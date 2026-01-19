@@ -1,6 +1,0 @@
-{"run_id": "bbe3d9e4c77e41a3aa3c341e622ed4ff", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_on_ack", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T23:54:28Z", "meta": {"pid": 14075}}
-{"run_id": "bbe3d9e4c77e41a3aa3c341e622ed4ff", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_on_ack", "record_type": "test_end", "t_ms": 208, "ts_utc": "2026-01-01T23:54:28Z", "outcome": "pass", "error": null}
-{"run_id": "bbe3d9e4c77e41a3aa3c341e622ed4ff", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_off_ack", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T23:54:28Z", "meta": {"pid": 14075}}
-{"run_id": "bbe3d9e4c77e41a3aa3c341e622ed4ff", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_off_ack", "record_type": "test_end", "t_ms": 40, "ts_utc": "2026-01-01T23:54:28Z", "outcome": "pass", "error": null}
-{"run_id": "bbe3d9e4c77e41a3aa3c341e622ed4ff", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_state_roundtrip", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T23:54:28Z", "meta": {"pid": 14075}}
-{"run_id": "bbe3d9e4c77e41a3aa3c341e622ed4ff", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_state_roundtrip", "record_type": "test_end", "t_ms": 10626, "ts_utc": "2026-01-01T23:54:39Z", "outcome": "pass", "error": null}

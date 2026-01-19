@@ -1,2 +1,0 @@
-{"run_id": "1ac4d385c30448999e0808344f68a827", "test_id": "test/test_e27_output_tstat_live.py::test_live_output_and_tstat_status", "record_type": "test_start", "t_ms": 0, "ts_utc": "2025-12-31T18:04:32Z", "meta": {"pid": 34462}}
-{"run_id": "1ac4d385c30448999e0808344f68a827", "test_id": "test/test_e27_output_tstat_live.py::test_live_output_and_tstat_status", "record_type": "test_end", "t_ms": 392, "ts_utc": "2025-12-31T18:04:33Z", "outcome": "pass", "error": null}

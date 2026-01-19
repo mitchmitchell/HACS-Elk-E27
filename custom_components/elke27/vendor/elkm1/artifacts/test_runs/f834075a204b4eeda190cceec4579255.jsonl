@@ -1,2 +1,0 @@
-{"run_id": "f834075a204b4eeda190cceec4579255", "test_id": "test/test_e27_retry_seq.py::test_retry_uses_same_sequence_number", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-04T08:11:22Z", "meta": {"pid": 81634}}
-{"run_id": "f834075a204b4eeda190cceec4579255", "test_id": "test/test_e27_retry_seq.py::test_retry_uses_same_sequence_number", "record_type": "test_end", "t_ms": 1, "ts_utc": "2026-01-04T08:11:22Z", "outcome": "pass", "error": null}

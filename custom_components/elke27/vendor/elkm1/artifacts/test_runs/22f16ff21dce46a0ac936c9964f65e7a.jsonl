@@ -1,2 +1,0 @@
-{"run_id": "22f16ff21dce46a0ac936c9964f65e7a", "test_id": "test/test_live_e27_zone_bypass.py::test_live_zone_bypass", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-19T05:48:29Z", "meta": {"pid": 11797}}
-{"run_id": "22f16ff21dce46a0ac936c9964f65e7a", "test_id": "test/test_live_e27_zone_bypass.py::test_live_zone_bypass", "record_type": "test_end", "t_ms": 7606, "ts_utc": "2026-01-19T05:48:37Z", "outcome": "pass", "error": null}

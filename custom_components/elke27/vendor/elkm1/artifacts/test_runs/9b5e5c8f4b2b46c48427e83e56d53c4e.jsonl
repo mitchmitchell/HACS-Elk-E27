@@ -1,2 +1,0 @@
-{"run_id": "9b5e5c8f4b2b46c48427e83e56d53c4e", "test_id": "test/test_live_e27_log.py::test_live_log_domain", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-18T06:14:05Z", "meta": {"pid": 31303}}
-{"run_id": "9b5e5c8f4b2b46c48427e83e56d53c4e", "test_id": "test/test_live_e27_log.py::test_live_log_domain", "record_type": "test_end", "t_ms": 22804, "ts_utc": "2026-01-18T06:14:28Z", "outcome": "pass", "error": null}

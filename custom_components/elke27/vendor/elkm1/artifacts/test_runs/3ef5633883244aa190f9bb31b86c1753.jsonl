@@ -1,2 +1,0 @@
-{"run_id": "3ef5633883244aa190f9bb31b86c1753", "test_id": "test/test_live_e27_bypass_events.py::test_live_zone_bypass_event_cycle", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-14T08:22:46Z", "meta": {"pid": 61650}}
-{"run_id": "3ef5633883244aa190f9bb31b86c1753", "test_id": "test/test_live_e27_bypass_events.py::test_live_zone_bypass_event_cycle", "record_type": "test_end", "t_ms": 10916, "ts_utc": "2026-01-14T08:22:57Z", "outcome": "pass", "error": null}

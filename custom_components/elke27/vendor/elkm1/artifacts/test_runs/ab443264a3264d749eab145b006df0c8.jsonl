@@ -1,4 +1,0 @@
-{"run_id": "ab443264a3264d749eab145b006df0c8", "test_id": "test/test_v2_wait_ready.py::test_wait_ready_times_out_when_not_ready", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-04T02:32:27Z", "meta": {"pid": 35042}}
-{"run_id": "ab443264a3264d749eab145b006df0c8", "test_id": "test/test_v2_wait_ready.py::test_wait_ready_times_out_when_not_ready", "record_type": "test_end", "t_ms": 52, "ts_utc": "2026-01-04T02:32:27Z", "outcome": "pass", "error": null}
-{"run_id": "ab443264a3264d749eab145b006df0c8", "test_id": "test/test_v2_wait_ready.py::test_wait_ready_returns_true_after_ready_signal", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-04T02:32:27Z", "meta": {"pid": 35042}}
-{"run_id": "ab443264a3264d749eab145b006df0c8", "test_id": "test/test_v2_wait_ready.py::test_wait_ready_returns_true_after_ready_signal", "record_type": "test_end", "t_ms": 0, "ts_utc": "2026-01-04T02:32:27Z", "outcome": "pass", "error": null}

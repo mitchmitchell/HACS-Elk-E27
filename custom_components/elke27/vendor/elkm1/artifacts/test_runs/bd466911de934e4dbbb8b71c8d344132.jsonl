@@ -1,4 +1,0 @@
-{"run_id": "bd466911de934e4dbbb8b71c8d344132", "test_id": "test/test_e27_roundtrip.py::test_e27_encrypt_frame_deframe_decrypt_roundtrip", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-19T08:33:53Z", "meta": {"pid": 8063}}
-{"run_id": "bd466911de934e4dbbb8b71c8d344132", "test_id": "test/test_e27_roundtrip.py::test_e27_encrypt_frame_deframe_decrypt_roundtrip", "record_type": "test_end", "t_ms": 12, "ts_utc": "2026-01-19T08:33:53Z", "outcome": "pass", "error": null}
-{"run_id": "bd466911de934e4dbbb8b71c8d344132", "test_id": "test/test_e27_roundtrip.py::test_e27_deframer_can_handle_multiple_frames_in_one_chunk", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-19T08:33:53Z", "meta": {"pid": 8063}}
-{"run_id": "bd466911de934e4dbbb8b71c8d344132", "test_id": "test/test_e27_roundtrip.py::test_e27_deframer_can_handle_multiple_frames_in_one_chunk", "record_type": "test_end", "t_ms": 0, "ts_utc": "2026-01-19T08:33:53Z", "outcome": "pass", "error": null}

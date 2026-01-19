@@ -1,2 +1,0 @@
-{"run_id": "b9ea8f90542d4f039a2d27af1ff52b19", "test_id": "test/test_outbound_queue.py::test_outbound_queue_throttle", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-04T20:24:43Z", "meta": {"pid": 4757}}
-{"run_id": "b9ea8f90542d4f039a2d27af1ff52b19", "test_id": "test/test_outbound_queue.py::test_outbound_queue_throttle", "record_type": "test_end", "t_ms": 207, "ts_utc": "2026-01-04T20:24:43Z", "outcome": "pass", "error": null}

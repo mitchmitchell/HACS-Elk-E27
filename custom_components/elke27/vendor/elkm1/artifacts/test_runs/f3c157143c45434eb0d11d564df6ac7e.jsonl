@@ -1,2 +1,0 @@
-{"run_id": "f3c157143c45434eb0d11d564df6ac7e", "test_id": "test/test_live_e27_area_names.py::test_live_area_names_from_attribs", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-11T08:35:23Z", "meta": {"pid": 57771}}
-{"run_id": "f3c157143c45434eb0d11d564df6ac7e", "test_id": "test/test_live_e27_area_names.py::test_live_area_names_from_attribs", "record_type": "test_end", "t_ms": 7451, "ts_utc": "2026-01-11T08:35:30Z", "outcome": "pass", "error": null}

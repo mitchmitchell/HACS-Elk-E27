@@ -1,2 +1,0 @@
-{"run_id": "12f42e18d759459ab74788d55791663d", "test_id": "test/test_live_e27_output_names.py::test_live_output_names_from_attribs", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-11T08:37:11Z", "meta": {"pid": 57799}}
-{"run_id": "12f42e18d759459ab74788d55791663d", "test_id": "test/test_live_e27_output_names.py::test_live_output_names_from_attribs", "record_type": "test_end", "t_ms": 7385, "ts_utc": "2026-01-11T08:37:18Z", "outcome": "pass", "error": null}

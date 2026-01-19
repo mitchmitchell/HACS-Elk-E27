@@ -1,2 +1,0 @@
-{"run_id": "15bdcc8f7cc543b497b8e5767f4d620a", "test_id": "test/test_e27_network_param_live.py::test_live_network_param_getters", "record_type": "test_start", "t_ms": 0, "ts_utc": "2025-12-29T08:37:47Z", "meta": {"pid": 95000}}
-{"run_id": "15bdcc8f7cc543b497b8e5767f4d620a", "test_id": "test/test_e27_network_param_live.py::test_live_network_param_getters", "record_type": "test_end", "t_ms": 208, "ts_utc": "2025-12-29T08:37:48Z", "outcome": "pass", "error": null}

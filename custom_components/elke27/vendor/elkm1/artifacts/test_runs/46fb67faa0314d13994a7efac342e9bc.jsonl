@@ -1,2 +1,0 @@
-{"run_id": "46fb67faa0314d13994a7efac342e9bc", "test_id": "test/test_live_e27_link.py::test_live_link_only", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-11T09:28:31Z", "meta": {"pid": 59436}}
-{"run_id": "46fb67faa0314d13994a7efac342e9bc", "test_id": "test/test_live_e27_link.py::test_live_link_only", "record_type": "test_end", "t_ms": 127, "ts_utc": "2026-01-11T09:28:31Z", "outcome": "pass", "error": null}

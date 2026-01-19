@@ -1,4 +1,0 @@
-{"run_id": "126cf78b88e9419bb9ce99eeb3d827a2", "test_id": "test/test_live_e27_paged_readonly.py::test_live_paged_zone_get_configured", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-02T01:15:05Z", "meta": {"pid": 18975}}
-{"run_id": "126cf78b88e9419bb9ce99eeb3d827a2", "test_id": "test/test_live_e27_paged_readonly.py::test_live_paged_zone_get_configured", "record_type": "test_end", "t_ms": 290, "ts_utc": "2026-01-02T01:15:05Z", "outcome": "pass", "error": null}
-{"run_id": "126cf78b88e9419bb9ce99eeb3d827a2", "test_id": "test/test_live_e27_zone_names.py::test_live_zone_names_from_configured", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-02T01:15:05Z", "meta": {"pid": 18975}}
-{"run_id": "126cf78b88e9419bb9ce99eeb3d827a2", "test_id": "test/test_live_e27_zone_names.py::test_live_zone_names_from_configured", "record_type": "test_end", "t_ms": 100, "ts_utc": "2026-01-02T01:15:05Z", "outcome": "pass", "error": null}
