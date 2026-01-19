@@ -1,21 +1,96 @@
 {
-    "config": {
-        "step": {
-            "user": {
-                "description": "If you need help with the configuration have a look here: https://github.com/ludeeus/integration_blueprint",
-                "data": {
-                    "username": "Username",
-                    "password": "Password"
-                }
-            }
+  "config": {
+    "abort": {
+      "missing_context": "Panel details are missing. Restart the flow.",
+      "reauth_successful": "Linking was updated successfully."
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the panel. Confirm the host is reachable and the panel is online.",
+      "invalid_auth": "The access code or passphrase is invalid.",
+      "invalid_pin": "The user PIN is invalid.",
+      "link_required": "The panel requires linking. Enter the access code and passphrase again.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "user": {
+        "title": "Set up Elke27",
+        "description": "Enter the panel address, linking credentials, and user PIN.",
+        "data": {
+          "host": "Address",
+          "access_code": "Access code (used for linking, NOT a PIN)",
+          "passphrase": "Passphrase",
+          "pin": "User PIN"
         },
-        "error": {
-            "auth": "Username/Password is wrong.",
-            "connection": "Unable to connect to the server.",
-            "unknown": "Unknown error occurred."
-        },
-        "abort": {
-            "already_configured": "This entry is already configured."
+        "data_description": {
+          "host": "The panel host name or IP address.",
+          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "passphrase": "The passphrase used during linking.",
+          "pin": "Your user PIN required to access user details."
         }
+      },
+      "manual": {
+        "title": "Manual connection",
+        "description": "Enter the host and port.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        },
+        "data_description": {
+          "host": "The panel host name or IP address.",
+          "port": "The panel port, usually 2101."
+        }
+      },
+      "link": {
+        "title": "Link credentials",
+        "description": "Enter the access code and passphrase to link the panel.",
+        "data": {
+          "access_code": "Access code (used for linking, NOT a PIN)",
+          "passphrase": "Passphrase"
+        },
+        "data_description": {
+          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "passphrase": "The passphrase used during linking."
+        }
+      },
+      "relink": {
+        "title": "Relink panel",
+        "description": "Enter the access code, passphrase, and user PIN to relink the panel.",
+        "data": {
+          "access_code": "Access code (used for linking, NOT a PIN)",
+          "passphrase": "Passphrase",
+          "pin": "User PIN"
+        },
+        "data_description": {
+          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "passphrase": "The passphrase used during linking.",
+          "pin": "Your user PIN required to access user details."
+        }
+      }
     }
+  },
+  "entity": {
+    "binary_sensor": {
+      "zone": {
+        "name": "Zone"
+      }
+    },
+    "light": {
+      "output": {
+        "name": "Output"
+      }
+    },
+    "button": {
+      "refresh_inventory": {
+        "name": "Refresh inventory"
+      }
+    },
+    "sensor": {
+      "panel_name": {
+        "name": "Panel name"
+      },
+      "panel_ready": {
+        "name": "Panel ready"
+      }
+    }
+  }
 }

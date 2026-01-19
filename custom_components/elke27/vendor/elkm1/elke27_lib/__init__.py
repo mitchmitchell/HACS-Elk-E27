@@ -1,0 +1,61 @@
+"""Elke27 v2 public API surface."""
+
+from .client import Elke27Client
+from .errors import (
+    Elke27AuthError,
+    Elke27ConnectionError,
+    Elke27CryptoError,
+    Elke27DisconnectedError,
+    Elke27Error,
+    Elke27InvalidArgument,
+    Elke27LinkRequiredError,
+    Elke27PinRequiredError,
+    Elke27PermissionError,
+    Elke27ProtocolError,
+    Elke27TimeoutError,
+    Elke27TransientError,
+)
+from .redact import redact_for_diagnostics
+from .types import (
+    ArmMode,
+    ClientConfig,
+    DiscoveredPanel,
+    Elke27Event,
+    EventType,
+    LinkKeys,
+    OutputState,
+    PanelInfo,
+    PanelSnapshot,
+    TableInfo,
+    AreaState,
+    ZoneState,
+)
+
+__all__ = [
+    "Elke27Client",
+    "ClientConfig",
+    "DiscoveredPanel",
+    "LinkKeys",
+    "PanelSnapshot",
+    "PanelInfo",
+    "TableInfo",
+    "AreaState",
+    "ZoneState",
+    "OutputState",
+    "ArmMode",
+    "Elke27Event",
+    "EventType",
+    "Elke27Error",
+    "Elke27TransientError",
+    "Elke27ConnectionError",
+    "Elke27TimeoutError",
+    "Elke27DisconnectedError",
+    "Elke27AuthError",
+    "Elke27LinkRequiredError",
+    "Elke27PinRequiredError",
+    "Elke27PermissionError",
+    "Elke27ProtocolError",
+    "Elke27CryptoError",
+    "Elke27InvalidArgument",
+    "redact_for_diagnostics",
+]

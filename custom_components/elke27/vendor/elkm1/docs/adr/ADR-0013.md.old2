@@ -1,0 +1,180 @@
+## ADR-0013: Session-Owned Protocol Liveness and Multi-Block Reassembly (E27)
+
+Date: 2025-12-27  
+Status: Accepted
+
+---
+
+## Context
+
+The Elk E27 Dealer API and observed panel behavior indicate that a long-lived TCP connection may be closed by the panel or network if the client remains idle. In live testing, an otherwise healthy connection ran for a period and then failed with `Connection reset by peer` when no traffic was sent for an interval.
+
+The Dealer API documents a liveness request/response (`system.r_u_alive`) intended to indicate that the control is still present. The E27 comms guidance describes maintaining a 24/7 TCP connection and reconnecting with a new HELLO when the socket is closed.
+
+In addition, the Dealer API defines multiple request/response patterns that return multi-block (paged) responses, where a logical response is delivered across multiple messages using explicit block numbering (`block_id`) and total block count (`block_count`). These appear in APIs such as (but not limited to):
+
+- `area.get_configured`
+- `zone.get_configured`
+- table and inventory readers
+
+We must decide where both protocol liveness and multi-block response handling belong in the architecture, consistent with DDR-0034:
+
+- `Session` is responsible for transport lifecycle, HELLO, framing receive pump, disconnect/reconnect mechanics, and message dispatch.
+- Linking and authentication are explicit operations owned above `Session` and are out of scope for `Session`.
+- Feature modules represent panel capabilities (domain semantics), update state, and emit events.
+- Home Assistant and sample applications should not be required to implement protocol plumbing.
+
+---
+
+## Decision
+
+### 1. Protocol liveness (keepalive)
+
+Protocol liveness for E27 SHALL be owned by `Session`.
+
+`Session` SHALL implement an internal keepalive loop that periodically sends `system.r_u_alive` while the session is ACTIVE, correlates the response by sequence number, and uses timeouts/failures as a connection-health signal to drive reconnect behavior.
+
+Keepalive messages and responses SHALL be handled privately by `Session` and SHALL NOT be exposed through feature modules, application-level request registries, or Home Assistant integration surfaces.
+
+---
+
+### 2. Multi-block (paged) response reassembly
+
+Reassembly of all E27 multi-block / paged responses SHALL be treated as a protocol-level responsibility and SHALL be implemented using a single canonical algorithm.
+
+Multi-block reassembly SHALL occur below feature semantics and SHALL NOT be re-implemented by individual domain handlers, feature modules, Home Assistant, or sample applications.
+
+Partial blocks SHALL NOT be exposed to higher layers.
+
+---
+
+## Rationale
+
+### Keepalive is transport health, not a panel capability
+
+`system.r_u_alive` exists to prevent idle TCP teardown and to detect dead peers. This is a property of maintaining the transport session and does not represent an application feature or panel capability that end users should choose to invoke.
+
+### Keepalive must run even when the application is idle
+
+Relying on normal application traffic (polling, user actions) to keep the connection alive is insufficient in an event-driven architecture and would require Home Assistant or sample apps to implement protocol scheduling logic.
+
+### Keepalive failure semantics differ from normal API call failures
+
+When keepalive times out or sending fails, the correct action is to treat the connection as unhealthy and reconnect, rather than reporting a domain-level API failure to the caller. This belongs to `Session`’s transport lifecycle responsibility.
+
+### Avoid leaking protocol plumbing to higher layers
+
+Implementing keepalive as a feature request/handler would:
+- expose keepalive to the outward API surface,
+- require HA/sample programs to schedule it,
+- create unnecessary state/events/noise,
+- blur the separation between transport mechanics and feature semantics.
+
+---
+
+### Multi-block responses are deterministic protocol mechanics
+
+Unlike general packet fragmentation, E27 multi-block responses explicitly encode:
+
+- the current block number (`block_id`, 1…N)
+- the total number of blocks (`block_count`, N)
+
+This makes reassembly:
+- deterministic,
+- order-explicit,
+- easy to validate,
+- and independent of message arrival order.
+
+Because this behavior is defined by the protocol itself, reassembly is not a feature concern and not an application workflow.
+
+---
+
+## Canonical Multi-Block Reassembly Algorithm
+
+For any E27 response that includes both `block_id` and `block_count`, the following algorithm SHALL be used.
+
+### State (per transfer)
+
+- `received_blocks`: mapping of `block_id → data`
+- `total_count`: integer, learned from first block
+- `started_at`: timestamp for timeout handling
+
+Transfers are keyed by a correlation identifier (typically `(session_id, seq, domain, operation)`).
+
+### On receiving a block
+
+1. Parse  
+   - Extract `block_id`, `block_count`, and payload.
+
+2. Validate  
+   - `block_id ≥ 1`  
+   - `block_count ≥ 1`  
+   - `block_id ≤ block_count`  
+   - If `total_count` already known, `block_count` MUST match.
+
+3. Store  
+   - If this `block_id` has not been seen, store its payload.  
+   - Duplicate blocks are ignored.
+
+4. Completion check  
+   - When `len(received_blocks) == total_count`:  
+     - Reassemble blocks in numeric order `1..N`.  
+     - Deliver the fully assembled result to the handler.  
+     - Clear transfer state.
+
+### Failure handling
+
+- If block totals are inconsistent, abort the transfer.
+- If no new blocks arrive within the configured timeout, abort the transfer.
+- On disconnect, all in-progress transfers are aborted.
+
+### Reassembly semantics
+
+The reassembly mechanism is generic; the merge policy is defined by the endpoint:
+- concatenate lists,
+- merge keyed dictionaries,
+- concatenate byte/string payloads.
+
+---
+
+## Consequences
+
+### Positive
+
+- Home Assistant integration and sample applications remain unaware of keepalive and paging requirements.
+- `Session.connect()` delivers a connection that remains stable during idle periods.
+- Keepalive response timeouts become a reliable signal to trigger reconnect.
+- Multi-block responses are handled consistently across all APIs.
+- Feature handlers receive only complete, validated data.
+
+### Negative / Tradeoffs
+
+- `Session` and request correlation logic become slightly more complex.
+- Memory is temporarily required to buffer multi-block responses.
+- Timeouts must be chosen carefully to avoid premature aborts on slow panels.
+
+---
+
+## Implementation Notes
+
+### Keepalive
+
+- Keepalive runs only while `SessionState.ACTIVE`.
+- Each keepalive uses a distinct `seq` and is correlated by `seq` (Option B).
+- `Session` logs a warning when a keepalive response is not received within `keepalive_timeout_s`.
+- `Session` triggers reconnect after `keepalive_max_missed` consecutive keepalive timeouts (default 2).
+- Keepalive responses are consumed internally and not forwarded to `on_message` / dispatcher / features.
+
+### Multi-block reassembly
+
+- Reassembly is keyed by request correlation (typically `seq`).
+- Partial blocks are never dispatched upward.
+- Feature handlers and HA code only see final assembled results.
+- Authorization errors (`error_code = 11008`) at the domain root abort reassembly and surface via existing semantic error mechanisms.
+
+---
+
+## Related Decisions
+
+- DDR-0034: Session responsibility boundaries (transport lifecycle, HELLO, framing receive pump, reconnect; no linking/auth orchestration).
+- ADR-0011 / ADR-010x: E27 framing and session mechanics (where applicable).

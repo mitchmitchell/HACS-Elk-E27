@@ -1,0 +1,160 @@
+{
+  "config": {
+    "abort": {
+      "missing_context": "Panel details are missing. Restart the flow.",
+      "reauth_successful": "Linking was updated successfully."
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the panel. Confirm the host is reachable and the panel is online.",
+      "invalid_auth": "Unable to authenticate with the panel. Check the access code, passphrase, and network connectivity.",
+      "invalid_pin": "The user PIN is invalid.",
+      "link_required": "The panel requires linking. Enter the access code and passphrase again.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "user": {
+        "title": "Set up Elk E27 Alarm Panel",
+        "description": "Enter the panel address, linking credentials, and user PIN.",
+        "data": {
+          "host": "Address",
+          "access_code": "Access code (used for linking, NOT a PIN)",
+          "passphrase": "Passphrase",
+          "pin": "User PIN"
+        },
+        "data_description": {
+          "host": "The panel host name or IP address.",
+          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "passphrase": "The passphrase used during linking.",
+          "pin": "Your user PIN required to access user details."
+        }
+      },
+      "manual": {
+        "title": "Manual connection",
+        "description": "Enter the host and port.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        },
+        "data_description": {
+          "host": "The panel host name or IP address.",
+          "port": "The panel port, usually 2101."
+        }
+      },
+      "link": {
+        "title": "Link credentials",
+        "description": "Enter the access code and passphrase to link the panel.",
+        "data": {
+          "access_code": "Access code (used for linking, NOT a PIN)",
+          "passphrase": "Passphrase"
+        },
+        "data_description": {
+          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "passphrase": "The passphrase used during linking."
+        }
+      },
+      "relink": {
+        "title": "Relink panel",
+        "description": "Enter the access code, passphrase, and user PIN to relink the panel.",
+        "data": {
+          "access_code": "Access code (used for linking, NOT a PIN)",
+          "passphrase": "Passphrase",
+          "pin": "User PIN"
+        },
+        "data_description": {
+          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "passphrase": "The passphrase used during linking.",
+          "pin": "Your user PIN required to access user details."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "zone": {
+        "name": "Zone"
+      }
+    },
+    "switch": {
+      "output": {
+        "name": "Output"
+      },
+      "zone_bypass": {
+        "name": "Bypass {zone}"
+      }
+    },
+    "sensor": {
+      "panel_name": {
+        "name": "Panel Name"
+      },
+      "panel_ready": {
+        "name": "Panel State"
+      }
+    }
+  },
+  "services": {
+    "alarm_bypass": {
+      "name": "Bypass alarm",
+      "description": "Bypass all zones on the selected alarm panel.",
+      "fields": {
+        "code": {
+          "name": "User code",
+          "description": "User code required to authorize the bypass."
+        }
+      }
+    },
+    "alarm_clear_bypass": {
+      "name": "Clear alarm bypass",
+      "description": "Clear bypassed zones on the selected alarm panel.",
+      "fields": {
+        "code": {
+          "name": "User code",
+          "description": "User code required to authorize clearing bypasses."
+        }
+      }
+    },
+    "alarm_arm_home_instant": {
+      "name": "Arm home instant",
+      "description": "Arm the panel in home mode without entry delay.",
+      "fields": {
+        "code": {
+          "name": "User code",
+          "description": "User code required to arm the panel."
+        }
+      }
+    },
+    "alarm_arm_night_instant": {
+      "name": "Arm night instant",
+      "description": "Arm the panel in night mode without entry delay.",
+      "fields": {
+        "code": {
+          "name": "User code",
+          "description": "User code required to arm the panel."
+        }
+      }
+    },
+    "alarm_arm_vacation": {
+      "name": "Arm vacation",
+      "description": "Arm the panel in vacation mode.",
+      "fields": {
+        "code": {
+          "name": "User code",
+          "description": "User code required to arm the panel."
+        }
+      }
+    },
+    "sensor_zone_bypass": {
+      "name": "Bypass zone",
+      "description": "Bypass the selected zone sensor.",
+      "fields": {
+        "code": {
+          "name": "User code",
+          "description": "User code required to authorize the bypass."
+        }
+      }
+    },
+    "sensor_zone_trigger": {
+      "name": "Trigger zone",
+      "description": "Trigger the selected zone sensor."
+    }
+  }
+}
