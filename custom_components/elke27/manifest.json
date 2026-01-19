@@ -2,7 +2,7 @@
   "domain": "elke27",
   "name": "Elk E27 Alarm Engine Integration",
   "codeowners": ["@mitchmitchell"],
-  "dependencies": [],
+  "dependencies": ["network"],
   "config_flow": true,
   "documentation": "https://github.com/mitchmitchell/HACS-Elk-E27",
   "integration_type": "hub",
