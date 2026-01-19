@@ -1,0 +1,2 @@
+{"run_id": "e0a7e942c74943a78ec39c53d72cb66d", "test_id": "test/test_live_e27_authenticate.py::test_live_control_authenticate", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-11T09:27:08Z", "meta": {"pid": 59421}}
+{"run_id": "e0a7e942c74943a78ec39c53d72cb66d", "test_id": "test/test_live_e27_authenticate.py::test_live_control_authenticate", "record_type": "test_end", "t_ms": 7480, "ts_utc": "2026-01-11T09:27:16Z", "outcome": "pass", "error": null}

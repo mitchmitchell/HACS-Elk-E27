@@ -84,6 +84,9 @@ pythonVersion = "3.11"
 # Handled by ruff...
 reportUndefinedVariable = false
 
+[tool.ruff]
+line-length = 120
+
 [tool.ruff.lint]
 select = [
     "E",    # pycodestyle

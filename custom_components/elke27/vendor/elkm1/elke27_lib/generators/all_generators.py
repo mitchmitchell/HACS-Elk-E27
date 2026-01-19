@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from elke27_lib.permissions import ALL_PERMISSION_KEYS, canonical_generator_key
 
-from . import area, control, keypad, network_param, output, rule, system, tstat, user, zone
+from . import (
+    area,
+    bus_ios,
+    control,
+    keypad,
+    log,
+    network_param,
+    output,
+    rule,
+    system,
+    tstat,
+    user,
+    zone,
+)
 
 GeneratorFn = Callable[..., tuple[dict, tuple[str, str]]]
 
@@ -32,7 +46,7 @@ def _stub_generator(key: str) -> GeneratorFn:
 
 
 _EXISTING: dict[str, GeneratorFn] = {}
-for _module in (area, control, keypad, network_param, output, rule, system, tstat, user, zone):
+for _module in (area, bus_ios, control, keypad, log, network_param, output, rule, system, tstat, user, zone):
     _EXISTING.update(_collect_generators(_module))
 
 

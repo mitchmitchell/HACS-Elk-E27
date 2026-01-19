@@ -6,26 +6,30 @@ Read/observe-only handlers for the "tstat" domain.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional, Set
+import logging
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from elke27_lib.dispatcher import DispatchContext
 from elke27_lib.events import (
-    ApiError,
-    BootstrapCountsReady,
-    DispatchRoutingError,
-    TstatStatusUpdated,
-    TstatTableInfoUpdated,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    ApiError,
+    BootstrapCountsReady,
+    CsmSnapshotUpdated,
+    TableCsmChanged,
+    TstatStatusUpdated,
+    TstatTableInfoUpdated,
 )
-from elke27_lib.states import PanelState, TstatState
-
+from elke27_lib.states import PanelState, TstatState, update_csm_snapshot
 
 EmitFn = Callable[[object, DispatchContext], None]
 NowFn = Callable[[], float]
+
+LOG = logging.getLogger(__name__)
 
 
 def make_tstat_get_status_handler(state: PanelState, emit: EmitFn, now: NowFn):
@@ -65,7 +69,7 @@ def make_tstat_get_status_handler(state: PanelState, emit: EmitFn, now: NowFn):
             return False
 
         tstat = state.get_or_create_tstat(tstat_id)
-        changed: Set[str] = set()
+        changed: set[str] = set()
         _apply_tstat_status_fields(tstat, payload, changed)
         tstat.last_update_at = now()
         state.panel.last_message_at = tstat.last_update_at
@@ -128,6 +132,25 @@ def make_tstat_get_table_info_handler(state: PanelState, emit: EmitFn, now: NowF
         state.table_info_by_domain["tstat"] = table_info
         state.panel.last_message_at = now()
         table_elements = _extract_int(payload, "table_elements")
+        table_csm = _extract_table_csm(payload, domain="tstat")
+        if table_csm is not None:
+            old = state.table_csm_by_domain.get("tstat")
+            if old != table_csm:
+                state.table_csm_by_domain["tstat"] = table_csm
+                emit(
+                    TableCsmChanged(
+                        kind=TableCsmChanged.KIND,
+                        at=UNSET_AT,
+                        seq=UNSET_SEQ,
+                        classification=UNSET_CLASSIFICATION,
+                        route=UNSET_ROUTE,
+                        session_id=UNSET_SESSION_ID,
+                        domain="tstat",
+                        old=old,
+                        new=table_csm,
+                    ),
+                    ctx=ctx,
+                )
         if table_elements is not None:
             state.table_info_known.add("tstat")
 
@@ -141,9 +164,25 @@ def make_tstat_get_table_info_handler(state: PanelState, emit: EmitFn, now: NowF
                 session_id=UNSET_SESSION_ID,
                 table_elements=table_elements,
                 increment_size=_extract_int(payload, "increment_size"),
+                table_csm=table_csm,
             ),
             ctx=ctx,
         )
+
+        snapshot = update_csm_snapshot(state)
+        if snapshot is not None:
+            emit(
+                CsmSnapshotUpdated(
+                    kind=CsmSnapshotUpdated.KIND,
+                    at=UNSET_AT,
+                    seq=UNSET_SEQ,
+                    classification=UNSET_CLASSIFICATION,
+                    route=UNSET_ROUTE,
+                    session_id=UNSET_SESSION_ID,
+                    snapshot=snapshot,
+                ),
+                ctx=ctx,
+            )
 
         if (
             not state.bootstrap_counts_ready
@@ -166,7 +205,7 @@ def make_tstat_get_table_info_handler(state: PanelState, emit: EmitFn, now: NowF
     return handler_tstat_get_table_info
 
 
-def _apply_tstat_status_fields(tstat: TstatState, payload: Mapping[str, Any], changed: Set[str]) -> None:
+def _apply_tstat_status_fields(tstat: TstatState, payload: Mapping[str, Any], changed: set[str]) -> None:
     _maybe_set(tstat, "temperature", payload.get("temperature"), changed)
     _maybe_set(tstat, "cool_setpoint", payload.get("cool_setpoint"), changed)
     _maybe_set(tstat, "heat_setpoint", payload.get("heat_setpoint"), changed)
@@ -205,7 +244,7 @@ def _apply_tstat_status_fields(tstat: TstatState, payload: Mapping[str, Any], ch
             changed.add(key)
 
 
-def _maybe_set(tstat: TstatState, attr: str, value: Any, changed: Set[str]) -> None:
+def _maybe_set(tstat: TstatState, attr: str, value: Any, changed: set[str]) -> None:
     if value is None:
         return
     if getattr(tstat, attr) != value:
@@ -213,6 +252,25 @@ def _maybe_set(tstat: TstatState, attr: str, value: Any, changed: Set[str]) -> N
         changed.add(attr)
 
 
-def _extract_int(payload: Mapping[str, Any], key: str) -> Optional[int]:
+def _extract_int(payload: Mapping[str, Any], key: str) -> int | None:
     value = payload.get(key)
     return value if isinstance(value, int) else None
+
+
+def _extract_table_csm(payload: Mapping[str, Any], *, domain: str) -> int | None:
+    if "table_csm" not in payload:
+        return None
+    value = payload.get("table_csm")
+    if isinstance(value, bool):
+        LOG.warning("%s.get_table_info table_csm has invalid bool value.", domain)
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    LOG.warning("%s.get_table_info table_csm has non-int value %r.", domain, value)
+    return None

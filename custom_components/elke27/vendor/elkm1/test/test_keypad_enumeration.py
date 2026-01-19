@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from elke27_lib.client import _merge_configured_keypads
 from elke27_lib.const import E27ErrorCode
-from elke27_lib.handlers.keypad import make_keypad_get_attribs_handler, make_keypad_get_configured_handler
+from elke27_lib.handlers.keypad import (
+    make_keypad_get_attribs_handler,
+    make_keypad_get_configured_handler,
+)
 from elke27_lib.states import PanelState
 
 

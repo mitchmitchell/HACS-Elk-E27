@@ -26,8 +26,8 @@ from __future__ import annotations
 from typing import Final
 
 try:
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     _HAS_CRYPTO = True
 except ImportError:
     Cipher = None  # type: ignore[assignment]

@@ -6,14 +6,14 @@ Feature module: network_param (domain key "network" per PDF).
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from elke27_lib.handlers.network_param import (
     make_network_error_handler,
     make_network_param_get_rssi_handler,
     make_network_param_get_ssid_handler,
 )
-
 
 ROUTE_NETWORK_GET_SSID = ("network", "get_ssid")
 ROUTE_NETWORK_GET_RSSI = ("network", "get_rssi")

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Mapping, Optional
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,7 +22,8 @@ class ClientConfig:
     request_timeout_s: float = 5.0
     outbound_min_interval_s: float = 0.05
     outbound_max_burst: int = 1
-    logger_name: Optional[str] = None
+    logger_name: str | None = None
+    session_wire_log: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,10 +34,10 @@ class DiscoveredPanel:
 
     host: str
     port: int
-    tls_port: Optional[int] = None
-    panel_name: Optional[str] = None
-    panel_serial: Optional[str] = None
-    panel_mac: Optional[str] = None
+    tls_port: int | None = None
+    panel_name: str | None = None
+    panel_serial: str | None = None
+    panel_mac: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +59,7 @@ class LinkKeys:
         }
 
     @classmethod
-    def from_json(cls, data: dict[str, str]) -> "LinkKeys":
+    def from_json(cls, data: dict[str, str]) -> LinkKeys:
         """Create LinkKeys from a JSON-serializable representation."""
         return cls(
             tempkey_hex=str(data.get("tempkey_hex", "")),
@@ -93,7 +94,7 @@ class Elke27Event:
     data: Mapping[str, object]
     seq: int
     timestamp: datetime
-    raw_type: Optional[str] = None
+    raw_type: str | None = None
 
 
 class ArmMode(str, Enum):
@@ -111,10 +112,10 @@ class PanelInfo:
     Immutable panel information snapshot.
     """
 
-    mac: Optional[str] = None
-    model: Optional[str] = None
-    firmware: Optional[str] = None
-    serial: Optional[str] = None
+    mac: str | None = None
+    model: str | None = None
+    firmware: str | None = None
+    serial: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,10 +124,58 @@ class TableInfo:
     Immutable snapshot of table metadata.
     """
 
-    areas: Optional[int] = None
-    zones: Optional[int] = None
-    outputs: Optional[int] = None
-    tstats: Optional[int] = None
+    areas: int | None = None
+    zones: int | None = None
+    outputs: int | None = None
+    tstats: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ZoneDefinition:
+    """
+    Immutable zone definition snapshot.
+    """
+
+    zone_id: int
+    name: str | None = None
+    definition: str | None = None
+    zone_type: str | None = None
+    kind: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OutputDefinition:
+    """
+    Immutable output definition snapshot.
+    """
+
+    output_id: int
+    name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CsmSnapshot:
+    """
+    Snapshot of CSM values (treat as immutable).
+
+    domain_csms: normalized per-domain CSMs (e.g., "zone": 123)
+    table_csms: normalized per-domain table CSMs (e.g., "zone": 456)
+    """
+
+    domain_csms: Mapping[str, int]
+    table_csms: Mapping[str, int]
+    version: int
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class CsmDiff:
+    """
+    Optional diff summary for CSM updates (e.g., in tests).
+    """
+
+    changed_domain_csms: set[str]
+    changed_table_csms: set[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,11 +185,11 @@ class AreaState:
     """
 
     area_id: int
-    name: Optional[str] = None
-    arm_mode: Optional[ArmMode] = None
-    ready: Optional[bool] = None
-    alarm_active: Optional[bool] = None
-    chime: Optional[bool] = None
+    name: str | None = None
+    arm_mode: ArmMode | None = None
+    ready: bool | None = None
+    alarm_active: bool | None = None
+    chime: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,13 +199,13 @@ class ZoneState:
     """
 
     zone_id: int
-    name: Optional[str] = None
-    open: Optional[bool] = None
-    bypassed: Optional[bool] = None
-    trouble: Optional[bool] = None
-    alarm: Optional[bool] = None
-    tamper: Optional[bool] = None
-    low_battery: Optional[bool] = None
+    name: str | None = None
+    open: bool | None = None
+    bypassed: bool | None = None
+    trouble: bool | None = None
+    alarm: bool | None = None
+    tamper: bool | None = None
+    low_battery: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,8 +215,8 @@ class OutputState:
     """
 
     output_id: int
-    name: Optional[str] = None
-    state: Optional[bool] = None
+    name: str | None = None
+    state: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,19 +233,23 @@ class PanelSnapshot:
     table_info: TableInfo
     areas: Mapping[int, AreaState]
     zones: Mapping[int, ZoneState]
+    zone_definitions: Mapping[int, ZoneDefinition]
     outputs: Mapping[int, OutputState]
+    output_definitions: Mapping[int, OutputDefinition]
     version: int
     updated_at: datetime
 
     @classmethod
-    def empty(cls) -> "PanelSnapshot":
+    def empty(cls) -> PanelSnapshot:
         """Return an empty snapshot placeholder."""
         return cls(
             panel=PanelInfo(),
             table_info=TableInfo(),
             areas={},
             zones={},
+            zone_definitions={},
             outputs={},
+            output_definitions={},
             version=0,
-            updated_at=datetime.min.replace(tzinfo=timezone.utc),
+            updated_at=datetime.min.replace(tzinfo=UTC),
         )

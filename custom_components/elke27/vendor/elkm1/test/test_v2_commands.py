@@ -3,17 +3,15 @@ from __future__ import annotations
 import pytest
 
 from elke27_lib import ArmMode, ClientConfig, Elke27Client
+from elke27_lib.client import Result
 from elke27_lib.errors import (
     E27ProvisioningRequired,
-    PermissionDeniedError,
-)
-from elke27_lib.errors import (
     Elke27DisconnectedError,
     Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27PermissionError,
+    PermissionDeniedError,
 )
-from elke27_lib.client import Result
 
 
 class _FakeKernel:

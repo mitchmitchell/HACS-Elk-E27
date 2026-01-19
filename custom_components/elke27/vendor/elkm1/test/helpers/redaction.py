@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-
 _SENSITIVE_KEYS = {
     # Credentials / auth
     "pin",

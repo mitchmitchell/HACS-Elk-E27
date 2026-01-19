@@ -22,10 +22,8 @@ import argparse
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
-from elke27_lib import Elk
-from elke27_lib import linking
+from elke27_lib import Elk, linking
 
 LOG = logging.getLogger(__name__)
 
@@ -36,12 +34,12 @@ class E27Credentials:
     passphrase: str
 
 
-def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+def _env(name: str, default: str | None = None) -> str | None:
     import os
     return os.environ.get(name, default)
 
 
-def _env_any(names: list[str], default: Optional[str] = None) -> Optional[str]:
+def _env_any(names: list[str], default: str | None = None) -> str | None:
     for name in names:
         value = _env(name)
         if value:

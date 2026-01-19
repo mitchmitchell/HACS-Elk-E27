@@ -1,22 +1,20 @@
-import pytest
 
 from elke27_lib.const import E27ErrorCode
 from elke27_lib.dispatcher import (
-    Dispatcher,
-    PendingRequest,
-    PagedTransferKey,
-    MessageKind,
-    ERROR_DOMAIN,
-    ERROR_ALL,
-    ERR_ROOT_EMPTY,
-    ERR_ROOT_MULTI,
     ERR_DOMAIN_EMPTY,
     ERR_DOMAIN_MULTI,
-    ERR_UNEXPECTED_VALUE_TYPE,
     ERR_INVALID_SEQ,
+    ERR_ROOT_EMPTY,
+    ERR_ROOT_MULTI,
+    ERR_UNEXPECTED_VALUE_TYPE,
+    ERROR_ALL,
+    ERROR_DOMAIN,
     ERROR_ROOT,
+    Dispatcher,
+    MessageKind,
+    PagedTransferKey,
+    PendingRequest,
 )
-
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -261,7 +259,7 @@ def test_error_envelope_shape_and_raw_route():
     d.register((ERROR_DOMAIN, ERROR_ALL), e.handler)
 
     msg = {"zone": {}, "seq": 5}
-    result = d.dispatch(msg)
+    d.dispatch(msg)
 
     assert len(e.calls) == 2
 

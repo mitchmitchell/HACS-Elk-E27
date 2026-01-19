@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from elke27_lib.const import E27ErrorCode
+from elke27_lib.events import ApiError, AreaStatusUpdated
 from elke27_lib.handlers.area import make_area_get_status_handler
 from elke27_lib.states import PanelState
-from elke27_lib.events import ApiError, AreaStatusUpdated
 
 
 class _EmitSpy:

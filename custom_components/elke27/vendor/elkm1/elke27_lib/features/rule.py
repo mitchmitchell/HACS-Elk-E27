@@ -10,7 +10,6 @@ from typing import Any
 
 from elke27_lib.handlers.rule import make_rule_get_rules_handler
 
-
 ROUTE_RULE_GET_RULES = ("rule", "get_rules")
 
 

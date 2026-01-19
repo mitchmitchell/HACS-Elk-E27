@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Tuple
-
-
-ResponseKey = Tuple[str, str]
+ResponseKey = tuple[str, str]
 
 
 def generator_rule_get_rules(*, block_id: int = 1) -> tuple[dict, ResponseKey]:

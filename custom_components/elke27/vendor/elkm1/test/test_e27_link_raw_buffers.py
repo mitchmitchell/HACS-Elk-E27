@@ -78,7 +78,7 @@ def test_link_raw_framed_and_deframed_buffers() -> None:
             sock.settimeout(min(0.5, remaining))
             try:
                 chunk = sock.recv(4096)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             if not chunk:
                 break

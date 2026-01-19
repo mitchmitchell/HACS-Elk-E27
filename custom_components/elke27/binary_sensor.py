@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Iterable, TYPE_CHECKING
+from typing import Any, Iterable
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
-    BinarySensorEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -25,22 +24,6 @@ from .entity import (
     unique_base,
 )
 from .hub import Elke27Hub
-
-if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
-    from .coordinator import BlueprintDataUpdateCoordinator
-    from .data import IntegrationBlueprintConfigEntry
-
-ENTITY_DESCRIPTIONS = (
-    BinarySensorEntityDescription(
-        key="elke27",
-        name="Integration Blueprint Binary Sensor",
-        device_class=BinarySensorDeviceClass.CONNECTIVITY,
-    ),
-)
-
 
 _LOGGER = logging.getLogger(__name__)
 

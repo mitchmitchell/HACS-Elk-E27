@@ -6,7 +6,8 @@ Feature module: system
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from elke27_lib.handlers.system import (
     make_system_file_info_handler,
@@ -31,7 +32,6 @@ from elke27_lib.handlers.system import (
     make_system_set_system_time_handler,
     make_system_start_updt_handler,
 )
-
 
 ROUTE_SYSTEM_GET_TROUBLE = ("system", "get_trouble")
 ROUTE_SYSTEM_GET_TROUBLES = ("system", "get_troubles")

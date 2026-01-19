@@ -15,7 +15,6 @@ from elke27_lib.const import E27ErrorCode
 from test.helpers.error_codes import describe_error, extract_error_code
 from test.helpers.payload_validation import assert_payload_shape
 
-
 _LIVE_TIMEOUT_S = 60.0
 
 

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
 from .const import REDACT_DIAGNOSTICS
 
@@ -36,9 +37,7 @@ def _should_redact(key: str) -> bool:
         return True
     if "pass" in key_l or "token" in key_l or "secret" in key_l:
         return True
-    if "key" in key_l and "monkey" not in key_l:
-        return True
-    return False
+    return bool("key" in key_l and "monkey" not in key_l)
 
 
 def _normalize_mapping(data: Mapping[str, Any]) -> dict[str, Any]:

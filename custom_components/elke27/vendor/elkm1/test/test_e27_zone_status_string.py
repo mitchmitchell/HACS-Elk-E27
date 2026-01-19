@@ -6,6 +6,9 @@ from elke27_lib.states import PanelState
 
 def test_zone_status_string_updates_zone_state() -> None:
     state = PanelState()
+    state.get_or_create_zone(1)
+    state.get_or_create_zone(2)
+    state.get_or_create_zone(3)
     payload = {"status": "1A4"}
 
     outcome = _reconcile_bulk_zone_status(state, payload, now=1.0)

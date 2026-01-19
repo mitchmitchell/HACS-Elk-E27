@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Awaitable, Callable, Optional
 
 
 class OutboundPriority(str, Enum):
@@ -18,13 +19,13 @@ class OutboundPriority(str, Enum):
 @dataclass(slots=True)
 class OutboundItem:
     payload: bytes
-    seq: Optional[int]
+    seq: int | None
     kind: str
     priority: OutboundPriority
     enqueued_at: float
-    on_sent: Optional[Callable[[float], None]] = None
-    on_fail: Optional[Callable[[BaseException], None]] = None
-    label: Optional[str] = None
+    on_sent: Callable[[float], None] | None = None
+    on_fail: Callable[[BaseException], None] | None = None
+    label: str | None = None
 
 
 class OutboundQueue:
@@ -41,7 +42,7 @@ class OutboundQueue:
         send_fn: Callable[[bytes], None],
         min_interval_s: float = 0.05,
         max_burst: int = 1,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         self._loop = loop
         self._send_fn = send_fn
@@ -51,7 +52,7 @@ class OutboundQueue:
         self._high_q: asyncio.Queue[OutboundItem] = asyncio.Queue()
         self._normal_q: asyncio.Queue[OutboundItem] = asyncio.Queue()
         self._stop_event = asyncio.Event()
-        self._worker: Optional[asyncio.Task[None]] = None
+        self._worker: asyncio.Task[None] | None = None
         self._tokens: float = float(self._max_burst)
         self._last_refill: float = self._loop.time()
         self._sending: bool = False
@@ -61,7 +62,7 @@ class OutboundQueue:
             self._stop_event.clear()
             self._worker = self._loop.create_task(self._run())
 
-    def stop(self, *, fail_exc: Optional[BaseException] = None) -> None:
+    def stop(self, *, fail_exc: BaseException | None = None) -> None:
         def _stop() -> None:
             if not self._stop_event.is_set():
                 self._stop_event.set()
@@ -96,7 +97,7 @@ class OutboundQueue:
     def is_idle(self) -> bool:
         return self._high_q.empty() and self._normal_q.empty() and not self._sending
 
-    async def wait_idle(self, *, timeout_s: Optional[float] = None) -> bool:
+    async def wait_idle(self, *, timeout_s: float | None = None) -> bool:
         deadline = None
         if timeout_s is not None:
             deadline = self._loop.time() + float(timeout_s)
@@ -107,7 +108,7 @@ class OutboundQueue:
                 return False
             await asyncio.sleep(0.01)
 
-    def _drain_with_failure(self, exc: Optional[BaseException]) -> None:
+    def _drain_with_failure(self, exc: BaseException | None) -> None:
         if exc is None:
             return
         for queue in (self._high_q, self._normal_q):
@@ -119,8 +120,14 @@ class OutboundQueue:
                 if item.on_fail is not None:
                     try:
                         item.on_fail(exc)
-                    except Exception:
-                        pass
+                    except Exception as fail_exc:
+                        self._log.warning(
+                            "Outbound on_fail callback failed: seq=%s kind=%s error=%s",
+                            item.seq,
+                            item.kind,
+                            fail_exc,
+                            exc_info=True,
+                        )
                 queue.task_done()
 
     async def _run(self) -> None:
@@ -147,25 +154,25 @@ class OutboundQueue:
             except Exception as exc:
                 if item.on_fail is not None:
                     item.on_fail(exc)
-                if self._log.isEnabledFor(logging.DEBUG):
-                    self._log.debug(
-                        "Outbound send failed: seq=%s kind=%s error=%s",
-                        item.seq,
-                        item.kind,
-                        exc,
-                    )
+                self._log.warning(
+                    "Outbound send failed: seq=%s kind=%s error=%s",
+                    item.seq,
+                    item.kind,
+                    exc,
+                    exc_info=True,
+                )
             finally:
                 self._sending = False
                 self._high_q.task_done() if item.priority is OutboundPriority.HIGH else self._normal_q.task_done()
 
-    async def _next_item(self) -> Optional[OutboundItem]:
+    async def _next_item(self) -> OutboundItem | None:
         if self._stop_event.is_set():
             return None
         if not self._high_q.empty():
             return await self._high_q.get()
         try:
             return await asyncio.wait_for(self._normal_q.get(), timeout=0.05)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if not self._high_q.empty():
                 return await self._high_q.get()
             return None

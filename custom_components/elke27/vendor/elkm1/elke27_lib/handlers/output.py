@@ -6,30 +6,35 @@ Read/observe-only handlers for the "output" domain.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional, Set
+import logging
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from elke27_lib.dispatcher import DispatchContext, PagedBlock
 from elke27_lib.events import (
-    ApiError,
-    AuthorizationRequiredEvent,
-    BootstrapCountsReady,
-    DispatchRoutingError,
-    OutputConfiguredInventoryReady,
-    OutputConfiguredUpdated,
-    OutputStatusUpdated,
-    OutputTableInfoUpdated,
-    OutputsStatusBulkUpdated,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    ApiError,
+    AuthorizationRequiredEvent,
+    BootstrapCountsReady,
+    CsmSnapshotUpdated,
+    DispatchRoutingError,
+    OutputConfiguredInventoryReady,
+    OutputConfiguredUpdated,
+    OutputsStatusBulkUpdated,
+    OutputStatusUpdated,
+    OutputTableInfoUpdated,
+    TableCsmChanged,
 )
-from elke27_lib.states import OutputState, PanelState
-
+from elke27_lib.states import OutputState, PanelState, update_csm_snapshot
 
 EmitFn = Callable[[object, DispatchContext], None]
 NowFn = Callable[[], float]
+
+LOG = logging.getLogger(__name__)
 
 
 def make_output_get_status_handler(state: PanelState, emit: EmitFn, now: NowFn):
@@ -69,7 +74,7 @@ def make_output_get_status_handler(state: PanelState, emit: EmitFn, now: NowFn):
             return False
 
         output = state.get_or_create_output(output_id)
-        changed: Set[str] = set()
+        changed: set[str] = set()
         _apply_output_status_fields(output, payload, changed)
         output.last_update_at = now()
         state.panel.last_message_at = output.last_update_at
@@ -331,7 +336,7 @@ def make_output_get_attribs_handler(state: PanelState, emit: EmitFn, now: NowFn)
             return False
 
         output = state.get_or_create_output(output_id)
-        changed: Set[str] = set()
+        changed: set[str] = set()
         _apply_output_attribs(output, payload, changed)
         output.last_update_at = now()
         state.panel.last_message_at = output.last_update_at
@@ -378,6 +383,25 @@ def make_output_get_table_info_handler(state: PanelState, emit: EmitFn, now: Now
         state.table_info_by_domain["output"] = table_info
         state.panel.last_message_at = now()
         table_elements = _extract_int(payload, "table_elements")
+        table_csm = _extract_table_csm(payload, domain="output")
+        if table_csm is not None:
+            old = state.table_csm_by_domain.get("output")
+            if old != table_csm:
+                state.table_csm_by_domain["output"] = table_csm
+                emit(
+                    TableCsmChanged(
+                        kind=TableCsmChanged.KIND,
+                        at=UNSET_AT,
+                        seq=UNSET_SEQ,
+                        classification=UNSET_CLASSIFICATION,
+                        route=UNSET_ROUTE,
+                        session_id=UNSET_SESSION_ID,
+                        domain="output",
+                        old=old,
+                        new=table_csm,
+                    ),
+                    ctx=ctx,
+                )
         if table_elements is not None:
             state.table_info_known.add("output")
 
@@ -391,9 +415,25 @@ def make_output_get_table_info_handler(state: PanelState, emit: EmitFn, now: Now
                 session_id=UNSET_SESSION_ID,
                 table_elements=table_elements,
                 increment_size=_extract_int(payload, "increment_size"),
+                table_csm=table_csm,
             ),
             ctx=ctx,
         )
+
+        snapshot = update_csm_snapshot(state)
+        if snapshot is not None:
+            emit(
+                CsmSnapshotUpdated(
+                    kind=CsmSnapshotUpdated.KIND,
+                    at=UNSET_AT,
+                    seq=UNSET_SEQ,
+                    classification=UNSET_CLASSIFICATION,
+                    route=UNSET_ROUTE,
+                    session_id=UNSET_SESSION_ID,
+                    snapshot=snapshot,
+                ),
+                ctx=ctx,
+            )
 
         if (
             not state.bootstrap_counts_ready
@@ -416,7 +456,26 @@ def make_output_get_table_info_handler(state: PanelState, emit: EmitFn, now: Now
     return handler_output_get_table_info
 
 
-def _apply_output_status_fields(output: OutputState, payload: Mapping[str, Any], changed: Set[str]) -> None:
+def _extract_table_csm(payload: Mapping[str, Any], *, domain: str) -> int | None:
+    if "table_csm" not in payload:
+        return None
+    value = payload.get("table_csm")
+    if isinstance(value, bool):
+        LOG.warning("%s.get_table_info table_csm has invalid bool value.", domain)
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    LOG.warning("%s.get_table_info table_csm has non-int value %r.", domain, value)
+    return None
+
+
+def _apply_output_status_fields(output: OutputState, payload: Mapping[str, Any], changed: set[str]) -> None:
     status = payload.get("status")
     if isinstance(status, str):
         norm = status.strip().upper()
@@ -455,14 +514,14 @@ def _apply_output_status_char(output: OutputState, ch: str) -> bool:
     return True
 
 
-def _normalize_name(value: Any) -> Optional[str]:
+def _normalize_name(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text if text else None
 
 
-def _apply_output_attribs(output: OutputState, payload: Mapping[str, Any], changed: Set[str]) -> None:
+def _apply_output_attribs(output: OutputState, payload: Mapping[str, Any], changed: set[str]) -> None:
     if "name" in payload:
         name = _normalize_name(payload.get("name"))
         if output.name != name:
@@ -470,6 +529,6 @@ def _apply_output_attribs(output: OutputState, payload: Mapping[str, Any], chang
             changed.add("name")
 
 
-def _extract_int(payload: Mapping[str, Any], key: str) -> Optional[int]:
+def _extract_int(payload: Mapping[str, Any], key: str) -> int | None:
     value = payload.get(key)
     return value if isinstance(value, int) else None

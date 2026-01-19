@@ -8,7 +8,6 @@ from elke27_lib.permissions import (
     canonical_generator_key,
 )
 
-
 EXPECTED_PERMISSIONS = {
     "area_get_table_info": PermissionLevel.PLT_ENCRYPTION_KEY,
     "area_get_configured": PermissionLevel.PLT_ENCRYPTION_KEY,
@@ -36,6 +35,15 @@ EXPECTED_PERMISSIONS = {
     "keypad_get_attribs": PermissionLevel.PLT_ENCRYPTION_KEY,
     "control_get_version_info": PermissionLevel.PLT_ENCRYPTION_KEY,
     "control_get_table_info": PermissionLevel.PLT_ENCRYPTION_KEY,
+    "log_get_index": PermissionLevel.PLT_ENCRYPTION_KEY,
+    "log_get_table_info": PermissionLevel.PLT_ENCRYPTION_KEY,
+    "log_get_log": PermissionLevel.PLT_ENCRYPTION_KEY,
+    "log_get_list": PermissionLevel.PLT_ENCRYPTION_KEY,
+    "log_clear": PermissionLevel.PLT_INSTALLER_USER_DISARMED,
+    "log_get_trouble": PermissionLevel.PLT_ENCRYPTION_KEY,
+    "log_get_attribs": PermissionLevel.PLT_ENCRYPTION_KEY,
+    "log_set_attribs": PermissionLevel.PLT_INSTALLER_USER_DISARMED,
+    "log_realloc": PermissionLevel.PLT_INSTALLER_USER_DISARMED,
 }
 
 
@@ -66,6 +74,12 @@ EXPECTED_CALLS = {
     "keypad_get_attribs": {"keypad_id": 1},
     "control_get_version_info": {},
     "control_get_table_info": {},
+    "log_get_index": {},
+    "log_get_table_info": {},
+    "log_get_trouble": {},
+    "log_get_attribs": {},
+    "log_get_log": {"log_id": 1},
+    "log_get_list": {"start": 500, "date": 1741704120, "cnt": 10},
 }
 
 
@@ -81,7 +95,7 @@ def test_registry_min_permissions_match_permission_table():
 
 
 def test_registry_generators_and_handlers_are_callable():
-    for key, spec in COMMANDS.items():
+    for _key, spec in COMMANDS.items():
         assert callable(spec.generator)
         assert callable(spec.handler)
 
@@ -116,7 +130,7 @@ def test_generators_are_pure():
 
 
 def test_stubbed_commands_raise_not_implemented():
-    stub_key = "log_get_log"
+    stub_key = "cs_param_get_trouble"
     spec = COMMANDS[stub_key]
 
     with pytest.raises(NotImplementedError, match=stub_key):
@@ -124,3 +138,12 @@ def test_stubbed_commands_raise_not_implemented():
 
     with pytest.raises(NotImplementedError, match=stub_key):
         spec.handler({}, None)
+
+
+def test_log_mutation_generators_are_disabled():
+    with pytest.raises(ValueError, match="log_clear is disabled"):
+        COMMANDS["log_clear"].generator(block_id=0)
+    with pytest.raises(ValueError, match="log_realloc is disabled"):
+        COMMANDS["log_realloc"].generator(table_elements=250)
+    with pytest.raises(ValueError, match="log_set_attribs is disabled"):
+        COMMANDS["log_set_attribs"].generator(log_flags={"arm_changed": True})

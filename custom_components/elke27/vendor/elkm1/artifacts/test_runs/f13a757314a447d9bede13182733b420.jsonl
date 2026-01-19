@@ -1,0 +1,4 @@
+{"run_id": "f13a757314a447d9bede13182733b420", "test_id": "test/test_discovery.py::test_async_scanner_specific_address", "record_type": "test_start", "t_ms": 0, "ts_utc": "2025-12-29T22:42:00Z", "meta": {"pid": 94357}}
+{"run_id": "f13a757314a447d9bede13182733b420", "test_id": "test/test_discovery.py::test_async_scanner_specific_address", "record_type": "test_end", "t_ms": 1, "ts_utc": "2025-12-29T22:42:00Z", "outcome": "pass", "error": null}
+{"run_id": "f13a757314a447d9bede13182733b420", "test_id": "test/test_discovery.py::test_async_scanner_broadcast", "record_type": "test_start", "t_ms": 0, "ts_utc": "2025-12-29T22:42:00Z", "meta": {"pid": 94357}}
+{"run_id": "f13a757314a447d9bede13182733b420", "test_id": "test/test_discovery.py::test_async_scanner_broadcast", "record_type": "test_end", "t_ms": 11, "ts_utc": "2025-12-29T22:42:00Z", "outcome": "pass", "error": null}

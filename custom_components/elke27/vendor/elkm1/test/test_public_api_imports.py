@@ -9,32 +9,35 @@ from elke27_lib import (
     AreaState,
     ArmMode,
     ClientConfig,
+    CsmSnapshot,
     DiscoveredPanel,
     Elke27Client,
     Elke27Event,
     EventType,
     LinkKeys,
+    OutputDefinition,
     OutputState,
     PanelInfo,
     PanelSnapshot,
     TableInfo,
+    ZoneDefinition,
     ZoneState,
     redact_for_diagnostics,
 )
 from elke27_lib.discovery import E27System
-from elke27_lib.kernel import DiscoverResult
-from elke27_lib.linking import E27LinkKeys
-from elke27_lib.errors import Elke27AuthError, E27ProvisioningTimeout
+from elke27_lib.errors import E27ProvisioningTimeout, Elke27AuthError
 from elke27_lib.events import (
-    AreaConfiguredInventoryReady,
-    OutputConfiguredInventoryReady,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    AreaConfiguredInventoryReady,
+    OutputConfiguredInventoryReady,
     ZoneConfiguredInventoryReady,
 )
+from elke27_lib.kernel import DiscoverResult
+from elke27_lib.linking import E27LinkKeys
 from elke27_lib.states import InventoryState
 
 
@@ -45,10 +48,13 @@ def test_public_api_types_are_dataclasses_or_enums() -> None:
     assert dataclasses.is_dataclass(Elke27Event)
     assert dataclasses.is_dataclass(PanelInfo)
     assert dataclasses.is_dataclass(TableInfo)
+    assert dataclasses.is_dataclass(CsmSnapshot)
     assert dataclasses.is_dataclass(AreaState)
     assert dataclasses.is_dataclass(ZoneState)
     assert dataclasses.is_dataclass(OutputState)
     assert dataclasses.is_dataclass(PanelSnapshot)
+    assert dataclasses.is_dataclass(ZoneDefinition)
+    assert dataclasses.is_dataclass(OutputDefinition)
     assert issubclass(EventType, Enum)
     assert issubclass(ArmMode, Enum)
 

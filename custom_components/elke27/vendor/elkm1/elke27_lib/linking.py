@@ -7,9 +7,14 @@ import os
 import socket
 import time
 from dataclasses import dataclass
-from typing import Final, Optional
+from typing import Final
 
-from .errors import E27ErrorContext, E27ProvisioningTimeout, E27ProtocolError, E27TransportError
+from .errors import (
+    E27ErrorContext,
+    E27ProtocolError,
+    E27ProvisioningTimeout,
+    E27TransportError,
+)
 from .framing import DeframeState, deframe_feed
 from .presentation import decrypt_api_link_response
 
@@ -95,7 +100,7 @@ def recv_cleartext_json_objects(sock: socket.socket, timeout_s: float = 5.0) -> 
     sock.settimeout(timeout_s)
     try:
         data = sock.recv(4096)
-    except socket.timeout as e:
+    except TimeoutError as e:
         raise E27ProvisioningTimeout(
             "Timed out waiting for cleartext JSON from panel.",
             context=E27ErrorContext(phase="cleartext_recv"),
@@ -139,7 +144,7 @@ def wait_for_discovery_nonce(sock: socket.socket, timeout_s: float = 10.0) -> st
     while time.monotonic() < deadline:
         try:
             chunk = sock.recv(4096)
-        except socket.timeout:
+        except TimeoutError:
             continue
         except OSError as e:
             raise E27TransportError(
@@ -324,7 +329,7 @@ def perform_api_link(
 
     deadline = time.monotonic() + float(timeout_s)
     state = DeframeState()
-    frame_no_crc: Optional[bytes] = None
+    frame_no_crc: bytes | None = None
 
     while time.monotonic() < deadline:
         # Ensure socket timeout does not exceed remaining time
@@ -332,7 +337,7 @@ def perform_api_link(
         sock.settimeout(min(1.0, remaining))
         try:
             chunk = sock.recv(4096)
-        except socket.timeout:
+        except TimeoutError:
             continue
         except OSError as e:
             raise E27TransportError(

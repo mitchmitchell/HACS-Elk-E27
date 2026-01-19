@@ -5,13 +5,13 @@ import pytest
 
 from elke27_lib.client import Elke27Client
 from elke27_lib.events import (
-    AreaConfiguredInventoryReady,
-    OutputConfiguredInventoryReady,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    AreaConfiguredInventoryReady,
+    OutputConfiguredInventoryReady,
     ZoneConfiguredInventoryReady,
 )
 from elke27_lib.session import SessionState

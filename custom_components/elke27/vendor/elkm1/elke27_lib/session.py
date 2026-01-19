@@ -17,21 +17,24 @@ Non-responsibilities (explicit):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import socket
 import threading
 import time
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
-from .framing import DeframeState, deframe_feed, frame_build
-from .hello import perform_hello
-from .presentation import decrypt_schema0_envelope, encrypt_schema0_envelope
 from . import linking
 from .errors import E27Error
+from .framing import DeframeState, deframe_feed, frame_build
+from .hello import perform_hello
 from .outbound import OutboundItem, OutboundPriority, OutboundQueue
+from .presentation import decrypt_schema0_envelope, encrypt_schema0_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -111,33 +114,40 @@ class Session:
         self.client_identity = client_identity
         self.link_key_hex = link_key_hex
 
-        self.sock: Optional[socket.socket] = None
-        self._deframe_state: Optional[DeframeState] = None
+        self.sock: socket.socket | None = None
+        self._deframe_state: DeframeState | None = None
+        self._pending_frames: deque[bytes] = deque()
 
-        self.info: Optional[SessionInfo] = None
+        self.info: SessionInfo | None = None
 
         self.state: SessionState = SessionState.DISCONNECTED
         self.last_error: Exception | None = None
 
         self._tx_envelope_seq = 1
-        self._last_rx_envelope_seq: Optional[int] = None
+        self._last_rx_envelope_seq: int | None = None
+        self._last_rx_json_seq: int | None = None
+        self._last_rx_json_keys: tuple[str, ...] | None = None
+        self._last_rx_json_domain: str | None = None
+        self._last_tx_json_seq: int | None = None
+        self._last_tx_json_keys: tuple[str, ...] | None = None
+        self._last_tx_json_domain: str | None = None
         now = time.monotonic()
         self._last_rx_at = now
         self._last_tx_at = now
         self._last_exchange_at = now
         self._rx_count = 0
-        self._recv_thread: Optional[threading.Thread] = None
-        self._recv_stop: Optional[threading.Event] = None
+        self._recv_thread: threading.Thread | None = None
+        self._recv_stop: threading.Event | None = None
         self._recv_lock = threading.Lock()
-        self._recv_task: Optional[asyncio.Task[None]] = None
-        self._recv_loop_ref: Optional[asyncio.AbstractEventLoop] = None
-        self._outbound: Optional[OutboundQueue] = None
+        self._recv_task: asyncio.Task[None] | None = None
+        self._recv_loop_ref: asyncio.AbstractEventLoop | None = None
+        self._outbound: OutboundQueue | None = None
 
         # Event hooks (optional)
-        self.on_connected: Optional[Callable[[SessionInfo], None]] = None
-        self.on_message: Optional[Callable[[dict[str, Any]], None]] = None
-        self.on_disconnected: Optional[Callable[[Exception | None], None]] = None
-        self.on_idle: Optional[Callable[[], None]] = None
+        self.on_connected: Callable[[SessionInfo], None] | None = None
+        self.on_message: Callable[[dict[str, Any]], None] | None = None
+        self.on_disconnected: Callable[[Exception | None], None] | None = None
+        self.on_idle: Callable[[], None] | None = None
 
     # --------------------------
     # Connection lifecycle
@@ -162,10 +172,8 @@ class Session:
         except OSError as e:
             self.last_error = e
             self.state = SessionState.DISCONNECTED
-            try:
+            with contextlib.suppress(OSError):
                 s.close()
-            except OSError:
-                pass
             raise SessionIOError(
                 f"Failed to connect to {self.cfg.host}:{self.cfg.port}: {e}"
             ) from e
@@ -221,12 +229,11 @@ class Session:
             self._outbound.stop(fail_exc=SessionIOError("Session closed."))
             self._outbound = None
         if self.sock is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self.sock.close()
-            except OSError:
-                pass
         self.sock = None
         self._deframe_state = None
+        self._pending_frames = deque()
         self.info = None
         self.state = SessionState.DISCONNECTED
 
@@ -255,7 +262,7 @@ class Session:
 
         try:
             data = self.sock.recv(max_bytes)
-        except socket.timeout as e:
+        except TimeoutError as e:
             raise TimeoutError("Timed out waiting for data from the panel.") from e
         except OSError as e:
             raise SessionIOError(
@@ -295,6 +302,8 @@ class Session:
         """
         self._require_ready()
         assert self._deframe_state is not None
+        if self._pending_frames:
+            return self._pending_frames.popleft()
 
         deadline = time.monotonic() + timeout_s
         while True:
@@ -309,10 +318,8 @@ class Session:
             except TimeoutError:
                 # keep pumping until overall deadline; allow idle hooks for retries
                 if self.on_idle:
-                    try:
+                    with contextlib.suppress(Exception):
                         self.on_idle()
-                    except Exception:
-                        pass
                 continue
 
             if self.cfg.wire_log and logger.isEnabledFor(logging.DEBUG):
@@ -323,18 +330,21 @@ class Session:
                 if getattr(r, "ok", False):
                     if r.frame_no_crc is None:
                         continue
-                    if self.cfg.wire_log and logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "RX frame_no_crc (%d bytes): %s",
-                            len(r.frame_no_crc or b""),
-                            (r.frame_no_crc or b"").hex(),
-                        )
-                    return r.frame_no_crc
+                    self._pending_frames.append(r.frame_no_crc)
                 # CRC-bad or malformed frames: ignore and keep scanning.
                 # If the framing layer provides details, emit at debug level.
                 err = getattr(r, "error", None)
                 if err:
-                    logger.debug("Ignoring invalid frame while resyncing: %s", err)
+                    logger.warning("Dropping invalid frame while resyncing: %s", err)
+            if self._pending_frames:
+                frame = self._pending_frames.popleft()
+                if self.cfg.wire_log and logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "RX frame_no_crc (%d bytes): %s",
+                        len(frame),
+                        frame.hex(),
+                    )
+                return frame
 
     # --------------------------
     # Public send/recv API
@@ -344,14 +354,15 @@ class Session:
         self,
         obj: dict[str, Any],
         *,
-        protocol_byte: Optional[int] = None,
+        protocol_byte: int | None = None,
         priority: OutboundPriority = OutboundPriority.NORMAL,
-        on_sent: Optional[Callable[[float], None]] = None,
-        on_fail: Optional[Callable[[BaseException], None]] = None,
+        on_sent: Callable[[float], None] | None = None,
+        on_fail: Callable[[BaseException], None] | None = None,
     ) -> None:
         """
         Encrypt schema-0 payload (JSON UTF-8 bytes) and send as a framed message.
         """
+        self._note_tx_json(obj)
         framed = self._encode_json(obj, protocol_byte=protocol_byte)
         if self._outbound is None:
             self._send_all(framed)
@@ -386,7 +397,7 @@ class Session:
         )
         self._outbound.start()
 
-    def _encode_json(self, obj: dict[str, Any], *, protocol_byte: Optional[int] = None) -> bytes:
+    def _encode_json(self, obj: dict[str, Any], *, protocol_byte: int | None = None) -> bytes:
         self._require_ready()
         assert self.info is not None
 
@@ -418,18 +429,30 @@ class Session:
             idle_check_at = time.monotonic() + timeout_s
             while True:
                 if self.on_idle and time.monotonic() >= idle_check_at:
-                    try:
+                    with contextlib.suppress(Exception):
                         self.on_idle()
-                    except Exception:
-                        pass
                     idle_check_at = time.monotonic() + timeout_s
                 frame_no_crc = self._recv_one_frame_no_crc(timeout_s=timeout_s)
                 if len(frame_no_crc) < 3:
+                    logger.warning(
+                        "Dropping short frame (len=%d) from %s:%s",
+                        len(frame_no_crc),
+                        self.cfg.host,
+                        self.cfg.port,
+                    )
                     raise SessionProtocolError(
                         f"Received an invalid frame (too short) from {self.cfg.host}:{self.cfg.port}."
                     )
 
                 protocol_byte = frame_no_crc[0]
+                frame_len = frame_no_crc[1] | (frame_no_crc[2] << 8)
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "RX frame header: protocol=0x%02x length=%d total=%d",
+                        protocol_byte,
+                        frame_len,
+                        len(frame_no_crc),
+                    )
                 ciphertext = frame_no_crc[3:]  # skip protocol + 2-byte length
 
                 try:
@@ -439,6 +462,13 @@ class Session:
                         session_key=bytes.fromhex(self.info.session_key_hex),
                     )
                 except Exception as e:
+                    logger.warning(
+                        "Dropping frame after decrypt failure: protocol=0x%02x length=%d ciphertext_len=%d error=%s",
+                        protocol_byte,
+                        frame_len,
+                        len(ciphertext),
+                        e,
+                    )
                     raise SessionProtocolError(
                         f"Failed to decrypt schema-0 envelope from {self.cfg.host}:{self.cfg.port}: {e}"
                     ) from e
@@ -449,13 +479,26 @@ class Session:
                 try:
                     obj = json.loads(env.payload.decode("utf-8"))
                 except Exception as e:
+                    logger.warning(
+                        "Dropping frame after JSON decode failure: protocol=0x%02x length=%d error=%s",
+                        protocol_byte,
+                        frame_len,
+                        e,
+                    )
                     raise SessionProtocolError(
                         f"Received invalid JSON payload from {self.cfg.host}:{self.cfg.port}: {e}"
                     ) from e
 
                 if not isinstance(obj, dict):
+                    logger.warning(
+                        "Dropping non-object JSON payload: protocol=0x%02x length=%d type=%s",
+                        protocol_byte,
+                        frame_len,
+                        type(obj).__name__,
+                    )
                     raise SessionProtocolError(
-                        f"Expected a JSON object (dict) but received {type(obj).__name__} from {self.cfg.host}:{self.cfg.port}."
+                        "Expected a JSON object (dict) but received "
+                        f"{type(obj).__name__} from {self.cfg.host}:{self.cfg.port}."
                     )
 
                 if logger.isEnabledFor(logging.DEBUG):
@@ -465,12 +508,17 @@ class Session:
                         obj.get("seq"),
                         tuple(obj.keys()),
                     )
+                    logger.debug(
+                        "RX json decoded: domain=%s",
+                        self._extract_domain_key(obj),
+                    )
+                self._note_rx_json(obj)
                 self._rx_count += 1
                 self._last_rx_at = time.monotonic()
                 self._last_exchange_at = self._last_rx_at
                 return obj
 
-    def pump_once(self, *, timeout_s: float = 0.5) -> Optional[dict[str, Any]]:
+    def pump_once(self, *, timeout_s: float = 0.5) -> dict[str, Any] | None:
         """
         One pump iteration: receive and dispatch exactly one message if available.
 
@@ -573,10 +621,8 @@ class Session:
                 obj = self.recv_json(timeout_s=self.cfg.io_timeout_s)
             except TimeoutError:
                 if self.on_idle:
-                    try:
+                    with contextlib.suppress(Exception):
                         self.on_idle()
-                    except Exception:
-                        pass
                 continue
             except SessionNotReadyError:
                 break
@@ -592,12 +638,55 @@ class Session:
                 self.on_message(obj)
 
     def _handle_disconnect(self, err: Exception | None) -> None:
+        now = time.monotonic()
+        rx_age = now - self._last_rx_at
+        tx_age = now - self._last_tx_at
+        exchange_age = now - self._last_exchange_at
+        err_name = type(err).__name__ if err is not None else "None"
+        logger.error(
+            "Session disconnect: err=%s state=%s host=%s port=%s rx_age=%.3fs tx_age=%.3fs "
+            "exchange_age=%.3fs rx_count=%s last_rx_seq=%s last_rx_domain=%s last_tx_seq=%s "
+            "last_tx_domain=%s",
+            err_name,
+            self.state.value,
+            self.cfg.host,
+            self.cfg.port,
+            rx_age,
+            tx_age,
+            exchange_age,
+            self._rx_count,
+            self._last_rx_json_seq,
+            self._last_rx_json_domain,
+            self._last_tx_json_seq,
+            self._last_tx_json_domain,
+        )
         self.last_error = err
         try:
             self.close()
         finally:
             if self.on_disconnected:
                 self.on_disconnected(err)
+
+    @staticmethod
+    def _extract_domain_key(obj: dict[str, Any]) -> str | None:
+        for key in obj.keys():
+            if key not in ("seq", "session_id"):
+                return key
+        return None
+
+    def _note_rx_json(self, obj: dict[str, Any]) -> None:
+        seq_val = obj.get("seq")
+        if isinstance(seq_val, int):
+            self._last_rx_json_seq = seq_val
+        self._last_rx_json_keys = tuple(obj.keys())
+        self._last_rx_json_domain = self._extract_domain_key(obj)
+
+    def _note_tx_json(self, obj: dict[str, Any]) -> None:
+        seq_val = obj.get("seq")
+        if isinstance(seq_val, int):
+            self._last_tx_json_seq = seq_val
+        self._last_tx_json_keys = tuple(obj.keys())
+        self._last_tx_json_domain = self._extract_domain_key(obj)
 
     def _next_envelope_seq(self, current: int) -> int:
         return self._wrap_seq(current + 1, wrap_to=1)

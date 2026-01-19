@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import socket
+import time
 from dataclasses import dataclass
+
 from .errors import (
     E27ErrorContext,
     E27ProtocolError,
@@ -105,7 +106,7 @@ def perform_hello(
                 pre_objs = recv_cleartext_json_objects_from_bytes(predata)
             except (ValueError, json.JSONDecodeError) as e:
                 LOG.warning("Pre-HELLO JSON parse failed: %s", e)
-    except (socket.timeout, BlockingIOError):
+    except (TimeoutError, BlockingIOError):
         pass
 
     # Send clear, UNFRAMED JSON

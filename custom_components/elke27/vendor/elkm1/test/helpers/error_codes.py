@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 from elke27_lib.const import E27ErrorCode
-
 
 _ERROR_CODE_RE = re.compile(r"error_code=(\d+)")
 
 
-def extract_error_code(err: Any) -> Optional[int]:
+def extract_error_code(err: Any) -> int | None:
     if err is None:
         return None
     code = getattr(err, "error_code", None)
@@ -21,7 +20,7 @@ def extract_error_code(err: Any) -> Optional[int]:
     return None
 
 
-def error_code_name(code: Optional[int]) -> str:
+def error_code_name(code: int | None) -> str:
     if code is None:
         return "UNKNOWN"
     try:

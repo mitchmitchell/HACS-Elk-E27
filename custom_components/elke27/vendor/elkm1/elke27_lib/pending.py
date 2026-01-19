@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
+from typing import Any
 
-
-ResponseKey = Tuple[str, str]
+ResponseKey = tuple[str, str]
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -25,7 +27,7 @@ class PendingResponse:
 class PendingResponseManager:
     def __init__(self, *, now: Callable[[], float] = time.monotonic) -> None:
         self._now = now
-        self._pending: Dict[int, PendingResponse] = {}
+        self._pending: dict[int, PendingResponse] = {}
         self._lock = threading.Lock()
 
     def create(
@@ -81,7 +83,7 @@ class PendingResponseManager:
         with self._lock:
             return len(self._pending)
 
-    def _pop(self, seq: int) -> Optional[PendingResponse]:
+    def _pop(self, seq: int) -> PendingResponse | None:
         with self._lock:
             return self._pending.pop(seq, None)
 
@@ -89,5 +91,6 @@ class PendingResponseManager:
     def _call_in_loop(entry: PendingResponse, fn: Callable[[], None]) -> None:
         try:
             entry.loop.call_soon_threadsafe(fn)
-        except RuntimeError:
+        except RuntimeError as exc:
+            LOG.warning("PendingResponse loop dispatch failed: %s", exc, exc_info=True)
             fn()

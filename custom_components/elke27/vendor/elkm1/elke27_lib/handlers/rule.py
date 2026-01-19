@@ -6,20 +6,20 @@ Read-only handlers for the "rule" domain.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from elke27_lib.dispatcher import DispatchContext
 from elke27_lib.events import (
-    ApiError,
-    AuthorizationRequiredEvent,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    ApiError,
+    AuthorizationRequiredEvent,
 )
 from elke27_lib.states import PanelState
-
 
 EmitFn = Callable[[object, DispatchContext], None]
 NowFn = Callable[[], float]

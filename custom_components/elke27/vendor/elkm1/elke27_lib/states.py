@@ -13,8 +13,9 @@ Principles:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from datetime import UTC, datetime
 
+from elke27_lib.types import CsmSnapshot
 
 # -------------------------
 # Panel-level state
@@ -25,16 +26,16 @@ class PanelMetaState:
     """
     Small "panel header" state owned by the kernel and updated by handlers.
     """
-    session_id: Optional[int] = None
+    session_id: int | None = None
     connected: bool = False
 
     # Monotonic timestamp of last message seen/processed.
-    last_message_at: Optional[float] = None
+    last_message_at: float | None = None
 
     # Optional panel/version info (filled when handlers decode device/version payloads)
-    model: Optional[str] = None
-    firmware: Optional[str] = None
-    serial: Optional[str] = None
+    model: str | None = None
+    firmware: str | None = None
+    serial: str | None = None
 
 
 # -------------------------
@@ -46,37 +47,37 @@ class AreaState:
     area_id: int
 
     # Identity/config
-    name: Optional[str] = None
+    name: str | None = None
 
     # Core status (strings depend on API enums; keep as str for now)
-    armed_state: Optional[str] = None
-    alarm_state: Optional[str] = None
-    alarm_event: Optional[str] = None
-    arm_state: Optional[str] = None
-    ready_status: Optional[str] = None
+    armed_state: str | None = None
+    alarm_state: str | None = None
+    alarm_event: str | None = None
+    arm_state: str | None = None
+    ready_status: str | None = None
 
     # Common flags
-    ready: Optional[bool] = None
-    stay: Optional[bool] = None
-    away: Optional[bool] = None
-    bypass: Optional[bool] = None
-    chime: Optional[bool] = None
-    entry_delay_active: Optional[bool] = None
-    exit_delay_active: Optional[bool] = None
-    trouble: Optional[bool] = None
+    ready: bool | None = None
+    stay: bool | None = None
+    away: bool | None = None
+    bypass: bool | None = None
+    chime: bool | None = None
+    entry_delay_active: bool | None = None
+    exit_delay_active: bool | None = None
+    trouble: bool | None = None
 
     # Common counts (if reported)
-    num_not_ready_zones: Optional[int] = None
-    num_bypassed_zones: Optional[int] = None
+    num_not_ready_zones: int | None = None
+    num_bypassed_zones: int | None = None
 
     # Response/error tracking
-    last_error_code: Optional[int] = None
+    last_error_code: int | None = None
 
     # Troubles list for area.get_troubles
-    troubles: Optional[list[str]] = None
+    troubles: list[str] | None = None
 
     # Monotonic timestamp of last update to this area
-    last_update_at: Optional[float] = None
+    last_update_at: float | None = None
 
 
 # -------------------------
@@ -87,24 +88,24 @@ class AreaState:
 class ZoneState:
     zone_id: int
 
-    name: Optional[str] = None
-    area_id: Optional[int] = None
-    definition: Optional[str] = None
-    flags: Optional[list[dict]] = None
+    name: str | None = None
+    area_id: int | None = None
+    definition: str | None = None
+    flags: list[dict] | None = None
 
-    enabled: Optional[bool] = None
-    bypassed: Optional[bool] = None
-    violated: Optional[bool] = None
-    trouble: Optional[bool] = None
-    tamper: Optional[bool] = None
-    alarm: Optional[bool] = None
-    low_battery: Optional[bool] = None
+    enabled: bool | None = None
+    bypassed: bool | None = None
+    violated: bool | None = None
+    trouble: bool | None = None
+    tamper: bool | None = None
+    alarm: bool | None = None
+    low_battery: bool | None = None
 
     # Bulk status code (see zone.get_all_zones_status)
-    status_code: Optional[str] = None
-    attribs: Dict[str, object] = field(default_factory=dict)
+    status_code: str | None = None
+    attribs: dict[str, object] = field(default_factory=dict)
 
-    last_update_at: Optional[float] = None
+    last_update_at: float | None = None
 
 
 # -------------------------
@@ -115,13 +116,13 @@ class ZoneState:
 class UserState:
     user_id: int
 
-    name: Optional[str] = None
-    group_id: Optional[int] = None
-    enabled: Optional[bool] = None
-    flags: Optional[list[dict]] = None
-    pin: Optional[int] = None
-    fields: Dict[str, object] = field(default_factory=dict)
-    last_update_at: Optional[float] = None
+    name: str | None = None
+    group_id: int | None = None
+    enabled: bool | None = None
+    flags: list[dict] | None = None
+    pin: int | None = None
+    fields: dict[str, object] = field(default_factory=dict)
+    last_update_at: float | None = None
 
 
 # -------------------------
@@ -132,14 +133,14 @@ class UserState:
 class KeypadState:
     keypad_id: int
 
-    name: Optional[str] = None
-    area: Optional[int] = None
-    zone_id: Optional[int] = None
-    source_id: Optional[int] = None
-    device_id: Optional[str] = None
-    flags: Optional[list[dict]] = None
-    fields: Dict[str, object] = field(default_factory=dict)
-    last_update_at: Optional[float] = None
+    name: str | None = None
+    area: int | None = None
+    zone_id: int | None = None
+    source_id: int | None = None
+    device_id: str | None = None
+    flags: list[dict] | None = None
+    fields: dict[str, object] = field(default_factory=dict)
+    last_update_at: float | None = None
 
 
 # -------------------------
@@ -148,8 +149,8 @@ class KeypadState:
 
 @dataclass(slots=True)
 class TroubleState:
-    active: Optional[bool] = None
-    last_update_at: Optional[float] = None
+    active: bool | None = None
+    last_update_at: float | None = None
 
     # Optional future expansion: named trouble bits, raw snapshots, etc.
     # bits: Dict[str, bool] = field(default_factory=dict)
@@ -157,9 +158,9 @@ class TroubleState:
 
 @dataclass(slots=True)
 class NetworkState:
-    ssid_scan_results: list[Dict[str, object]] = field(default_factory=list)
-    rssi: Optional[int] = None
-    last_update_at: Optional[float] = None
+    ssid_scan_results: list[dict[str, object]] = field(default_factory=list)
+    rssi: int | None = None
+    last_update_at: float | None = None
 
 
 # -------------------------
@@ -170,30 +171,30 @@ class NetworkState:
 class OutputState:
     output_id: int
 
-    name: Optional[str] = None
-    status: Optional[str] = None
-    on: Optional[bool] = None
-    status_code: Optional[str] = None
-    fields: Dict[str, object] = field(default_factory=dict)
-    last_update_at: Optional[float] = None
+    name: str | None = None
+    status: str | None = None
+    on: bool | None = None
+    status_code: str | None = None
+    fields: dict[str, object] = field(default_factory=dict)
+    last_update_at: float | None = None
 
 
 @dataclass(slots=True)
 class TstatState:
     tstat_id: int
 
-    name: Optional[str] = None
-    temperature: Optional[int] = None
-    cool_setpoint: Optional[int] = None
-    heat_setpoint: Optional[int] = None
-    mode: Optional[str] = None
-    fan_mode: Optional[str] = None
-    humidity: Optional[int] = None
-    rssi: Optional[int] = None
-    battery_level: Optional[int] = None
-    prec: Optional[list[int]] = None
-    fields: Dict[str, object] = field(default_factory=dict)
-    last_update_at: Optional[float] = None
+    name: str | None = None
+    temperature: int | None = None
+    cool_setpoint: int | None = None
+    heat_setpoint: int | None = None
+    mode: str | None = None
+    fan_mode: str | None = None
+    humidity: int | None = None
+    rssi: int | None = None
+    battery_level: int | None = None
+    prec: list[int] | None = None
+    fields: dict[str, object] = field(default_factory=dict)
+    last_update_at: float | None = None
 
 
 # -------------------------
@@ -218,10 +219,10 @@ class InventoryState:
     user_attribs_requested: set[int] = field(default_factory=set)
     keypad_attribs_requested: set[int] = field(default_factory=set)
 
-    configured_area_block_count: Optional[int] = None
-    configured_zone_block_count: Optional[int] = None
-    configured_area_blocks_remaining: Optional[int] = None
-    configured_zone_blocks_remaining: Optional[int] = None
+    configured_area_block_count: int | None = None
+    configured_zone_block_count: int | None = None
+    configured_area_blocks_remaining: int | None = None
+    configured_zone_blocks_remaining: int | None = None
 
     configured_areas_complete: bool = False
     configured_zones_complete: bool = False
@@ -233,10 +234,10 @@ class InventoryState:
     invalid_id_streak_threshold: int = 3
     area_invalid_streak: int = 0
     zone_invalid_streak: int = 0
-    area_last_invalid_id: Optional[int] = None
-    zone_last_invalid_id: Optional[int] = None
-    area_discovery_max_id: Optional[int] = None
-    zone_discovery_max_id: Optional[int] = None
+    area_last_invalid_id: int | None = None
+    zone_last_invalid_id: int | None = None
+    area_discovery_max_id: int | None = None
+    zone_discovery_max_id: int | None = None
 
 
 # -------------------------
@@ -248,29 +249,36 @@ class PanelState:
     panel: PanelMetaState = field(default_factory=PanelMetaState)
 
     # Domain containers keyed by id
-    areas: Dict[int, AreaState] = field(default_factory=dict)
-    zones: Dict[int, ZoneState] = field(default_factory=dict)
+    areas: dict[int, AreaState] = field(default_factory=dict)
+    zones: dict[int, ZoneState] = field(default_factory=dict)
     inventory: InventoryState = field(default_factory=InventoryState)
-    zone_defs_by_id: Dict[int, Dict[str, object]] = field(default_factory=dict)
-    zone_def_flags_by_id: Dict[int, Dict[str, object]] = field(default_factory=dict)
-    zone_def_flags_by_name: Dict[str, Dict[str, object]] = field(default_factory=dict)
-    outputs: Dict[int, OutputState] = field(default_factory=dict)
-    tstats: Dict[int, TstatState] = field(default_factory=dict)
-    users: Dict[int, UserState] = field(default_factory=dict)
-    keypads: Dict[int, KeypadState] = field(default_factory=dict)
+    zone_defs_by_id: dict[int, dict[str, object]] = field(default_factory=dict)
+    zone_def_flags_by_id: dict[int, dict[str, object]] = field(default_factory=dict)
+    zone_def_flags_by_name: dict[str, dict[str, object]] = field(default_factory=dict)
+    outputs: dict[int, OutputState] = field(default_factory=dict)
+    tstats: dict[int, TstatState] = field(default_factory=dict)
+    users: dict[int, UserState] = field(default_factory=dict)
+    keypads: dict[int, KeypadState] = field(default_factory=dict)
 
     troubles: TroubleState = field(default_factory=TroubleState)
-    system_status: Dict[str, object] = field(default_factory=dict)
+    system_status: dict[str, object] = field(default_factory=dict)
+    control_status: dict[str, object] = field(default_factory=dict)
+    log_status: dict[str, object] = field(default_factory=dict)
+    bus_io_status: dict[str, object] = field(default_factory=dict)
     network: NetworkState = field(default_factory=NetworkState)
-    table_info_by_domain: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    table_info_by_domain: dict[str, dict[str, object]] = field(default_factory=dict)
     table_info_known: set[str] = field(default_factory=set)
+    domain_csm_by_name: dict[str, int] = field(default_factory=dict)
+    table_csm_by_domain: dict[str, int] = field(default_factory=dict)
+    csm_snapshot_version: int = 0
+    csm_snapshot: CsmSnapshot | None = None
     bootstrap_counts_ready: bool = False
-    rules: Dict[int, Dict[str, object]] = field(default_factory=dict)
-    rules_block_count: Optional[int] = None
+    rules: dict[int, dict[str, object]] = field(default_factory=dict)
+    rules_block_count: int | None = None
 
     # Debug storage (off by default; kernel/handlers can choose to fill)
     debug_last_raw_by_route_enabled: bool = False
-    debug_last_raw_by_route: Dict[str, dict] = field(default_factory=dict)
+    debug_last_raw_by_route: dict[str, dict] = field(default_factory=dict)
 
     def get_or_create_area(self, area_id: int) -> AreaState:
         """
@@ -318,3 +326,31 @@ class PanelState:
             tstat = TstatState(tstat_id=tstat_id)
             self.tstats[tstat_id] = tstat
         return tstat
+
+
+def update_csm_snapshot(state: PanelState, *, updated_at: datetime | None = None) -> CsmSnapshot | None:
+    """
+    Build a normalized CSM snapshot and store it on state if changed.
+    """
+    if updated_at is None:
+        updated_at = datetime.now(UTC)
+    domain_csms = dict(state.domain_csm_by_name)
+    table_csms = dict(state.table_csm_by_domain)
+
+    existing = state.csm_snapshot
+    if (
+        existing is not None
+        and dict(existing.domain_csms) == domain_csms
+        and dict(existing.table_csms) == table_csms
+    ):
+        return None
+
+    state.csm_snapshot_version += 1
+    snapshot = CsmSnapshot(
+        domain_csms=dict(domain_csms),
+        table_csms=dict(table_csms),
+        version=state.csm_snapshot_version,
+        updated_at=updated_at,
+    )
+    state.csm_snapshot = snapshot
+    return snapshot

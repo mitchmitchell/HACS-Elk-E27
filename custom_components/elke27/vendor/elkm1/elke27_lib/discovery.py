@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import asyncio
+import json
 import logging
 import socket
 import time
@@ -116,7 +116,7 @@ class AIOELKDiscovery:
         if (
             data is None
             or data == self.DISCOVER_MESSAGE
-            or not (b"ELKWC2017" in data)
+            or b"ELKWC2017" not in data
         ):
             return False
         try:

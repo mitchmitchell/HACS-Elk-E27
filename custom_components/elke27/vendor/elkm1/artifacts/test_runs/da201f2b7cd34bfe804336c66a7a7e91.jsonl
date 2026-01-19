@@ -1,0 +1,2 @@
+{"run_id": "da201f2b7cd34bfe804336c66a7a7e91", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_state_roundtrip", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-14T04:29:25Z", "meta": {"pid": 75291}}
+{"run_id": "da201f2b7cd34bfe804336c66a7a7e91", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_state_roundtrip", "record_type": "test_end", "t_ms": 8916, "ts_utc": "2026-01-14T04:29:34Z", "outcome": "pass", "error": null}

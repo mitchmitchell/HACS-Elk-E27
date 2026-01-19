@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 
 def _e27_frame_build(*, protocol_byte: int, ciphertext: bytes) -> bytes:
     """
@@ -85,7 +83,10 @@ def _deframe_one_or_fail(chunks: list[bytes]) -> bytes:
 def test_e27_encrypt_frame_deframe_decrypt_roundtrip():
     # Import real modules (not fakes)
     from elke27_lib.message import build_area_get_status
-    from elke27_lib.presentation import encrypt_schema0_envelope, decrypt_schema0_envelope
+    from elke27_lib.presentation import (
+        decrypt_schema0_envelope,
+        encrypt_schema0_envelope,
+    )
 
     session_key = bytes.fromhex("00112233445566778899AABBCCDDEEFF")  # 16 bytes
 
@@ -113,9 +114,12 @@ def test_e27_encrypt_frame_deframe_decrypt_roundtrip():
 
 
 def test_e27_deframer_can_handle_multiple_frames_in_one_chunk():
-    from elke27_lib.message import build_authenticate, build_area_get_status
-    from elke27_lib.presentation import encrypt_schema0_envelope, decrypt_schema0_envelope
     from elke27_lib.framing import DeframeState, deframe_feed
+    from elke27_lib.message import build_area_get_status, build_authenticate
+    from elke27_lib.presentation import (
+        decrypt_schema0_envelope,
+        encrypt_schema0_envelope,
+    )
 
     session_key = bytes.fromhex("00112233445566778899AABBCCDDEEFF")  # 16 bytes
 

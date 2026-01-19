@@ -1,7 +1,6 @@
 # test/test_e27_util.py
 
 from __future__ import annotations
-from test.helpers.trace import make_event
 
 import pytest
 

@@ -13,10 +13,8 @@ import json
 import logging
 import time
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Optional
 
-from elke27_lib import Elk
-from elke27_lib import linking
+from elke27_lib import Elk, linking
 from elke27_lib.session import SessionConfig, SessionState
 
 LOG = logging.getLogger(__name__)
@@ -28,7 +26,7 @@ class E27Credentials:
     passphrase: str
 
 
-def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+def _env(name: str, default: str | None = None) -> str | None:
     import os
     value = os.environ.get(name, default)
     if value == "":
@@ -38,10 +36,7 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
 
 def _parse_client_identity(value: str) -> linking.E27Identity:
     text = value.strip()
-    if "," in text:
-        parts = [p.strip() for p in text.split(",")]
-    else:
-        parts = [p.strip() for p in text.split(":")]
+    parts = [p.strip() for p in text.split(",")] if "," in text else [p.strip() for p in text.split(":")]
 
     if len(parts) == 2:
         mn, sn = parts

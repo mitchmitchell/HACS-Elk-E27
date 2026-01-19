@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Literal, Optional
+from typing import Literal
 
 from elke27_lib.errors import Elke27ProtocolError
 from elke27_lib.handlers.all_handlers import HANDLERS, HandlerFn
-from elke27_lib.permissions import ALL_PERMISSION_KEYS, PermissionLevel, permission_for_generator
+from elke27_lib.permissions import (
+    ALL_PERMISSION_KEYS,
+    PermissionLevel,
+    permission_for_generator,
+)
 
 from .all_generators import GENERATORS, GeneratorFn
 
@@ -23,10 +28,10 @@ class CommandSpec:
     handler: HandlerFn
     min_permission: PermissionLevel
     response_mode: Literal["single", "paged_blocks"] = "single"
-    block_field: Optional[str] = None
-    block_count_field: Optional[str] = None
+    block_field: str | None = None
+    block_count_field: str | None = None
     first_block: int = 1
-    merge_strategy: Optional[MergeStrategy] = None
+    merge_strategy: MergeStrategy | None = None
     requires_automation_authority: bool = False
     area_scoped: bool = False
 
@@ -71,6 +76,8 @@ _DOMAIN_PREFIXES = sorted(
 
 
 def _split_domain_command(key: str) -> tuple[str, str]:
+    if key.startswith("bus_ios_"):
+        return "bus_io_dev", key[len("bus_ios_") :]
     if key.startswith("network_param_"):
         return "network", key[len("network_param_") :]
     for domain in _DOMAIN_PREFIXES:

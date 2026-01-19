@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal, Tuple
+from typing import Literal
 
-
-ResponseKey = Tuple[str, str]
+ResponseKey = tuple[str, str]
 ArmState = Literal["DISARMED", "ARMED_AWAY", "ARMED_STAY"]
 
 _ARM_STATES: set[str] = {"DISARMED", "ARMED_AWAY", "ARMED_STAY"}

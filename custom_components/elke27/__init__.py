@@ -1,36 +1,3 @@
-"""
-Custom integration to integrate elke27 with Home Assistant.
-
-For more details about this integration, please refer to
-https://github.com/mitchmitchell/HACS-Elk-E27
-"""
-
-from __future__ import annotations
-
-from datetime import timedelta
-from typing import TYPE_CHECKING
-
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.loader import async_get_loaded_integration
-
-from .api import IntegrationBlueprintApiClient
-from .const import DOMAIN, LOGGER
-from .coordinator import BlueprintDataUpdateCoordinator
-from .data import IntegrationBlueprintData
-
-if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
-
-    from .data import IntegrationBlueprintConfigEntry
-
-PLATFORMS: list[Platform] = [
-    Platform.SENSOR,
-    Platform.BINARY_SENSOR,
-    Platform.SWITCH,
-]
-
-
 """Set up the Elke27 integration."""
 
 from __future__ import annotations
@@ -154,9 +121,30 @@ def _panel_name_from_entry(panel: object | None) -> str | None:
     return None
 
 
-async def async_reload_entry(
-    hass: HomeAssistant,
-    entry: IntegrationBlueprintConfigEntry,
+async def _async_migrate_unique_ids(
+    hass: HomeAssistant, entry: ConfigEntry, base: str
 ) -> None:
-    """Reload config entry."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Migrate legacy unique IDs to the <base>:<domain>:<id> format."""
+    registry = er.async_get(hass)
+    prefix = f"{base}_"
+    for entity in registry.entities.values():
+        if entity.platform != DOMAIN:
+            continue
+        if entity.config_entry_id != entry.entry_id:
+            continue
+        unique_id = entity.unique_id
+        if not unique_id.startswith(prefix):
+            continue
+        rest = unique_id[len(prefix) :]
+        if "_" not in rest:
+            continue
+        domain, numeric_id = rest.rsplit("_", 1)
+        new_unique_id = f"{base}:{domain}:{numeric_id}"
+        if registry.async_get_entity_id(entity.domain, DOMAIN, new_unique_id):
+            _LOGGER.debug(
+                "Unique ID migration skipped for %s; %s already exists",
+                entity.entity_id,
+                new_unique_id,
+            )
+            continue
+        registry.async_update_entity(entity.entity_id, new_unique_id=new_unique_id)

@@ -23,6 +23,7 @@ Notes
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import json
 import logging
@@ -30,33 +31,42 @@ import socket
 import threading
 import time
 from collections import deque
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any, Callable, Deque, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import (
+    Any,
+)
 
-from . import discovery
-from . import linking
+LOG = logging.getLogger(__name__)
+from . import discovery, linking
 from . import session as session_mod
-from .dispatcher import DispatchContext, Dispatcher, MessageKind, PagedTransferKey, PendingRequest, RouteKey
+from .const import REDACT_DIAGNOSTICS
+from .dispatcher import (
+    DispatchContext,
+    Dispatcher,
+    MessageKind,
+    PagedTransferKey,
+    PendingRequest,
+    RouteKey,
+)
 from .errors import ConnectionLost, E27Error, E27Timeout
-from .outbound import OutboundPriority
 from .events import (
-    ApiError,
-    AuthorizationRequiredEvent,
-    ConnectionStateChanged,
-    DispatchRoutingError,
-    Event,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    ApiError,
+    AuthorizationRequiredEvent,
+    ConnectionStateChanged,
+    DispatchRoutingError,
+    Event,
     stamp_event,
 )
-from .const import REDACT_DIAGNOSTICS
+from .outbound import OutboundPriority
 from .pending import PendingResponseManager
 from .states import PanelState
-
 
 RequestBuilder = Callable[..., Mapping[str, Any]]  # returns payload dict
 
@@ -69,12 +79,12 @@ class RequestRegistry:
     """
 
     def __init__(self) -> None:
-        self._builders: Dict[RouteKey, RequestBuilder] = {}
+        self._builders: dict[RouteKey, RequestBuilder] = {}
 
     def register(self, route: RouteKey, builder: RequestBuilder) -> None:
         self._builders[route] = builder
 
-    def get(self, route: RouteKey) -> Optional[RequestBuilder]:
+    def get(self, route: RouteKey) -> RequestBuilder | None:
         return self._builders.get(route)
 
     def require(self, route: RouteKey) -> RequestBuilder:
@@ -103,7 +113,7 @@ class KernelMissingContextError(KernelError):
 @dataclass(frozen=True, slots=True)
 class _Subscriber:
     callback: Callable[[Event], None]
-    kinds: Optional[set[str]] = None
+    kinds: set[str] | None = None
 
 
 class _RequestState(str, Enum):
@@ -119,7 +129,7 @@ class _QueuedRequest:
     payload: Any
     pending: bool
     opaque: Any
-    expected_route: Optional[RouteKey]
+    expected_route: RouteKey | None
     priority: OutboundPriority
     timeout_s: float
 
@@ -127,7 +137,7 @@ class _QueuedRequest:
 @dataclass(frozen=True, slots=True)
 class DiscoverResult:
     """Wrapper for discovery results to keep the public contract explicit."""
-    panels: List[discovery.E27System]
+    panels: list[discovery.E27System]
 
 
 _REDACT_KEYS = {"access_code", "accesscode", "passphrase", "pin"}
@@ -194,7 +204,9 @@ class E27Kernel:
     Lifecycle:
       1) panels = (await E27Kernel.discover()).panels
       2) link_keys = await elk.link(panels[0], client_identity, credentials)
-      3) await elk.connect(link_keys, panel=panels[0], client_identity=client_identity)  # creates Session, HELLO, ACTIVE
+      3) await elk.connect(
+           link_keys, panel=panels[0], client_identity=client_identity
+         )  # creates Session, HELLO, ACTIVE
       4) elk.request(...) and/or consume elk.drain_events()
 
     Dispatcher is synchronous and routes inbound messages to registered handlers.
@@ -202,8 +214,10 @@ class E27Kernel:
 
     DEFAULT_FEATURES: Sequence[str] = (
         "elke27_lib.features.control",
+        "elke27_lib.features.log",
         "elke27_lib.features.system",
         "elke27_lib.features.area",
+        "elke27_lib.features.bus_ios",
         "elke27_lib.features.zone",
         "elke27_lib.features.output",
         "elke27_lib.features.tstat",
@@ -218,8 +232,8 @@ class E27Kernel:
         *,
         now_monotonic: Callable[[], float] = time.monotonic,
         event_queue_maxlen: int = 0,  # 0 means unbounded deque
-        features: Optional[Sequence[str]] = None,
-        logger: Optional[logging.Logger] = None,
+        features: Sequence[str] | None = None,
+        logger: logging.Logger | None = None,
         request_timeout_s: float = 5.0,
         request_max_retries: int = 2,
         request_max_backoff_s: float = 30.0,
@@ -232,14 +246,14 @@ class E27Kernel:
         self.now = now_monotonic
 
         # Kernel-owned components
-        self._session: Optional[session_mod.Session] = None
+        self._session: session_mod.Session | None = None
         self.state = PanelState()
         self.dispatcher = Dispatcher()
         self.requests = RequestRegistry()
-        self._events: Deque[Event] = deque(maxlen=(event_queue_maxlen or None))
+        self._events: deque[Event] = deque(maxlen=(event_queue_maxlen or None))
         self._seq: int = 1
         self._event_lock = threading.Lock()
-        self._subscribers: Dict[int, _Subscriber] = {}
+        self._subscribers: dict[int, _Subscriber] = {}
         self._next_subscriber_id: int = 1
         self._request_timeout_s = request_timeout_s
         self._request_max_retries = request_max_retries
@@ -248,9 +262,9 @@ class E27Kernel:
         self._filter_attribs_to_configured = filter_attribs_to_configured
         self._outbound_min_interval_s = outbound_min_interval_s
         self._outbound_max_burst = outbound_max_burst
-        self._last_link_keys: Optional[linking.E27LinkKeys] = None
-        self._last_client_identity: Optional[linking.E27Identity] = None
-        self._last_session_config: Optional[session_mod.SessionConfig] = None
+        self._last_link_keys: linking.E27LinkKeys | None = None
+        self._last_client_identity: linking.E27Identity | None = None
+        self._last_session_config: session_mod.SessionConfig | None = None
         self._feature_modules: Sequence[str] = features if features is not None else self.DEFAULT_FEATURES
         self._features_loaded: bool = False
         self._features_lock = threading.Lock()
@@ -265,17 +279,17 @@ class E27Kernel:
         self._pending_responses = PendingResponseManager(now=self.now)
         self._closing = False
         self._closed_explicitly = False
-        self._sent_events: Dict[int, asyncio.Event] = {}
+        self._sent_events: dict[int, asyncio.Event] = {}
         self._sent_event_lock = threading.Lock()
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._request_state = _RequestState.IDLE
-        self._active_seq: Optional[int] = None
-        self._active_timeout_handle: Optional[asyncio.TimerHandle] = None
+        self._active_seq: int | None = None
+        self._active_timeout_handle: asyncio.TimerHandle | None = None
         self._active_released = False
-        self._active_request: Optional[_QueuedRequest] = None
-        self._request_queue_high: Deque[_QueuedRequest] = deque()
-        self._request_queue_normal: Deque[_QueuedRequest] = deque()
-        self._keepalive_task: Optional[asyncio.Task[None]] = None
+        self._active_request: _QueuedRequest | None = None
+        self._request_queue_high: deque[_QueuedRequest] = deque()
+        self._request_queue_normal: deque[_QueuedRequest] = deque()
+        self._keepalive_task: asyncio.Task[None] | None = None
         self._keepalive_enabled = False
         self._keepalive_interval_s = 30.0
         self._keepalive_timeout_s = 10.0
@@ -319,6 +333,7 @@ class E27Kernel:
             scanner = discovery.AIOELKDiscovery()
             panels = await scanner.async_scan(timeout=timeout, address=address)
         except Exception as e:
+            LOG.warning("Discovery failed: %s", e, exc_info=True)
             raise KernelError(f"Discovery failed: {e}") from e
 
         if panels is None:
@@ -326,7 +341,7 @@ class E27Kernel:
         if not isinstance(panels, list):
             raise KernelError(f"Discovery returned unexpected type {type(panels).__name__}; expected list.")
 
-        out: List[discovery.E27System] = []
+        out: list[discovery.E27System] = []
         for i, p in enumerate(panels):
             if isinstance(p, discovery.E27System):
                 out.append(p)
@@ -337,7 +352,7 @@ class E27Kernel:
 
     async def link(
         self,
-        panel: discovery.E27System | Dict[str, Any],
+        panel: discovery.E27System | dict[str, Any],
         client_identity: linking.E27Identity,
         credentials: Any,
         *,
@@ -388,10 +403,8 @@ class E27Kernel:
                     timeout_s=float(timeout_s),
                 )
             finally:
-                try:
+                with contextlib.suppress(OSError):
                     sock.close()
-                except OSError:
-                    pass
 
         try:
             link_keys = await asyncio.to_thread(_do_link_sync)
@@ -404,9 +417,9 @@ class E27Kernel:
         self,
         link_keys: linking.E27LinkKeys,
         *,
-        panel: discovery.E27System | Dict[str, Any] | None = None,
+        panel: discovery.E27System | dict[str, Any] | None = None,
         client_identity: linking.E27Identity | None = None,
-        session_config: Optional[session_mod.SessionConfig] = None,
+        session_config: session_mod.SessionConfig | None = None,
     ) -> session_mod.SessionState:
         """
         E27Kernel.connect accepts E27LinkKeys and client_identity, creates/stores a session.Session, performs HELLO,
@@ -676,13 +689,16 @@ class E27Kernel:
                         seq,
                         self.state.panel.session_id,
                     )
-                if self._last_rx_at > sent_at:
-                    return True
-                return False
-            except Exception:
-                if self._last_rx_at > sent_at:
-                    return True
-                return False
+                return self._last_rx_at > sent_at
+            except Exception as exc:
+                self._log.warning(
+                    "E27 keepalive check failed: seq=%s session_id=%s error=%s",
+                    seq,
+                    self.state.panel.session_id,
+                    exc,
+                    exc_info=True,
+                )
+                return self._last_rx_at > sent_at
         finally:
             self._keepalive_inflight = False
 
@@ -694,7 +710,7 @@ class E27Kernel:
         """Backward-compatible wrapper for blocking feature loading."""
         self.load_features_blocking(modules)
 
-    def load_features_blocking(self, modules: Optional[Sequence[str]] = None) -> None:
+    def load_features_blocking(self, modules: Sequence[str] | None = None) -> None:
         """Import each module and invoke its register(elk) function (blocking)."""
         with self._features_lock:
             if self._features_loaded:
@@ -722,8 +738,8 @@ class E27Kernel:
         route: RouteKey,
         *,
         merge_fn: Callable[[list, int], Mapping[str, Any]],
-        request_block: Optional[Callable[[int, PagedTransferKey], None]] = None,
-        timeout_s: Optional[float] = None,
+        request_block: Callable[[int, PagedTransferKey], None] | None = None,
+        timeout_s: float | None = None,
     ) -> None:
         self.dispatcher.register_paged(
             route,
@@ -796,11 +812,41 @@ class E27Kernel:
             except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
                 continue
 
+        zone_defs_route = ("zone", "get_defs")
+        if self.requests.get(zone_defs_route) is not None:
+            with contextlib.suppress(E27Error, KeyError, RuntimeError, TypeError, ValueError):
+                self.request(zone_defs_route, block_id=1)
+
+    def request_csm_refresh(
+        self,
+        *,
+        auth_pin: int | None = None,
+        domains: Sequence[str] | None = None,
+    ) -> None:
+        """
+        Request minimal CSM refresh (authenticate + table_info only).
+        """
+        if self._session is None:
+            raise KernelError("No active Session. Call connect() successfully first.")
+
+        if auth_pin is not None and self.requests.get(("control", "authenticate")) is not None:
+            with contextlib.suppress(E27Error, KeyError, RuntimeError, TypeError, ValueError):
+                self.request(("control", "authenticate"), pin=auth_pin)
+
+        for domain in (domains or ("area", "zone", "output", "tstat")):
+            route = (domain, "get_table_info")
+            if self.requests.get(route) is None:
+                continue
+            try:
+                self.request(route)
+            except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
+                continue
+
     # -------------------------
     # Event subscriptions
     # -------------------------
 
-    def subscribe(self, callback: Callable[[Event], None], *, kinds: Optional[Iterable[str]] = None) -> int:
+    def subscribe(self, callback: Callable[[Event], None], *, kinds: Iterable[str] | None = None) -> int:
         kind_set = set(kinds) if kinds is not None else None
         with self._event_lock:
             token = self._next_subscriber_id
@@ -881,11 +927,10 @@ class E27Kernel:
             return
         if self._closed_explicitly and isinstance(err, session_mod.SessionIOError):
             return
-        if self._log.isEnabledFor(logging.DEBUG):
-            self._log.debug(
-                "E27Kernel._on_session_disconnected: session reported disconnect err=%s",
-                err,
-            )
+        self._log.warning(
+            "E27Kernel._on_session_disconnected: session reported disconnect err=%s",
+            err,
+        )
         self.state.panel.connected = False
         self.dispatcher.abort_paged_transfers()
         self._abort_requests(ConnectionLost("Session disconnected."))
@@ -936,7 +981,8 @@ class E27Kernel:
                 loop.call_soon_threadsafe(event.set)
             else:
                 event.set()
-        except Exception:
+        except Exception as exc:
+            self._log.warning("Event set failed: %s", exc, exc_info=True)
             event.set()
 
     def _set_loop_if_needed(self) -> None:
@@ -981,10 +1027,11 @@ class E27Kernel:
         if session_state is not session_mod.SessionState.ACTIVE:
             return
 
-        if self._request_queue_high:
-            item = self._request_queue_high.popleft()
-        else:
-            item = self._request_queue_normal.popleft()
+        item = (
+            self._request_queue_high.popleft()
+            if self._request_queue_high
+            else self._request_queue_normal.popleft()
+        )
         self._request_state = _RequestState.IN_FLIGHT
         self._active_seq = item.seq
         self._active_released = False
@@ -1160,7 +1207,7 @@ class E27Kernel:
         *,
         pending: bool,
         opaque: Any,
-        expected_route: Optional[RouteKey],
+        expected_route: RouteKey | None,
     ) -> int:
         """
         Mechanical request sender (no policy enforcement in this phase):
@@ -1189,9 +1236,9 @@ class E27Kernel:
         *,
         pending: bool,
         opaque: Any,
-        expected_route: Optional[RouteKey],
+        expected_route: RouteKey | None,
         priority: OutboundPriority = OutboundPriority.NORMAL,
-        timeout_s: Optional[float] = None,
+        timeout_s: float | None = None,
         expects_reply: bool = True,
     ) -> int:
         if self._session is None:
@@ -1230,8 +1277,8 @@ class E27Kernel:
         self._enqueue_request(queued)
         return seq
 
-    def _build_request_message(self, seq: int, domain: str, name: str, payload: Any) -> Dict[str, Any]:
-        msg: Dict[str, Any] = {"seq": seq}
+    def _build_request_message(self, seq: int, domain: str, name: str, payload: Any) -> dict[str, Any]:
+        msg: dict[str, Any] = {"seq": seq}
         if self.state.panel.session_id is not None:
             msg["session_id"] = self.state.panel.session_id
 
@@ -1302,8 +1349,8 @@ class E27Kernel:
         self,
         *,
         connected: bool,
-        reason: Optional[str] = None,
-        error_type: Optional[str] = None,
+        reason: str | None = None,
+        error_type: str | None = None,
     ) -> None:
         ctx = DispatchContext(
             kind=MessageKind.UNKNOWN,

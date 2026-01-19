@@ -1,0 +1,6 @@
+{"run_id": "da170faa90d2445a9d604405d7965b5b", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_on_ack", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T23:32:31Z", "meta": {"pid": 11494}}
+{"run_id": "da170faa90d2445a9d604405d7965b5b", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_on_ack", "record_type": "test_end", "t_ms": 1, "ts_utc": "2026-01-01T23:32:31Z", "outcome": "unknown", "error": null}
+{"run_id": "da170faa90d2445a9d604405d7965b5b", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_off_ack", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T23:32:31Z", "meta": {"pid": 11494}}
+{"run_id": "da170faa90d2445a9d604405d7965b5b", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_off_ack", "record_type": "test_end", "t_ms": 0, "ts_utc": "2026-01-01T23:32:31Z", "outcome": "unknown", "error": null}
+{"run_id": "da170faa90d2445a9d604405d7965b5b", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_state_roundtrip", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T23:32:31Z", "meta": {"pid": 11494}}
+{"run_id": "da170faa90d2445a9d604405d7965b5b", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_state_roundtrip", "record_type": "test_end", "t_ms": 0, "ts_utc": "2026-01-01T23:32:31Z", "outcome": "unknown", "error": null}

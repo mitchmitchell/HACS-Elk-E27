@@ -12,10 +12,10 @@ Rules:
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Optional, Tuple
 
+from elke27_lib.types import CsmSnapshot
 
-RouteKey = Tuple[str, str]
+RouteKey = tuple[str, str]
 
 
 # -------------------------
@@ -27,10 +27,10 @@ class Event:
     # Common header fields (kernel.emit overwrites these unconditionally)
     kind: str
     at: float
-    seq: Optional[int]
+    seq: int | None
     classification: str
     route: RouteKey
-    session_id: Optional[int]
+    session_id: int | None
 
     @property
     def domain(self) -> str:
@@ -40,9 +40,9 @@ class Event:
 # Placeholder header values for handlers (optional convenience constants)
 UNSET_ROUTE: RouteKey = ("__unset__", "__unset__")
 UNSET_AT: float = 0.0
-UNSET_SEQ: Optional[int] = None
+UNSET_SEQ: int | None = None
 UNSET_CLASSIFICATION: str = "UNKNOWN"
-UNSET_SESSION_ID: Optional[int] = None
+UNSET_SESSION_ID: int | None = None
 
 
 # -------------------------
@@ -54,8 +54,8 @@ class ConnectionStateChanged(Event):
     KIND = "connection_state_changed"
 
     connected: bool
-    reason: Optional[str] = None
-    error_type: Optional[str] = None
+    reason: str | None = None
+    error_type: str | None = None
 
 
 # -------------------------
@@ -67,7 +67,7 @@ class AreaStatusUpdated(Event):
     KIND = "area_status_updated"
 
     area_id: int
-    changed_fields: Tuple[str, ...]  # sorted tuple for deterministic tests/logs
+    changed_fields: tuple[str, ...]  # sorted tuple for deterministic tests/logs
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,14 +75,14 @@ class AreaAttribsUpdated(Event):
     KIND = "area_attribs_updated"
 
     area_id: int
-    changed_fields: Tuple[str, ...]
+    changed_fields: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class AreaConfiguredUpdated(Event):
     KIND = "area_configured_updated"
 
-    configured_ids: Tuple[int, ...]
+    configured_ids: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +98,7 @@ class AreaConfiguredInventoryReady(Event):
 class ZoneConfiguredUpdated(Event):
     KIND = "zone_configured_updated"
 
-    configured_ids: Tuple[int, ...]
+    configured_ids: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +111,7 @@ class ZoneStatusUpdated(Event):
     KIND = "zone_status_updated"
 
     zone_id: int
-    changed_fields: Tuple[str, ...]
+    changed_fields: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +119,7 @@ class ZonesStatusBulkUpdated(Event):
     KIND = "zones_status_bulk_updated"
 
     updated_count: int
-    updated_ids: Tuple[int, ...]
+    updated_ids: tuple[int, ...]
 
 
 # -------------------------
@@ -131,7 +131,7 @@ class ZoneDefsUpdated(Event):
     KIND = "zone_defs_updated"
 
     count: int
-    updated_ids: Tuple[int, ...]
+    updated_ids: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +150,7 @@ class ZoneAttribsUpdated(Event):
     KIND = "zone_attribs_updated"
 
     zone_id: int
-    changed_fields: Tuple[str, ...]
+    changed_fields: tuple[str, ...]
 
 
 # -------------------------
@@ -161,8 +161,8 @@ class ZoneAttribsUpdated(Event):
 class AreaTroublesUpdated(Event):
     KIND = "area_troubles_updated"
 
-    area_id: Optional[int]
-    troubles: Tuple[str, ...]
+    area_id: int | None
+    troubles: tuple[str, ...]
 
 
 # -------------------------
@@ -173,7 +173,7 @@ class AreaTroublesUpdated(Event):
 class OutputConfiguredUpdated(Event):
     KIND = "output_configured_updated"
 
-    configured_ids: Tuple[int, ...]
+    configured_ids: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,8 +196,8 @@ class OutputStatusUpdated(Event):
     KIND = "output_status_updated"
 
     output_id: int
-    status: Optional[str]
-    on: Optional[bool]
+    status: str | None
+    on: bool | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,7 +205,7 @@ class OutputsStatusBulkUpdated(Event):
     KIND = "outputs_status_bulk_updated"
 
     updated_count: int
-    updated_ids: Tuple[int, ...]
+    updated_ids: tuple[int, ...]
 
 
 # -------------------------
@@ -217,9 +217,9 @@ class TstatStatusUpdated(Event):
     KIND = "tstat_status_updated"
 
     tstat_id: int
-    mode: Optional[str]
-    fan_mode: Optional[str]
-    temperature: Optional[int]
+    mode: str | None
+    fan_mode: str | None
+    temperature: int | None
 
 
 # -------------------------
@@ -231,14 +231,14 @@ class NetworkSsidResultsUpdated(Event):
     KIND = "network_ssid_results_updated"
 
     count: int
-    ssids: Tuple[str, ...]
+    ssids: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class NetworkRssiUpdated(Event):
     KIND = "network_rssi_updated"
 
-    rssi: Optional[int]
+    rssi: int | None
 
 
 # -------------------------
@@ -249,32 +249,65 @@ class NetworkRssiUpdated(Event):
 class AreaTableInfoUpdated(Event):
     KIND = "area_table_info_updated"
 
-    table_elements: Optional[int]
-    increment_size: Optional[int]
+    table_elements: int | None
+    increment_size: int | None
+    table_csm: int | None
 
 
 @dataclass(frozen=True, slots=True)
 class ZoneTableInfoUpdated(Event):
     KIND = "zone_table_info_updated"
 
-    table_elements: Optional[int]
-    increment_size: Optional[int]
+    table_elements: int | None
+    increment_size: int | None
+    table_csm: int | None
 
 
 @dataclass(frozen=True, slots=True)
 class OutputTableInfoUpdated(Event):
     KIND = "output_table_info_updated"
 
-    table_elements: Optional[int]
-    increment_size: Optional[int]
+    table_elements: int | None
+    increment_size: int | None
+    table_csm: int | None
 
 
 @dataclass(frozen=True, slots=True)
 class TstatTableInfoUpdated(Event):
     KIND = "tstat_table_info_updated"
 
-    table_elements: Optional[int]
-    increment_size: Optional[int]
+    table_elements: int | None
+    increment_size: int | None
+    table_csm: int | None
+
+
+# -------------------------
+# CSM events
+# -------------------------
+
+@dataclass(frozen=True, slots=True)
+class CsmSnapshotUpdated(Event):
+    KIND = "csm_snapshot_updated"
+
+    snapshot: CsmSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class DomainCsmChanged(Event):
+    KIND = "domain_csm_changed"
+
+    domain: str = ""
+    old: int | None = None
+    new: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class TableCsmChanged(Event):
+    KIND = "table_csm_changed"
+
+    domain: str = ""
+    old: int | None = None
+    new: int = 0
 
 
 # -------------------------
@@ -285,8 +318,8 @@ class TstatTableInfoUpdated(Event):
 class TroubleStatusUpdated(Event):
     KIND = "trouble_status_updated"
 
-    active: Optional[bool]
-    changed_fields: Tuple[str, ...]
+    active: bool | None
+    changed_fields: tuple[str, ...]
 
 
 # -------------------------
@@ -297,7 +330,7 @@ class TroubleStatusUpdated(Event):
 class PanelVersionInfoUpdated(Event):
     KIND = "panel_version_info_updated"
 
-    changed_fields: Tuple[str, ...]
+    changed_fields: tuple[str, ...]
 
 
 # -------------------------
@@ -309,9 +342,9 @@ class ApiError(Event):
     KIND = "api_error"
 
     error_code: int
-    scope: Optional[str] = None
-    entity_id: Optional[int] = None
-    message: Optional[str] = None
+    scope: str | None = None
+    entity_id: int | None = None
+    message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,9 +352,9 @@ class AuthorizationRequiredEvent(Event):
     KIND = "authorization_required"
 
     error_code: int
-    scope: Optional[str] = None
-    entity_id: Optional[int] = None
-    message: Optional[str] = None
+    scope: str | None = None
+    entity_id: int | None = None
+    message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,7 +362,7 @@ class AuthenticateResult(Event):
     KIND = "authenticate_result"
 
     success: bool
-    error_code: Optional[int] = None
+    error_code: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,7 +376,7 @@ class DispatchRoutingError(Event):
 
     code: str
     message: str
-    keys: Tuple[str, ...]
+    keys: tuple[str, ...]
     severity: str  # "debug"|"info"|"warning"|"error"
 
 
@@ -356,7 +389,7 @@ class UnknownMessage(Event):
     KIND = "unknown_message"
 
     unhandled_route: RouteKey
-    keys: Tuple[str, ...]
+    keys: tuple[str, ...]
 
 
 # -------------------------
@@ -367,10 +400,10 @@ def stamp_event(
     evt: Event,
     *,
     at: float,
-    seq: Optional[int],
+    seq: int | None,
     classification: str,
     route: RouteKey,
-    session_id: Optional[int],
+    session_id: int | None,
 ) -> Event:
     """
     Replace the common header fields on an event.

@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from elke27_lib.dispatcher import DispatchContext
 from elke27_lib.permissions import ALL_PERMISSION_KEYS
 
-from . import area, control, keypad, network_param, output, rule, system, tstat, user, zone
+from . import (
+    area,
+    bus_ios,
+    control,
+    keypad,
+    log,
+    network_param,
+    output,
+    rule,
+    system,
+    tstat,
+    user,
+    zone,
+)
 
 HandlerFn = Callable[[Mapping[str, Any], DispatchContext], bool]
 
@@ -33,7 +47,7 @@ def _stub_handler(key: str) -> HandlerFn:
 
 
 _EXISTING: dict[str, HandlerFn] = {}
-for _module in (area, control, keypad, network_param, output, rule, system, tstat, user, zone):
+for _module in (area, bus_ios, control, keypad, log, network_param, output, rule, system, tstat, user, zone):
     _EXISTING.update(_collect_handlers(_module))
 
 HANDLERS: dict[str, HandlerFn] = {}

@@ -1,0 +1,2 @@
+{"run_id": "f409007376ab41f2b319cf13e120f78c", "test_id": "test/test_live_e27_area_names.py::test_live_area_names_from_attribs", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-02T01:12:56Z", "meta": {"pid": 18714}}
+{"run_id": "f409007376ab41f2b319cf13e120f78c", "test_id": "test/test_live_e27_area_names.py::test_live_area_names_from_attribs", "record_type": "test_end", "t_ms": 313, "ts_utc": "2026-01-02T01:12:56Z", "outcome": "pass", "error": null}

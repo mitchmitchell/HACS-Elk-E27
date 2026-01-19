@@ -6,7 +6,7 @@ import os
 import pathlib
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 def _safe_json_default(obj: Any) -> Any:
@@ -36,7 +36,7 @@ def _load_redactor():
 _REDACT = _load_redactor()
 
 
-def _minimal_redact(record: Dict[str, Any]) -> Dict[str, Any]:
+def _minimal_redact(record: dict[str, Any]) -> dict[str, Any]:
     # Last-resort redaction: remove common secret-ish keys.
     if not isinstance(record, dict):
         return record
@@ -82,9 +82,9 @@ class Reporter:
     enable: bool = True
 
     _t0: float = field(default_factory=time.monotonic, init=False)
-    _records: List[Dict[str, Any]] = field(default_factory=list, init=False)
-    _jsonl_path: Optional[pathlib.Path] = field(default=None, init=False)
-    _yaml_path: Optional[pathlib.Path] = field(default=None, init=False)
+    _records: list[dict[str, Any]] = field(default_factory=list, init=False)
+    _jsonl_path: pathlib.Path | None = field(default=None, init=False)
+    _yaml_path: pathlib.Path | None = field(default=None, init=False)
 
     def _t_ms(self) -> int:
         return int((time.monotonic() - self._t0) * 1000)
@@ -97,7 +97,7 @@ class Reporter:
         self._jsonl_path = self.artifacts_dir / f"{base}.jsonl"
         self._yaml_path = self.artifacts_dir / f"{base}.summary.yaml"
 
-    def _apply_redaction(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def _apply_redaction(self, record: dict[str, Any]) -> dict[str, Any]:
         if _REDACT is not None:
             try:
                 return _REDACT(record)
@@ -106,7 +106,7 @@ class Reporter:
                 return _minimal_redact(record)
         return _minimal_redact(record)
 
-    def emit(self, record_type: str, **fields: Any) -> Dict[str, Any]:
+    def emit(self, record_type: str, **fields: Any) -> dict[str, Any]:
         """
         Emit a typed record. Always adds:
           - run_id
@@ -121,7 +121,7 @@ class Reporter:
 
         self._ensure_paths()
 
-        record: Dict[str, Any] = {
+        record: dict[str, Any] = {
             "run_id": self.run_id,
             "test_id": self.test_id,
             "record_type": record_type,
@@ -149,8 +149,8 @@ class Reporter:
             },
         )
 
-    def test_end(self, outcome: str, when: Optional[str], longrepr: Any) -> None:
-        err: Optional[Dict[str, Any]] = None
+    def test_end(self, outcome: str, when: str | None, longrepr: Any) -> None:
+        err: dict[str, Any] | None = None
         if longrepr is not None:
             # pytest longrepr can be various types; store as string safely.
             err = {"when": when, "longrepr": str(longrepr)}

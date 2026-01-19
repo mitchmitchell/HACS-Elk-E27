@@ -4,7 +4,11 @@ import pytest
 
 from elke27_lib.client import Elke27Client
 from elke27_lib.const import E27ErrorCode
-from elke27_lib.errors import Elke27PinRequiredError, Elke27PermissionError, Elke27ProtocolError
+from elke27_lib.errors import (
+    Elke27PermissionError,
+    Elke27PinRequiredError,
+    Elke27ProtocolError,
+)
 from elke27_lib.generators.registry import COMMANDS, CommandSpec
 from elke27_lib.permissions import PermissionLevel
 

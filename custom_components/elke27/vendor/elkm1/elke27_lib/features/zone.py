@@ -10,20 +10,20 @@ Responsibilities:
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from elke27_lib.handlers.zone import (
-    make_zone_get_all_zones_status_handler,
-    make_zone_get_status_handler,
-    make_zone_get_attribs_handler,
     make_zone_configured_merge,
+    make_zone_get_all_zones_status_handler,
+    make_zone_get_attribs_handler,
     make_zone_get_configured_handler,
     make_zone_get_def_flags_handler,
     make_zone_get_defs_handler,
+    make_zone_get_status_handler,
     make_zone_get_table_info_handler,
     make_zone_set_status_handler,
 )
-
 
 ROUTE_ZONE_GET_CONFIGURED = ("zone", "get_configured")
 ROUTE_ZONE_GET_ATTRIBS = ("zone", "get_attribs")

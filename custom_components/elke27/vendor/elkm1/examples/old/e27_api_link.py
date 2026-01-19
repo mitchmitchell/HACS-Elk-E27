@@ -46,22 +46,19 @@ import argparse
 import logging
 import os
 import socket
-import sys
 from dataclasses import asdict
-from typing import Optional
 
 from elke27_lib.linking import E27Identity, perform_api_link, wait_for_discovery_nonce
-
 
 LOG = logging.getLogger(__name__)
 
 
-def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+def _env(name: str, default: str | None = None) -> str | None:
     v = os.environ.get(name)
     return v if v not in (None, "") else default
 
 
-def _require(name: str, value: Optional[str]) -> str:
+def _require(name: str, value: str | None) -> str:
     if value is None or value == "":
         raise SystemExit(f"Missing required value for {name}")
     return value
@@ -118,8 +115,8 @@ def main() -> int:
         )
 
     # Handle return type variations (some branches returned tuple historically)
-    linkkey_hex: Optional[str] = None
-    linkhmac_hex: Optional[str] = None
+    linkkey_hex: str | None = None
+    linkhmac_hex: str | None = None
 
     if isinstance(result, tuple):
         # Historically: (tempkey_hex, linkkey_hex, linkhmac_hex) or similar
@@ -151,4 +148,4 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except KeyboardInterrupt:
-        raise SystemExit(0)
+        raise SystemExit(0) from None

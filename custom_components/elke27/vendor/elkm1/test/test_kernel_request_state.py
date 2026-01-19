@@ -121,3 +121,18 @@ class KernelRequestStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.kernel._session.sent), 2)
         self.kernel._on_message({"seq": seq2, "system": {"ping": {"ok": True}}})
         await asyncio.wait_for(future2, timeout=0.1)
+
+
+def test_bootstrap_requests_zone_defs() -> None:
+    kernel = E27Kernel()
+    kernel._session = object()
+    recorded: list[tuple[tuple[str, str], dict]] = []
+
+    def _fake_request(route, **kwargs):
+        recorded.append((route, dict(kwargs)))
+
+    kernel.request = _fake_request  # type: ignore[assignment]
+    kernel.requests.get = lambda route: object()  # type: ignore[assignment]
+
+    kernel._bootstrap_requests()
+    assert ("zone", "get_defs") in [route for route, _ in recorded]

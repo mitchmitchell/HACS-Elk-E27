@@ -1,0 +1,2 @@
+{"run_id": "689a53a61bd4457d95e579d51cb8a314", "test_id": "test/test_live_e27_keepalive.py::test_live_system_r_u_alive", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-19T05:42:21Z", "meta": {"pid": 11390}}
+{"run_id": "689a53a61bd4457d95e579d51cb8a314", "test_id": "test/test_live_e27_keepalive.py::test_live_system_r_u_alive", "record_type": "test_end", "t_ms": 1190, "ts_utc": "2026-01-19T05:42:22Z", "outcome": "pass", "error": null}

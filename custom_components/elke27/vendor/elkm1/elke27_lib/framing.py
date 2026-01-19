@@ -16,13 +16,14 @@ Escaping:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import List, Optional
 
 from .util import calculate_crc16_checksum
 
 STARTCHAR: int = 0x7E
+LOG = logging.getLogger(__name__)
 
 
 class FrameStates(IntEnum):
@@ -54,8 +55,8 @@ class DeframeResult:
     """
 
     ok: bool
-    frame_no_crc: Optional[bytes] = None
-    error: Optional[object] = None
+    frame_no_crc: bytes | None = None
+    error: object | None = None
 
 
 @dataclass
@@ -69,6 +70,10 @@ class DeframeState:
     # Some tests splice streams such that the next byte repeats the protocol byte; we ignore
     # one duplicate protocol byte in that specific situation.
     just_resynced: bool = False
+    # Throttle "waiting for startchar" errors to once per unexpected byte sequence.
+    warned_wait_start: bool = False
+    # Throttle resync errors to once per resync sequence.
+    warned_resync: bool = False
 
     rcv_state: FrameStates = FrameStates.WAIT_START
     msglength: int = 0
@@ -124,9 +129,11 @@ def _reset_to_wait_start(state: DeframeState) -> None:
     state.input_buffer = bytearray()
     state.escaping = False
     state.just_resynced = False
+    state.warned_wait_start = False
+    state.warned_resync = False
 
 
-def deframe_feed(state: DeframeState, chunk: bytes) -> List[DeframeResult]:
+def deframe_feed(state: DeframeState, chunk: bytes) -> list[DeframeResult]:
     """
     Feed a TCP chunk into the deframer and return zero or more DeframeResult.
 
@@ -134,7 +141,17 @@ def deframe_feed(state: DeframeState, chunk: bytes) -> List[DeframeResult]:
     - Continues scanning after CRC errors.
     - Implements Node-RED resync rule: STARTCHAR + non-zero => new frame start.
     """
-    results: List[DeframeResult] = []
+    results: list[DeframeResult] = []
+    if state.rcv_state is FrameStates.WAIT_START and chunk:
+        start_at = chunk.find(bytes([STARTCHAR]))
+        if start_at != 0 and not state.warned_wait_start:
+            if LOG.isEnabledFor(logging.ERROR):
+                LOG.error(
+                    "deframe discard: waiting for startchar chunk_len=%s discarded=%s",
+                    len(chunk),
+                    len(chunk) if start_at < 0 else start_at,
+                )
+            state.warned_wait_start = True
 
     for raw in chunk:
         b = raw & 0xFF
@@ -142,10 +159,21 @@ def deframe_feed(state: DeframeState, chunk: bytes) -> List[DeframeResult]:
         # STARTCHAR + escaping mode
         if b == STARTCHAR:
             state.escaping = True
+            state.warned_wait_start = False
             continue
 
         if state.escaping and b != 0:
             # STARTCHAR followed by non-zero => new frame start; b is protocol.
+            if (
+                not state.warned_resync
+                and (state.rcv_state is not FrameStates.WAIT_START or state.input_buffer)
+                and LOG.isEnabledFor(logging.ERROR)
+            ):
+                LOG.error(
+                    "deframe resync: startchar mid-frame; discarded_buffer=%s",
+                    len(state.input_buffer),
+                )
+                state.warned_resync = True
             state.input_buffer = bytearray([b])
             state.msglength = 0
             state.rcv_state = FrameStates.WAIT_LENGTH
@@ -160,6 +188,15 @@ def deframe_feed(state: DeframeState, chunk: bytes) -> List[DeframeResult]:
 
         # Until we see STARTCHAR+protocol (resync rule above), ignore bytes.
         if state.rcv_state == FrameStates.WAIT_START:
+            if not state.warned_wait_start and LOG.isEnabledFor(logging.ERROR):
+                LOG.error(
+                    "deframe discard: waiting for startchar byte=0x%02x",
+                    b,
+                )
+                state.warned_wait_start = True
+            results.append(
+                DeframeResult(ok=False, frame_no_crc=None, error=RxErrorType.FRAMING_ERROR)
+            )
             continue
 
         # Collect 2 length bytes after protocol
@@ -212,4 +249,17 @@ def deframe_feed(state: DeframeState, chunk: bytes) -> List[DeframeResult]:
         results.append(DeframeResult(ok=False, frame_no_crc=None, error="invalid_state"))
         _reset_to_wait_start(state)
 
+    if (
+        LOG.isEnabledFor(logging.DEBUG)
+        and chunk
+        and not results
+        and (state.rcv_state is not FrameStates.WAIT_START or state.input_buffer)
+    ):
+        LOG.debug(
+            "deframe pending: state=%s buffer_len=%s escaping=%s chunk_len=%s",
+            state.rcv_state.name,
+            len(state.input_buffer),
+            state.escaping,
+            len(chunk),
+        )
     return results

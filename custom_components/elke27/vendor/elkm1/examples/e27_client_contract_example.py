@@ -23,7 +23,6 @@ import os
 import sys
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from elke27_lib.client import E27Identity, Elke27Client
 from elke27_lib.events import (
@@ -44,7 +43,7 @@ class Credentials:
     passphrase: str
 
 
-def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+def _env(name: str, default: str | None = None) -> str | None:
     return os.environ.get(name, default)
 
 def _print_summary() -> None:
@@ -52,7 +51,7 @@ def _print_summary() -> None:
     print("Client Contract Summary", flush=True)
     print("-----------------------", flush=True)
     try:
-        with open(summary_path, "r", encoding="utf-8") as fh:
+        with open(summary_path, encoding="utf-8") as fh:
             print(fh.read().strip(), flush=True)
     except OSError as exc:
         print(f"[summary unavailable: {exc}]", flush=True)

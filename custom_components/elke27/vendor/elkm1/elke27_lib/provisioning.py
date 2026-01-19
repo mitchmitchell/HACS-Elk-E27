@@ -14,8 +14,8 @@ This module:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Optional, Tuple, Callable
 
 
 @dataclass
@@ -26,10 +26,10 @@ class Credentials:
 
 class ProvisioningManager:
     def __init__(self) -> None:
-        self._creds: Optional[Credentials] = None
+        self._creds: Credentials | None = None
 
         # Caller (Home Assistant adapter or CLI) can hook this:
-        self.on_credentials_required: Optional[Callable[[str], None]] = None
+        self.on_credentials_required: Callable[[str], None] | None = None
 
     def request_credentials(self, reason: str) -> None:
         """
@@ -45,7 +45,7 @@ class ProvisioningManager:
     def clear_credentials(self) -> None:
         self._creds = None
 
-    def get_credentials(self) -> Optional[Tuple[str, str]]:
+    def get_credentials(self) -> tuple[str, str] | None:
         if self._creds is None:
             return None
         return self._creds.access_code, self._creds.pass_phrase

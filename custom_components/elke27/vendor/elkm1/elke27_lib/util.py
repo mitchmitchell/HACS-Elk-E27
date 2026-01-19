@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Union
 from urllib.parse import urlparse
 
 
@@ -58,7 +57,7 @@ def calculate_crc16_checksum(w_sum: int, data_bytes: bytes | bytearray, start: i
     return w_sum & 0xFFFF
 
 #def swap_endianness(src: Union[bytes, bytearray, list[int]]) -> bytearray:
-def swap_endianness(src: Union[bytes, bytearray, list[int]]) -> bytes:
+def swap_endianness(src: bytes | bytearray | list[int]) -> bytes:
     """
     Swaps the endianness of 32-bit words in a byte array.
     Processes the input in 4-byte chunks, reversing the order of bytes within each chunk.

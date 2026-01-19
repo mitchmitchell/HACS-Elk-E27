@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 class E27ErrorCode(str, Enum):
@@ -45,12 +44,12 @@ class E27ErrorContext:
     Keep this safe for logs: do NOT include access codes, passphrases, PINs,
     raw decrypted payloads, or key material.
     """
-    host: Optional[str] = None
-    port: Optional[int] = None
-    phase: Optional[str] = None  # e.g. "discovery", "api_link", "hello", "authenticate", "call"
-    detail: Optional[str] = None  # short non-secret info
-    seq: Optional[int] = None
-    session_id: Optional[int] = None
+    host: str | None = None
+    port: int | None = None
+    phase: str | None = None  # e.g. "discovery", "api_link", "hello", "authenticate", "call"
+    detail: str | None = None  # short non-secret info
+    seq: int | None = None
+    session_id: int | None = None
 
 
 class E27Error(RuntimeError):
@@ -67,12 +66,12 @@ class E27Error(RuntimeError):
         message: str,
         *,
         code: E27ErrorCode = E27ErrorCode.INTERNAL_ERROR,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(message)
         self.code: E27ErrorCode = code
-        self.context: Optional[E27ErrorContext] = context
+        self.context: E27ErrorContext | None = context
         self.__cause__ = cause
 
 
@@ -88,8 +87,8 @@ class E27ProvisioningRequired(E27Error):
         self,
         message: str = "Provisioning is required: missing E27 link credentials (linkkey/linkhmac).",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -114,8 +113,8 @@ class E27ProvisioningTimeout(E27Error):
             "Verify access code/passphrase and connectivity, then retry."
         ),
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -141,8 +140,8 @@ class E27LinkInvalid(E27Error):
             "Re-provisioning may be required."
         ),
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -164,8 +163,8 @@ class E27AuthFailed(E27Error):
         self,
         message: str = "Authentication failed (PIN rejected or insufficient privileges).",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -190,8 +189,8 @@ class E27ProtocolError(E27Error):
         self,
         message: str = "E27 protocol error.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -220,8 +219,8 @@ class E27TransportError(E27Error):
         self,
         message: str = "E27 transport error (socket/connectivity failure).",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -248,8 +247,8 @@ class E27Timeout(E27Error):
         self,
         message: str = "E27 operation timed out waiting for a response.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -271,8 +270,8 @@ class E27NotReady(E27Error):
         self,
         message: str = "E27 session is not ready for this operation.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -291,8 +290,8 @@ class NotAuthenticatedError(E27Error):
         self,
         message: str = "Authentication required for this operation.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -311,8 +310,8 @@ class E27MissingContext(E27Error):
         self,
         message: str = "Missing required connection context.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -335,8 +334,8 @@ class AuthorizationRequired(E27Error):
         self,
         message: str = "Authorization is required for this operation.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -355,8 +354,8 @@ class PermissionDeniedError(E27Error):
         self,
         message: str = "Permission denied for this operation.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -375,8 +374,8 @@ class PanelNotDisarmedError(E27Error):
         self,
         message: str = "Panel must be fully disarmed for this operation.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -395,8 +394,8 @@ class InvalidCredentials(E27Error):
         self,
         message: str = "Credentials were rejected or are invalid.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -415,8 +414,8 @@ class InvalidLinkKeys(E27Error):
         self,
         message: str = "Stored link keys are invalid or rejected.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -435,8 +434,8 @@ class InvalidPin(E27Error):
         self,
         message: str = "PIN was rejected or is invalid.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -455,8 +454,8 @@ class MissingPinError(E27Error):
         self,
         message: str = "PIN required for this command.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -475,8 +474,8 @@ class InvalidPinError(E27Error):
         self,
         message: str = "PIN must be a positive integer.",
         *,
-        context: Optional[E27ErrorContext] = None,
-        cause: Optional[BaseException] = None,
+        context: E27ErrorContext | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -532,7 +531,7 @@ class Elke27Error(Exception):
         *,
         code: str,
         is_transient: bool,
-        user_message: Optional[str] = None,
+        user_message: str | None = None,
     ) -> None:
         safe_message = _scrub_text(user_message or message)
         super().__init__(safe_message)
@@ -551,52 +550,62 @@ class Elke27Error(Exception):
 
 
 class Elke27TransientError(Elke27Error):
-    def __init__(self, message: str, *, code: str = "transient", user_message: Optional[str] = None) -> None:
+    def __init__(self, message: str, *, code: str = "transient", user_message: str | None = None) -> None:
         super().__init__(message, code=code, is_transient=True, user_message=user_message)
 
 
 class Elke27ConnectionError(Elke27TransientError):
-    def __init__(self, message: str = "Connection error.", *, user_message: Optional[str] = None) -> None:
+    def __init__(self, message: str = "Connection error.", *, user_message: str | None = None) -> None:
         super().__init__(message, code="connection_error", user_message=user_message)
 
 
 class Elke27TimeoutError(Elke27TransientError):
-    def __init__(self, message: str = "Operation timed out.", *, user_message: Optional[str] = None) -> None:
+    def __init__(self, message: str = "Operation timed out.", *, user_message: str | None = None) -> None:
         super().__init__(message, code="timeout", user_message=user_message)
 
 
 class Elke27DisconnectedError(Elke27TransientError):
-    def __init__(self, message: str = "Disconnected.", *, user_message: Optional[str] = None) -> None:
+    def __init__(self, message: str = "Disconnected.", *, user_message: str | None = None) -> None:
         super().__init__(message, code="disconnected", user_message=user_message)
 
 
 class Elke27AuthError(Elke27Error):
-    def __init__(self, message: str = "Authentication failed.", *, user_message: Optional[str] = None) -> None:
+    def __init__(self, message: str = "Authentication failed.", *, user_message: str | None = None) -> None:
         super().__init__(message, code="auth", is_transient=False, user_message=user_message)
 
 
 class Elke27LinkRequiredError(Elke27Error):
-    def __init__(self, message: str = "Linking required.", *, user_message: Optional[str] = None) -> None:
+    def __init__(self, message: str = "Linking required.", *, user_message: str | None = None) -> None:
         super().__init__(message, code="link_required", is_transient=False, user_message=user_message)
 
 
 class Elke27PermissionError(Elke27Error):
-    def __init__(self, message: str = "Permission denied.", *, user_message: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        message: str = "Permission denied.",
+        *,
+        user_message: str | None = None,
+    ) -> None:
         super().__init__(message, code="permission", is_transient=False, user_message=user_message)
 
 
 class Elke27PinRequiredError(Elke27Error):
-    def __init__(self, message: str = "A PIN is required to perform this action.", *, user_message: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        message: str = "A PIN is required to perform this action.",
+        *,
+        user_message: str | None = None,
+    ) -> None:
         super().__init__(message, code="pin_required", is_transient=False, user_message=user_message)
 
 
 class Elke27ProtocolError(Elke27Error):
-    def __init__(self, message: str = "Protocol error.", *, user_message: Optional[str] = None) -> None:
+    def __init__(self, message: str = "Protocol error.", *, user_message: str | None = None) -> None:
         super().__init__(message, code="protocol", is_transient=False, user_message=user_message)
 
 
 class Elke27CryptoError(Elke27Error):
-    def __init__(self, message: str = "Cryptographic error.", *, user_message: Optional[str] = None) -> None:
+    def __init__(self, message: str = "Cryptographic error.", *, user_message: str | None = None) -> None:
         super().__init__(message, code="crypto", is_transient=False, user_message=user_message)
 
 

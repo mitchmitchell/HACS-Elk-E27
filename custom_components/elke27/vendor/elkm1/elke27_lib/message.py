@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from elke27_lib.features.area import build_area_get_status_payload
 from elke27_lib.features.control import build_control_authenticate_payload
 
 
-def _wrap_request(*, seq: int, domain: str, name: str, payload: Mapping[str, Any], session_id: int | None = None) -> dict:
+def _wrap_request(
+    *,
+    seq: int,
+    domain: str,
+    name: str,
+    payload: Mapping[str, Any],
+    session_id: int | None = None,
+) -> dict:
     msg: dict[str, Any] = {"seq": seq}
     if session_id is not None:
         msg["session_id"] = session_id

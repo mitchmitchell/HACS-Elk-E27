@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-import asyncio
 import time
 from dataclasses import dataclass
 
@@ -12,7 +12,6 @@ import pytest
 
 from elke27_lib import linking
 from elke27_lib.client import Elke27Client
-from elke27_lib.errors import AuthorizationRequired
 from elke27_lib.errors import AuthorizationRequired
 from test.helpers.payload_validation import assert_payload_shape
 
@@ -143,11 +142,14 @@ async def test_live_configured_names() -> None:
                 assert_payload_shape("control_get_version_info", result.data)
             next_version_retry = time.monotonic() + 5.0
         panel_ready = bool(panel_info.model) and bool(panel_info.firmware) and bool(panel_info.serial)
-        if inv.configured_areas_complete and inv.configured_zones_complete:
-            if (inv.configured_areas and area_names_seen) or area_auth_required:
-                if (inv.configured_zones and zone_names_seen) or zone_auth_required:
-                    if panel_ready:
-                        break
+        if (
+            inv.configured_areas_complete
+            and inv.configured_zones_complete
+            and ((inv.configured_areas and area_names_seen) or area_auth_required)
+            and ((inv.configured_zones and zone_names_seen) or zone_auth_required)
+            and panel_ready
+        ):
+            break
         if now >= next_debug:
             elapsed = now - start
             print(
@@ -213,7 +215,7 @@ async def test_live_configured_names() -> None:
     missing_area_names = [
         area_id
         for area_id in sorted(inv.configured_areas)
-        if not getattr(elk.state.areas.get(area_id), "name", None)
+        if not getattr(client.state.areas.get(area_id), "name", None)
     ]
     if missing_area_names:
         pytest.fail(f"Missing area names for ids: {missing_area_names}")

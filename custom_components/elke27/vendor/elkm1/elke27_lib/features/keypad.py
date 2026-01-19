@@ -14,7 +14,6 @@ from elke27_lib.handlers.keypad import (
     make_keypad_get_table_info_handler,
 )
 
-
 ROUTE_KEYPAD_GET_CONFIGURED = ("keypad", "get_configured")
 ROUTE_KEYPAD_GET_ATTRIBS = ("keypad", "get_attribs")
 ROUTE_KEYPAD_GET_TABLE_INFO = ("keypad", "get_table_info")

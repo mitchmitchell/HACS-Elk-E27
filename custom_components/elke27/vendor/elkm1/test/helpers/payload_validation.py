@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Iterable
-
+from collections.abc import Iterable, Mapping
 
 _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "control_authenticate": (
@@ -90,6 +88,19 @@ _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "output_get_all_outputs_status": ("status", "block_count"),
     "rule_get_rules": ("rules", "block_count"),
     "system_get_trouble": ("troubles", "at", "error_code"),
+    "log_get_index": ("newest", "max", "total", "error_code"),
+    "log_get_table_info": (
+        "table_csm",
+        "table_elements",
+        "tablesize",
+        "increment_size",
+        "element_size",
+        "error_code",
+    ),
+    "log_get_trouble": ("log_full", "error_code"),
+    "log_get_attribs": ("log_flags", "sdlog_flags", "error_code"),
+    "log_get_list": ("id", "time", "text", "error_code"),
+    "log_get_log": ("log_id", "log_count", "error_code"),
     "user_get_configured": ("users", "block_count"),
     "user_get_attribs": ("user_id", "name", "pin", "group_id", "flags", "error_code"),
     "keypad_get_configured": ("keypads", "block_count"),
@@ -175,6 +186,7 @@ _ALTERNATE_REQUIRED: dict[str, tuple[tuple[str, ...], ...]] = {
     "rule_get_rules": (("data", "block_id", "block_count", "error_code"),),
     "user_get_configured": (("users", "block_id", "block_count", "error_code"),),
     "keypad_get_configured": (("keypads", "block_id", "block_count", "error_code"),),
+    "log_get_trouble": (("troubles", "error_code"),),
 }
 
 _OPTIONAL_KEYS: dict[str, tuple[str, ...]] = {

@@ -6,21 +6,21 @@ Read-only handlers for the "user" domain.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional, Set
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from elke27_lib.dispatcher import DispatchContext
 from elke27_lib.events import (
-    ApiError,
-    AuthorizationRequiredEvent,
-    UserConfiguredInventoryReady,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    ApiError,
+    AuthorizationRequiredEvent,
+    UserConfiguredInventoryReady,
 )
 from elke27_lib.states import PanelState, UserState
-
 
 EmitFn = Callable[[object, DispatchContext], None]
 NowFn = Callable[[], float]
@@ -81,20 +81,24 @@ def make_user_get_configured_handler(state: PanelState, emit: EmitFn, now: NowFn
 
         block_id = payload.get("block_id")
         block_count = payload.get("block_count")
-        if isinstance(block_id, int) and isinstance(block_count, int) and block_count >= 1:
-            if block_id >= block_count:
-                state.inventory.configured_users_complete = True
-                emit(
-                    UserConfiguredInventoryReady(
-                        kind=UserConfiguredInventoryReady.KIND,
-                        at=UNSET_AT,
-                        seq=UNSET_SEQ,
-                        classification=UNSET_CLASSIFICATION,
-                        route=UNSET_ROUTE,
-                        session_id=UNSET_SESSION_ID,
-                    ),
-                    ctx=ctx,
-                )
+        if (
+            isinstance(block_id, int)
+            and isinstance(block_count, int)
+            and block_count >= 1
+            and block_id >= block_count
+        ):
+            state.inventory.configured_users_complete = True
+            emit(
+                UserConfiguredInventoryReady(
+                    kind=UserConfiguredInventoryReady.KIND,
+                    at=UNSET_AT,
+                    seq=UNSET_SEQ,
+                    classification=UNSET_CLASSIFICATION,
+                    route=UNSET_ROUTE,
+                    session_id=UNSET_SESSION_ID,
+                ),
+                ctx=ctx,
+            )
 
         state.panel.last_message_at = now()
         return True
@@ -156,7 +160,7 @@ def make_user_get_attribs_handler(state: PanelState, emit: EmitFn, now: NowFn):
             return False
 
         user = state.get_or_create_user(user_id)
-        changed: Set[str] = set()
+        changed: set[str] = set()
         _apply_user_attribs(user, payload, changed)
         user.last_update_at = now()
         state.panel.last_message_at = user.last_update_at
@@ -174,14 +178,14 @@ def _extract_configured_ids(payload: Mapping[str, Any]) -> set[int]:
     return set()
 
 
-def _normalize_name(value: Any) -> Optional[str]:
+def _normalize_name(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text if text else None
 
 
-def _apply_user_attribs(user: UserState, payload: Mapping[str, Any], changed: Set[str]) -> None:
+def _apply_user_attribs(user: UserState, payload: Mapping[str, Any], changed: set[str]) -> None:
     if "name" in payload:
         name = _normalize_name(payload.get("name"))
         if user.name != name:

@@ -9,7 +9,6 @@ import pytest
 from elke27_lib.client import Elke27Client
 from test.helpers.payload_validation import assert_payload_shape
 
-
 LOG = logging.getLogger(__name__)
 
 

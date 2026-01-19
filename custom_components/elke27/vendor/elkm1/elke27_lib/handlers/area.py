@@ -18,11 +18,21 @@ Policy:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from typing import Any, Callable, Mapping, Optional, Set, Tuple, Union
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any
 
+from elke27_lib.dispatcher import (  # adjust import to your dispatcher module location
+    DispatchContext,
+    PagedBlock,
+)
 from elke27_lib.events import (
+    UNSET_AT,
+    UNSET_CLASSIFICATION,
+    UNSET_ROUTE,
+    UNSET_SEQ,
+    UNSET_SESSION_ID,
     ApiError,
     AreaAttribsUpdated,
     AreaConfiguredInventoryReady,
@@ -32,17 +42,12 @@ from elke27_lib.events import (
     AreaTroublesUpdated,
     AuthorizationRequiredEvent,
     BootstrapCountsReady,
+    CsmSnapshotUpdated,
     DispatchRoutingError,
-    UNSET_AT,
-    UNSET_CLASSIFICATION,
-    UNSET_ROUTE,
-    UNSET_SEQ,
-    UNSET_SESSION_ID,
+    TableCsmChanged,
     UnknownMessage,
 )
-from elke27_lib.states import InventoryState, PanelState
-from elke27_lib.dispatcher import DispatchContext, PagedBlock  # adjust import to your dispatcher module location
-
+from elke27_lib.states import InventoryState, PanelState, update_csm_snapshot
 
 EmitFn = Callable[[object, DispatchContext], None]
 NowFn = Callable[[], float]
@@ -57,19 +62,19 @@ LOG = logging.getLogger(__name__)
 @dataclass(frozen=True, slots=True)
 class _AreaOutcome:
     area_id: int
-    changed_fields: Tuple[str, ...]
-    error_code: Optional[int]
-    warnings: Tuple[str, ...]
+    changed_fields: tuple[str, ...]
+    error_code: int | None
+    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class _ConfiguredOutcome:
-    configured_ids: Tuple[int, ...]
-    warnings: Tuple[str, ...]
+    configured_ids: tuple[int, ...]
+    warnings: tuple[str, ...]
     completed_now: bool
 
 
-_EXPECTED_TYPES: dict[str, Union[type, Tuple[type, ...]]] = {
+_EXPECTED_TYPES: dict[str, type | tuple[type, ...]] = {
     # strings
     "arm_state": str,
     "armed_state": str,
@@ -91,6 +96,7 @@ _EXPECTED_TYPES: dict[str, Union[type, Tuple[type, ...]]] = {
     # ints
     "num_not_ready_zones": int,
     "num_bypassed_zones": int,
+    "zones_bypassed": int,
     "error_code": int,
 }
 
@@ -113,6 +119,7 @@ _FIELD_MAP: dict[str, str] = {
 
     "num_not_ready_zones": "num_not_ready_zones",
     "num_bypassed_zones": "num_bypassed_zones",
+    "zones_bypassed": "num_bypassed_zones",
 
     # response field; stored on state as last_error_code
     "error_code": "last_error_code",
@@ -132,7 +139,7 @@ def _reconcile_area_state(state: PanelState, payload: Mapping[str, Any], *, now:
         - area.last_update_at
     """
     warnings: list[str] = []
-    changed: Set[str] = set()
+    changed: set[str] = set()
 
     area_id_val = payload.get("area_id")
     if not isinstance(area_id_val, int) or area_id_val < 1:
@@ -175,12 +182,12 @@ def _reconcile_area_state(state: PanelState, payload: Mapping[str, Any], *, now:
     )
 
 
-def _extract_error_code(payload: Mapping[str, Any]) -> Optional[int]:
+def _extract_error_code(payload: Mapping[str, Any]) -> int | None:
     v = payload.get("error_code")
     return v if isinstance(v, int) else None
 
 
-def _type_name(t: Union[type, Tuple[type, ...]]) -> str:
+def _type_name(t: type | tuple[type, ...]) -> str:
     if isinstance(t, tuple):
         return " | ".join(x.__name__ for x in t)
     return t.__name__
@@ -247,21 +254,23 @@ def make_area_get_status_handler(state: PanelState, emit: EmitFn, now: NowFn):
 
         if outcome.changed_fields:
             LOG.debug("area.get_status changed_fields=%s area_id=%s", outcome.changed_fields, outcome.area_id)
-            evt = AreaStatusUpdated(
-                kind=AreaStatusUpdated.KIND,
-                at=UNSET_AT,
-                seq=UNSET_SEQ,
-                classification=UNSET_CLASSIFICATION,
-                route=UNSET_ROUTE,
-                session_id=UNSET_SESSION_ID,
-                area_id=outcome.area_id,
-                changed_fields=outcome.changed_fields,
-            )
-            try:
-                emit(evt, ctx=ctx)
-                LOG.debug("area.get_status emitted AreaStatusUpdated")
-            except Exception as e:
-                LOG.error("area.get_status emit failed: %s", e, exc_info=True)
+        else:
+            LOG.warning("area.get_status no changes; area_id=%s", outcome.area_id)
+        evt = AreaStatusUpdated(
+            kind=AreaStatusUpdated.KIND,
+            at=UNSET_AT,
+            seq=UNSET_SEQ,
+            classification=UNSET_CLASSIFICATION,
+            route=UNSET_ROUTE,
+            session_id=UNSET_SESSION_ID,
+            area_id=outcome.area_id,
+            changed_fields=outcome.changed_fields,
+        )
+        try:
+            emit(evt, ctx=ctx)
+            LOG.debug("area.get_status emitted AreaStatusUpdated")
+        except Exception as e:
+            LOG.error("area.get_status emit failed: %s", e, exc_info=True)
 
         if outcome.warnings:
             emit(
@@ -343,7 +352,7 @@ def make_area_get_attribs_handler(state: PanelState, emit: EmitFn, now: NowFn):
             return False
 
         area = state.get_or_create_area(area_id)
-        changed: Set[str] = set()
+        changed: set[str] = set()
         _apply_area_attribs(area, payload, changed)
         area.last_update_at = now()
         state.panel.last_message_at = area.last_update_at
@@ -641,8 +650,16 @@ def make_area_get_troubles_handler(state: PanelState, emit: EmitFn, now: NowFn):
             return False
 
         payload = area_obj.get("get_troubles")
+        if payload is None:
+            payload = area_obj.get("get_trouble")
+            if payload is not None:
+                LOG.info("area.get_trouble payload received; treating as get_troubles")
         if not isinstance(payload, Mapping):
             return False
+        # Defensive: some panels broadcast get_troubles without a request.
+        if getattr(ctx, "classification", None) == "BROADCAST":
+            area_id = payload.get("area_id")
+            LOG.info("area.get_troubles broadcast received (area_id=%s)", area_id)
 
         error_code = _extract_error_code(payload)
         if error_code is not None and error_code != 0:
@@ -731,6 +748,25 @@ def make_area_get_table_info_handler(state: PanelState, emit: EmitFn, now: NowFn
         state.table_info_by_domain["area"] = table_info
         state.panel.last_message_at = now()
         table_elements = _extract_int(payload, "table_elements")
+        table_csm = _extract_table_csm(payload, domain="area")
+        if table_csm is not None:
+            old = state.table_csm_by_domain.get("area")
+            if old != table_csm:
+                state.table_csm_by_domain["area"] = table_csm
+                emit(
+                    TableCsmChanged(
+                        kind=TableCsmChanged.KIND,
+                        at=UNSET_AT,
+                        seq=UNSET_SEQ,
+                        classification=UNSET_CLASSIFICATION,
+                        route=UNSET_ROUTE,
+                        session_id=UNSET_SESSION_ID,
+                        domain="area",
+                        old=old,
+                        new=table_csm,
+                    ),
+                    ctx=ctx,
+                )
         if table_elements is not None:
             state.table_info_known.add("area")
             if state.inventory.configured_areas:
@@ -772,9 +808,25 @@ def make_area_get_table_info_handler(state: PanelState, emit: EmitFn, now: NowFn
                 session_id=UNSET_SESSION_ID,
                 table_elements=table_elements,
                 increment_size=_extract_int(payload, "increment_size"),
+                table_csm=table_csm,
             ),
             ctx=ctx,
         )
+
+        snapshot = update_csm_snapshot(state)
+        if snapshot is not None:
+            emit(
+                CsmSnapshotUpdated(
+                    kind=CsmSnapshotUpdated.KIND,
+                    at=UNSET_AT,
+                    seq=UNSET_SEQ,
+                    classification=UNSET_CLASSIFICATION,
+                    route=UNSET_ROUTE,
+                    session_id=UNSET_SESSION_ID,
+                    snapshot=snapshot,
+                ),
+                ctx=ctx,
+            )
 
         if (
             not state.bootstrap_counts_ready
@@ -828,6 +880,25 @@ def make_area___root___handler(state: PanelState, emit: EmitFn, now: NowFn):
     return handler_area___root__
 
 
+def _extract_table_csm(payload: Mapping[str, Any], *, domain: str) -> int | None:
+    if "table_csm" not in payload:
+        return None
+    value = payload.get("table_csm")
+    if isinstance(value, bool):
+        LOG.warning("%s.get_table_info table_csm has invalid bool value.", domain)
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    LOG.warning("%s.get_table_info table_csm has non-int value %r.", domain, value)
+    return None
+
+
 def _reconcile_configured_areas(state: PanelState, payload: Mapping[str, Any], *, now: float) -> _ConfiguredOutcome:
     warnings: list[str] = []
     inv = state.inventory
@@ -875,7 +946,7 @@ def _configured_block_size(
     block_count: int,
     *,
     domain: str,
-) -> Optional[int]:
+) -> int | None:
     for key in ("block_size", "block_elements", "block_length", "block_len"):
         value = payload.get(key)
         if isinstance(value, int) and value > 0:
@@ -892,7 +963,7 @@ def _apply_configured_block_offset(
     ids: list[int],
     *,
     block_id: int,
-    block_size: Optional[int],
+    block_size: int | None,
 ) -> list[int]:
     if not ids or block_id <= 1:
         return ids
@@ -932,15 +1003,23 @@ def _extract_configured_area_ids(payload: Mapping[str, Any], warnings: list[str]
 def _is_intish(value: Any) -> bool:
     if isinstance(value, int):
         return True
-    if isinstance(value, str) and value.isdigit():
-        return True
-    return False
+    return bool(isinstance(value, str) and value.isdigit())
 
 
 def _has_configured_area_ids(payload: Mapping[str, Any]) -> bool:
     return any(
         key in payload
-        for key in ("configured_area_ids", "configured_areas", "area_ids", "areas", "configured", "bitmask", "bitmap", "mask", "area_mask")
+        for key in (
+            "configured_area_ids",
+            "configured_areas",
+            "area_ids",
+            "areas",
+            "configured",
+            "bitmask",
+            "bitmap",
+            "mask",
+            "area_mask",
+        )
     )
 
 
@@ -1000,7 +1079,7 @@ def _ids_from_bitmask(mask: int) -> list[int]:
     return ids
 
 
-def _coerce_area_id(value: Any) -> Optional[int]:
+def _coerce_area_id(value: Any) -> int | None:
     if isinstance(value, int) and value > 0:
         return value
     if isinstance(value, str):
@@ -1034,14 +1113,14 @@ def _extract_troubles_list(payload: Mapping[str, Any]) -> list[str]:
     return [] 
 
 
-def _normalize_name(value: Any) -> Optional[str]:
+def _normalize_name(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text if text else None
 
 
-def _apply_area_attribs(area, payload: Mapping[str, Any], changed: Set[str]) -> None:
+def _apply_area_attribs(area, payload: Mapping[str, Any], changed: set[str]) -> None:
     if "name" in payload:
         name = _normalize_name(payload.get("name"))
         if area.name != name:
@@ -1049,6 +1128,6 @@ def _apply_area_attribs(area, payload: Mapping[str, Any], changed: Set[str]) -> 
             changed.add("name")
 
 
-def _extract_int(payload: Mapping[str, Any], key: str) -> Optional[int]:
+def _extract_int(payload: Mapping[str, Any], key: str) -> int | None:
     value = payload.get(key)
     return value if isinstance(value, int) else None

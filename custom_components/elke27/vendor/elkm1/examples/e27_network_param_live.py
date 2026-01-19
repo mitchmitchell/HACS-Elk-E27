@@ -13,10 +13,8 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
 
-from elke27_lib import Elk
-from elke27_lib import linking
+from elke27_lib import Elk, linking
 from elke27_lib.events import ApiError, NetworkRssiUpdated, NetworkSsidResultsUpdated
 from elke27_lib.session import SessionConfig
 
@@ -29,7 +27,7 @@ class E27Credentials:
     passphrase: str
 
 
-def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+def _env(name: str, default: str | None = None) -> str | None:
     import os
     value = os.environ.get(name, default)
     if value == "":
@@ -37,7 +35,7 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
     return value
 
 
-def _env_any(names: list[str], default: Optional[str] = None) -> Optional[str]:
+def _env_any(names: list[str], default: str | None = None) -> str | None:
     for name in names:
         value = _env(name)
         if value:
@@ -45,12 +43,9 @@ def _env_any(names: list[str], default: Optional[str] = None) -> Optional[str]:
     return default
 
 
-def _prompt_pin() -> Optional[int]:
+def _prompt_pin() -> int | None:
     pin = _env("ELKE27_PIN")
-    if pin:
-        pin = pin.strip()
-    else:
-        pin = input("Panel requires authorization. Enter PIN: ").strip()
+    pin = pin.strip() if pin else input("Panel requires authorization. Enter PIN: ").strip()
 
     if not pin.isdigit() or not (4 <= len(pin) <= 6):
         print("ERROR: PIN must be 4–6 digits.")
@@ -68,9 +63,7 @@ def _dict_auth_required(obj: dict) -> bool:
             error_code = int(error_code)
         except ValueError:
             return False
-    if error_code == 11008:
-        return True
-    return False
+    return error_code == 11008
 
 
 def _wait_for_network_event(elk: Elk, kind: str, timeout_s: float):

@@ -16,19 +16,19 @@ Notes:
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from elke27_lib.handlers.area import (
     make_area___root___handler,
     make_area_configured_merge,
-    make_area_get_configured_handler,
     make_area_get_attribs_handler,
+    make_area_get_configured_handler,
     make_area_get_status_handler,
     make_area_get_table_info_handler,
     make_area_get_troubles_handler,
     make_area_set_status_handler,
 )
-
 
 ROUTE_AREA_GET_STATUS = ("area", "get_status")
 ROUTE_AREA_GET_ATTRIBS = ("area", "get_attribs")
@@ -36,6 +36,7 @@ ROUTE_AREA_GET_CONFIGURED = ("area", "get_configured")
 ROUTE_AREA_GET_TABLE_INFO = ("area", "get_table_info")
 ROUTE_AREA_TABLE_INFO = ("area", "table_info")
 ROUTE_AREA_GET_TROUBLES = ("area", "get_troubles")
+ROUTE_AREA_GET_TROUBLE = ("area", "get_trouble")
 ROUTE_AREA_SET_STATUS = ("area", "set_status")   # inbound-only (no outbound builder)
 ROUTE_AREA_ROOT = ("area", "__root__")
 
@@ -79,6 +80,10 @@ def register(elk) -> None:
     )
     elk.register_handler(
         ROUTE_AREA_GET_TROUBLES,
+        make_area_get_troubles_handler(elk.state, elk.emit, elk.now),
+    )
+    elk.register_handler(
+        ROUTE_AREA_GET_TROUBLE,
         make_area_get_troubles_handler(elk.state, elk.emit, elk.now),
     )
     elk.register_handler(

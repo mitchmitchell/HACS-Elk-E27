@@ -1,0 +1,6 @@
+{"run_id": "67f7f89facef430ba9befb81f51d1c6d", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_on_ack", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T23:42:31Z", "meta": {"pid": 12646}}
+{"run_id": "67f7f89facef430ba9befb81f51d1c6d", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_on_ack", "record_type": "test_end", "t_ms": 1, "ts_utc": "2026-01-01T23:42:31Z", "outcome": "unknown", "error": null}
+{"run_id": "67f7f89facef430ba9befb81f51d1c6d", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_off_ack", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T23:42:31Z", "meta": {"pid": 12646}}
+{"run_id": "67f7f89facef430ba9befb81f51d1c6d", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_off_ack", "record_type": "test_end", "t_ms": 0, "ts_utc": "2026-01-01T23:42:31Z", "outcome": "unknown", "error": null}
+{"run_id": "67f7f89facef430ba9befb81f51d1c6d", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_state_roundtrip", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T23:42:31Z", "meta": {"pid": 12646}}
+{"run_id": "67f7f89facef430ba9befb81f51d1c6d", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_state_roundtrip", "record_type": "test_end", "t_ms": 0, "ts_utc": "2026-01-01T23:42:31Z", "outcome": "unknown", "error": null}

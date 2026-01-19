@@ -76,10 +76,7 @@ class _FakeKernel:
         expects_reply=True,
     ) -> int:
         del pending, opaque, expected_route, timeout_s, expects_reply
-        if name == "__root__":
-            msg = {"seq": seq, domain: payload}
-        else:
-            msg = {"seq": seq, domain: {name: payload}}
+        msg = {"seq": seq, domain: payload} if name == "__root__" else {"seq": seq, domain: {name: payload}}
         if self.state.panel.session_id is not None:
             msg["session_id"] = self.state.panel.session_id
         self.session.send_json(

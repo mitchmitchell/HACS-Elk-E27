@@ -6,13 +6,13 @@ Feature module: tstat
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from elke27_lib.handlers.tstat import (
     make_tstat_get_status_handler,
     make_tstat_get_table_info_handler,
 )
-
 
 ROUTE_TSTAT_GET_STATUS = ("tstat", "get_status")
 ROUTE_TSTAT_GET_TABLE_INFO = ("tstat", "get_table_info")

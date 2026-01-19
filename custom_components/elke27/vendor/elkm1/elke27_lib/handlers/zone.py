@@ -6,32 +6,34 @@ Read/observe-only handlers for the "zone" domain.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Set, Tuple
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from elke27_lib.dispatcher import DispatchContext, PagedBlock
 from elke27_lib.events import (
-    ApiError,
-    AuthorizationRequiredEvent,
-    BootstrapCountsReady,
-    DispatchRoutingError,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    ApiError,
+    AuthorizationRequiredEvent,
+    BootstrapCountsReady,
+    CsmSnapshotUpdated,
+    DispatchRoutingError,
+    TableCsmChanged,
+    ZoneAttribsUpdated,
+    ZoneConfiguredInventoryReady,
+    ZoneConfiguredUpdated,
     ZoneDefFlagsUpdated,
     ZoneDefsUpdated,
-    ZoneAttribsUpdated,
-    ZoneConfiguredUpdated,
-    ZoneConfiguredInventoryReady,
+    ZonesStatusBulkUpdated,
     ZoneStatusUpdated,
     ZoneTableInfoUpdated,
-    ZonesStatusBulkUpdated,
 )
-from elke27_lib.states import InventoryState, PanelState, ZoneState
-
+from elke27_lib.states import InventoryState, PanelState, ZoneState, update_csm_snapshot
 
 EmitFn = Callable[[object, DispatchContext], None]
 NowFn = Callable[[], float]
@@ -41,15 +43,15 @@ LOG = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class _ConfiguredOutcome:
-    configured_ids: Tuple[int, ...]
-    warnings: Tuple[str, ...]
+    configured_ids: tuple[int, ...]
+    warnings: tuple[str, ...]
     completed_now: bool
 
 
 @dataclass(frozen=True, slots=True)
 class _BulkStatusOutcome:
-    updated_ids: Tuple[int, ...]
-    warnings: Tuple[str, ...]
+    updated_ids: tuple[int, ...]
+    warnings: tuple[str, ...]
 
 
 _ZONE_STATUS_FIELDS: dict[str, str] = {
@@ -195,11 +197,11 @@ def make_zone_get_configured_handler(
     return handler_zone_get_configured
 
 
-def make_zone_configured_merge(state: PanelState) -> Callable[[List[PagedBlock], int], Mapping[str, Any]]:
+def make_zone_configured_merge(state: PanelState) -> Callable[[list[PagedBlock], int], Mapping[str, Any]]:
     """
     Merge paged get_configured blocks into a single payload (ADR-0013).
     """
-    def _merge(blocks: List[PagedBlock], block_count: int) -> Mapping[str, Any]:
+    def _merge(blocks: list[PagedBlock], block_count: int) -> Mapping[str, Any]:
         warnings: list[str] = []
         merged_ids: list[int] = []
         for block in blocks:
@@ -269,7 +271,7 @@ def make_zone_get_attribs_handler(state: PanelState, emit: EmitFn, now: NowFn):
             return False
 
         zone = state.get_or_create_zone(zone_id)
-        changed: Set[str] = set()
+        changed: set[str] = set()
         _apply_zone_attribs(zone, payload, changed)
         zone.last_update_at = now()
         state.panel.last_message_at = zone.last_update_at
@@ -441,11 +443,18 @@ def make_zone_get_status_handler(state: PanelState, emit: EmitFn, now: NowFn):
             return False
 
         zone = state.get_or_create_zone(zone_id)
-        changed: Set[str] = set()
+        changed: set[str] = set()
         warnings: list[str] = []
         _apply_zone_status_payload(zone, payload, changed, warnings)
         zone.last_update_at = now()
         state.panel.last_message_at = zone.last_update_at
+        if LOG.isEnabledFor(logging.DEBUG) and "BYPASSED" in payload:
+            LOG.debug(
+                "zone.get_status bypassed=%s zone_id=%s changed=%s",
+                payload.get("BYPASSED"),
+                zone_id,
+                sorted(changed),
+            )
         if changed:
             emit(
                 ZoneStatusUpdated(
@@ -502,11 +511,18 @@ def make_zone_set_status_handler(state: PanelState, emit: EmitFn, now: NowFn):
             return False
 
         zone = state.get_or_create_zone(zone_id)
-        changed: Set[str] = set()
+        changed: set[str] = set()
         warnings: list[str] = []
         _apply_zone_status_payload(zone, payload, changed, warnings)
         zone.last_update_at = now()
         state.panel.last_message_at = zone.last_update_at
+        if LOG.isEnabledFor(logging.DEBUG) and "BYPASSED" in payload:
+            LOG.debug(
+                "zone.set_status bypassed=%s zone_id=%s changed=%s",
+                payload.get("BYPASSED"),
+                zone_id,
+                sorted(changed),
+            )
         if changed:
             emit(
                 ZoneStatusUpdated(
@@ -565,6 +581,25 @@ def make_zone_get_table_info_handler(state: PanelState, emit: EmitFn, now: NowFn
         state.table_info_by_domain["zone"] = table_info
         state.panel.last_message_at = now()
         table_elements = _extract_int(payload, "table_elements")
+        table_csm = _extract_table_csm(payload, domain="zone")
+        if table_csm is not None:
+            old = state.table_csm_by_domain.get("zone")
+            if old != table_csm:
+                state.table_csm_by_domain["zone"] = table_csm
+                emit(
+                    TableCsmChanged(
+                        kind=TableCsmChanged.KIND,
+                        at=UNSET_AT,
+                        seq=UNSET_SEQ,
+                        classification=UNSET_CLASSIFICATION,
+                        route=UNSET_ROUTE,
+                        session_id=UNSET_SESSION_ID,
+                        domain="zone",
+                        old=old,
+                        new=table_csm,
+                    ),
+                    ctx=ctx,
+                )
         if table_elements is not None:
             state.table_info_known.add("zone")
             if state.inventory.configured_zones:
@@ -606,9 +641,25 @@ def make_zone_get_table_info_handler(state: PanelState, emit: EmitFn, now: NowFn
                 session_id=UNSET_SESSION_ID,
                 table_elements=table_elements,
                 increment_size=_extract_int(payload, "increment_size"),
+                table_csm=table_csm,
             ),
             ctx=ctx,
         )
+
+        snapshot = update_csm_snapshot(state)
+        if snapshot is not None:
+            emit(
+                CsmSnapshotUpdated(
+                    kind=CsmSnapshotUpdated.KIND,
+                    at=UNSET_AT,
+                    seq=UNSET_SEQ,
+                    classification=UNSET_CLASSIFICATION,
+                    route=UNSET_ROUTE,
+                    session_id=UNSET_SESSION_ID,
+                    snapshot=snapshot,
+                ),
+                ctx=ctx,
+            )
 
         if (
             not state.bootstrap_counts_ready
@@ -629,6 +680,25 @@ def make_zone_get_table_info_handler(state: PanelState, emit: EmitFn, now: NowFn
         return True
 
     return handler_zone_get_table_info
+
+
+def _extract_table_csm(payload: Mapping[str, Any], *, domain: str) -> int | None:
+    if "table_csm" not in payload:
+        return None
+    value = payload.get("table_csm")
+    if isinstance(value, bool):
+        LOG.warning("%s.get_table_info table_csm has invalid bool value.", domain)
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    LOG.warning("%s.get_table_info table_csm has non-int value %r.", domain, value)
+    return None
 
 
 def make_zone_get_defs_handler(state: PanelState, emit: EmitFn, now: NowFn):
@@ -668,11 +738,12 @@ def make_zone_get_defs_handler(state: PanelState, emit: EmitFn, now: NowFn):
             return False
 
         block_id = payload.get("block_id")
-        if isinstance(block_id, int) and block_id >= 1 and defs:
-            # Preserve API meaning: block_id is 1-based; offset by block size we observed.
-            base_index = 1 + (block_id - 1) * len(defs)
-        else:
-            base_index = 1
+        # Preserve API meaning: block_id is 1-based; offset by block size we observed.
+        base_index = (
+            1 + (block_id - 1) * len(defs)
+            if isinstance(block_id, int) and block_id >= 1 and defs
+            else 1
+        )
 
         updated: list[int] = []
         for idx, name in enumerate(defs):
@@ -813,7 +884,7 @@ def _configured_block_size(
     block_count: int,
     *,
     domain: str,
-) -> Optional[int]:
+) -> int | None:
     for key in ("block_size", "block_elements", "block_length", "block_len"):
         value = payload.get(key)
         if isinstance(value, int) and value > 0:
@@ -830,7 +901,7 @@ def _apply_configured_block_offset(
     ids: list[int],
     *,
     block_id: int,
-    block_size: Optional[int],
+    block_size: int | None,
 ) -> list[int]:
     if not ids or block_id <= 1:
         return ids
@@ -870,7 +941,17 @@ def _extract_configured_zone_ids(payload: Mapping[str, Any], warnings: list[str]
 def _has_configured_zone_ids(payload: Mapping[str, Any]) -> bool:
     return any(
         key in payload
-        for key in ("configured_zone_ids", "configured_zones", "zone_ids", "zones", "configured", "bitmask", "bitmap", "mask", "zone_mask")
+        for key in (
+            "configured_zone_ids",
+            "configured_zones",
+            "zone_ids",
+            "zones",
+            "configured",
+            "bitmask",
+            "bitmap",
+            "mask",
+            "zone_mask",
+        )
     )
 
 
@@ -921,9 +1002,7 @@ def _parse_zone_id_container(value: Any, warnings: list[str]) -> list[int]:
 def _is_intish(value: Any) -> bool:
     if isinstance(value, int):
         return True
-    if isinstance(value, str) and value.isdigit():
-        return True
-    return False
+    return bool(isinstance(value, str) and value.isdigit())
 
 
 def _ids_from_bitmask(mask: int) -> list[int]:
@@ -946,7 +1025,11 @@ def _reconcile_bulk_zone_status(state: PanelState, payload: Mapping[str, Any], *
         compact = "".join(status_text.split()).upper()
         for idx, ch in enumerate(compact):
             zone_id = idx + 1
-            zone = state.get_or_create_zone(zone_id)
+            if not _should_apply_bulk_zone(state, zone_id):
+                continue
+            zone = state.zones.get(zone_id)
+            if zone is None:
+                continue
             if _apply_zone_status_char(zone, ch, warnings):
                 zone.last_update_at = now
                 updated.append(zone_id)
@@ -966,8 +1049,11 @@ def _reconcile_bulk_zone_status(state: PanelState, payload: Mapping[str, Any], *
         if zone_id is None:
             warnings.append("zone status item missing zone_id")
             continue
-
-        zone = state.get_or_create_zone(zone_id)
+        if not _should_apply_bulk_zone(state, zone_id):
+            continue
+        zone = state.zones.get(zone_id)
+        if zone is None:
+            continue
         _apply_zone_fields(zone, item, warnings)
         zone.last_update_at = now
         updated.append(zone_id)
@@ -978,7 +1064,16 @@ def _reconcile_bulk_zone_status(state: PanelState, payload: Mapping[str, Any], *
     return _BulkStatusOutcome(updated_ids=tuple(_dedupe_sorted(updated)), warnings=tuple(warnings))
 
 
-def _coerce_bool(value: Any) -> Optional[bool]:
+def _should_apply_bulk_zone(state: PanelState, zone_id: int) -> bool:
+    inv = state.inventory
+    if inv.configured_zones:
+        return zone_id in inv.configured_zones
+    if inv.zone_discovery_max_id is not None:
+        return zone_id <= inv.zone_discovery_max_id
+    return True
+
+
+def _coerce_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
     if isinstance(value, int) and value in (0, 1):
@@ -992,7 +1087,7 @@ def _coerce_bool(value: Any) -> Optional[bool]:
     return None
 
 
-def _update_zone_bool(zone: ZoneState, field: str, value: Optional[bool], changed: Set[str]) -> None:
+def _update_zone_bool(zone: ZoneState, field: str, value: bool | None, changed: set[str]) -> None:
     if value is None:
         return
     if getattr(zone, field) != value:
@@ -1003,7 +1098,7 @@ def _update_zone_bool(zone: ZoneState, field: str, value: Optional[bool], change
 def _apply_zone_status_payload(
     zone: ZoneState,
     payload: Mapping[str, Any],
-    changed: Set[str],
+    changed: set[str],
     warnings: list[str],
 ) -> None:
     bypassed = _coerce_bool(payload.get("BYPASSED", payload.get("bypassed")))
@@ -1117,7 +1212,7 @@ def _apply_zone_fields(zone: ZoneState, item: Mapping[str, Any], warnings: list[
         setattr(zone, attr, value)
 
 
-def _apply_zone_attribs(zone: ZoneState, payload: Mapping[str, Any], changed: Set[str]) -> None:
+def _apply_zone_attribs(zone: ZoneState, payload: Mapping[str, Any], changed: set[str]) -> None:
     for key, attr in (("name", "name"), ("area_id", "area_id"), ("definition", "definition"), ("flags", "flags")):
         if key in payload:
             value = payload.get(key)
@@ -1135,7 +1230,7 @@ def _apply_zone_attribs(zone: ZoneState, payload: Mapping[str, Any], changed: Se
             changed.add(key)
 
 
-def _coerce_zone_id(value: Any) -> Optional[int]:
+def _coerce_zone_id(value: Any) -> int | None:
     if isinstance(value, int):
         return value if value >= 1 else None
     if isinstance(value, str):
@@ -1150,7 +1245,7 @@ def _coerce_zone_id(value: Any) -> Optional[int]:
     return None
 
 
-def _normalize_name(value: Any) -> Optional[str]:
+def _normalize_name(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -1161,12 +1256,12 @@ def _dedupe_sorted(ids: Iterable[int]) -> list[int]:
     return sorted({i for i in ids if i >= 1})
 
 
-def _extract_int(payload: Mapping[str, Any], key: str) -> Optional[int]:
+def _extract_int(payload: Mapping[str, Any], key: str) -> int | None:
     value = payload.get(key)
     return value if isinstance(value, int) else None
 
 
-def _resolve_zone_def_id(state: PanelState, definition: str) -> Optional[int]:
+def _resolve_zone_def_id(state: PanelState, definition: str) -> int | None:
     for def_id, entry in state.zone_defs_by_id.items():
         if entry.get("definition") == definition:
             return def_id

@@ -6,23 +6,28 @@ Read-only handlers for the "system" domain.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping
+import logging
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from elke27_lib.dispatcher import DispatchContext
 from elke27_lib.events import (
-    ApiError,
-    AuthorizationRequiredEvent,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    ApiError,
+    AuthorizationRequiredEvent,
+    CsmSnapshotUpdated,
+    TableCsmChanged,
 )
-from elke27_lib.states import PanelState
-
+from elke27_lib.states import PanelState, update_csm_snapshot
 
 EmitFn = Callable[[object, DispatchContext], None]
 NowFn = Callable[[], float]
+
+LOG = logging.getLogger(__name__)
 
 
 def _handle_system_command(
@@ -34,6 +39,7 @@ def _handle_system_command(
     *,
     command: str,
     alt_command: str | None = None,
+    on_payload: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> bool:
     system_obj = msg.get("system")
     if not isinstance(system_obj, Mapping):
@@ -44,6 +50,8 @@ def _handle_system_command(
         payload = system_obj.get(alt_command)
     if not isinstance(payload, Mapping):
         return False
+    if command in {"get_trouble", "get_troubles"} and getattr(ctx, "classification", None) == "BROADCAST":
+        LOG.warning("system.%s broadcast received", command)
 
     error_code = payload.get("error_code", system_obj.get("error_code"))
     if isinstance(error_code, int) and error_code != 0:
@@ -87,6 +95,8 @@ def _handle_system_command(
         if isinstance(troubles, list):
             state.system_status["troubles"] = list(troubles)
     state.panel.last_message_at = now()
+    if on_payload is not None:
+        on_payload(payload)
     return True
 
 
@@ -137,9 +147,72 @@ def make_system_get_table_info_handler(state: PanelState, emit: EmitFn, now: Now
             msg,
             ctx,
             command="get_table_info",
+            on_payload=lambda payload: _apply_system_table_csm(state, emit, ctx, payload),
         )
 
     return handler_system_get_table_info
+
+
+def _apply_system_table_csm(
+    state: PanelState,
+    emit: EmitFn,
+    ctx: DispatchContext,
+    payload: Mapping[str, Any],
+) -> None:
+    table_csm = _extract_table_csm(payload, domain="system")
+    if table_csm is None:
+        return
+    old = state.table_csm_by_domain.get("system")
+    if old == table_csm:
+        return
+    state.table_csm_by_domain["system"] = table_csm
+    emit(
+        TableCsmChanged(
+            kind=TableCsmChanged.KIND,
+            at=UNSET_AT,
+            seq=UNSET_SEQ,
+            classification=UNSET_CLASSIFICATION,
+            route=UNSET_ROUTE,
+            session_id=UNSET_SESSION_ID,
+            domain="system",
+            old=old,
+            new=table_csm,
+        ),
+        ctx=ctx,
+    )
+    snapshot = update_csm_snapshot(state)
+    if snapshot is not None:
+        emit(
+            CsmSnapshotUpdated(
+                kind=CsmSnapshotUpdated.KIND,
+                at=UNSET_AT,
+                seq=UNSET_SEQ,
+                classification=UNSET_CLASSIFICATION,
+                route=UNSET_ROUTE,
+                session_id=UNSET_SESSION_ID,
+                snapshot=snapshot,
+            ),
+            ctx=ctx,
+        )
+
+
+def _extract_table_csm(payload: Mapping[str, Any], *, domain: str) -> int | None:
+    if "table_csm" not in payload:
+        return None
+    value = payload.get("table_csm")
+    if isinstance(value, bool):
+        LOG.warning("%s.get_table_info table_csm has invalid bool value.", domain)
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    LOG.warning("%s.get_table_info table_csm has non-int value %r.", domain, value)
+    return None
 
 
 def make_system_get_attribs_handler(state: PanelState, emit: EmitFn, now: NowFn):

@@ -20,28 +20,34 @@ Focus: ("control","get_version_info")
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Optional, Set, Tuple
+from typing import Any
 
+from elke27_lib.dispatcher import (
+    DispatchContext,  # adjust import to your dispatcher module location
+)
 from elke27_lib.events import (
-    ApiError,
-    AuthenticateResult,
-    AuthorizationRequiredEvent,
-    DispatchRoutingError,
-    PanelVersionInfoUpdated,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    ApiError,
+    AuthenticateResult,
+    AuthorizationRequiredEvent,
+    CsmSnapshotUpdated,
+    DispatchRoutingError,
+    DomainCsmChanged,
+    PanelVersionInfoUpdated,
 )
-from elke27_lib.states import PanelState
-from elke27_lib.dispatcher import DispatchContext  # adjust import to your dispatcher module location
-
+from elke27_lib.states import PanelState, update_csm_snapshot
 
 EmitFn = Callable[[object, DispatchContext], None]
 NowFn = Callable[[], float]
 
+LOG = logging.getLogger(__name__)
 
 # -------------------------
 # Module-private reconcile
@@ -49,12 +55,17 @@ NowFn = Callable[[], float]
 
 @dataclass(frozen=True, slots=True)
 class _VersionInfoOutcome:
-    changed_fields: Tuple[str, ...]
-    error_code: Optional[int]
-    warnings: Tuple[str, ...]
+    changed_fields: tuple[str, ...]
+    error_code: int | None
+    warnings: tuple[str, ...]
 
 
-def _reconcile_control_get_version_info(state: PanelState, payload: Mapping[str, Any], *, now: float) -> _VersionInfoOutcome:
+def _reconcile_control_get_version_info(
+    state: PanelState,
+    payload: Mapping[str, Any],
+    *,
+    now: float,
+) -> _VersionInfoOutcome:
     """
     Pure reconcile for control.get_version_info.
 
@@ -64,7 +75,7 @@ def _reconcile_control_get_version_info(state: PanelState, payload: Mapping[str,
     - Always updates state.panel.last_message_at
     """
     warnings: list[str] = []
-    changed: Set[str] = set()
+    changed: set[str] = set()
 
     # Always update panel freshness
     state.panel.last_message_at = now
@@ -114,7 +125,7 @@ def _reconcile_control_get_version_info(state: PanelState, payload: Mapping[str,
     )
 
 
-def _first_present(payload: Mapping[str, Any], keys: Tuple[str, ...]) -> Any:
+def _first_present(payload: Mapping[str, Any], keys: tuple[str, ...]) -> Any:
     for k in keys:
         if k in payload:
             return payload.get(k)
@@ -201,13 +212,72 @@ def make_control_authenticate_handler(state: PanelState, emit: EmitFn, now: NowF
             ),
             ctx=ctx,
         )
+        _apply_auth_csm_updates(state, emit, ctx, payload)
         _notify_auth_opaque(ctx, success=True, error_code=0)
         return True
 
     return handler_control_authenticate
 
 
-def _notify_auth_opaque(ctx: DispatchContext, *, success: bool, error_code: Optional[int]) -> None:
+def make_control_get_trouble_handler(state: PanelState, emit: EmitFn, now: NowFn):
+    """
+    Handler for ("control","get_trouble") responses.
+    """
+    def handler_control_get_trouble(msg: Mapping[str, Any], ctx: DispatchContext) -> bool:
+        control_obj = msg.get("control")
+        if not isinstance(control_obj, Mapping):
+            return False
+
+        payload = control_obj.get("get_trouble")
+        if not isinstance(payload, Mapping):
+            return False
+        if getattr(ctx, "classification", None) == "BROADCAST":
+            LOG.warning("control.get_trouble broadcast received")
+
+        error_code = payload.get("error_code", control_obj.get("error_code"))
+        if isinstance(error_code, int) and error_code != 0:
+            if error_code == 11008:
+                emit(
+                    AuthorizationRequiredEvent(
+                        kind=AuthorizationRequiredEvent.KIND,
+                        at=UNSET_AT,
+                        seq=UNSET_SEQ,
+                        classification=UNSET_CLASSIFICATION,
+                        route=UNSET_ROUTE,
+                        session_id=UNSET_SESSION_ID,
+                        error_code=error_code,
+                        scope="control",
+                        entity_id=None,
+                        message=None,
+                    ),
+                    ctx=ctx,
+                )
+                return True
+            emit(
+                ApiError(
+                    kind=ApiError.KIND,
+                    at=UNSET_AT,
+                    seq=UNSET_SEQ,
+                    classification=UNSET_CLASSIFICATION,
+                    route=UNSET_ROUTE,
+                    session_id=UNSET_SESSION_ID,
+                    error_code=error_code,
+                    scope="control",
+                    entity_id=None,
+                    message=None,
+                ),
+                ctx=ctx,
+            )
+            return True
+
+        state.control_status["get_trouble"] = dict(payload)
+        state.panel.last_message_at = now()
+        return True
+
+    return handler_control_get_trouble
+
+
+def _notify_auth_opaque(ctx: DispatchContext, *, success: bool, error_code: int | None) -> None:
     match = ctx.response_match
     if match is None:
         return
@@ -220,14 +290,89 @@ def _notify_auth_opaque(ctx: DispatchContext, *, success: bool, error_code: Opti
         try:
             put_nowait(payload)
             return
-        except Exception:
+        except Exception as exc:
+            LOG.warning("auth opaque put_nowait failed: %s", exc, exc_info=True)
             return
     put = getattr(opaque, "put", None)
     if callable(put):
         try:
             put(payload)
-        except Exception:
+        except Exception as exc:
+            LOG.warning("auth opaque put failed: %s", exc, exc_info=True)
             return
+
+
+def _apply_auth_csm_updates(
+    state: PanelState,
+    emit: EmitFn,
+    ctx: DispatchContext,
+    payload: Mapping[str, Any],
+) -> None:
+    for key, value in payload.items():
+        domain = _domain_from_csm_key(key)
+        if domain is None:
+            continue
+        parsed = _coerce_csm_value(key, value, source="authenticate")
+        if parsed is None:
+            continue
+        old = state.domain_csm_by_name.get(domain)
+        if old == parsed:
+            continue
+        state.domain_csm_by_name[domain] = parsed
+        emit(
+            DomainCsmChanged(
+                kind=DomainCsmChanged.KIND,
+                at=UNSET_AT,
+                seq=UNSET_SEQ,
+                classification=UNSET_CLASSIFICATION,
+                route=UNSET_ROUTE,
+                session_id=UNSET_SESSION_ID,
+                domain=domain,
+                old=old,
+                new=parsed,
+            ),
+            ctx=ctx,
+        )
+
+    snapshot = update_csm_snapshot(state)
+    if snapshot is not None:
+        emit(
+            CsmSnapshotUpdated(
+                kind=CsmSnapshotUpdated.KIND,
+                at=UNSET_AT,
+                seq=UNSET_SEQ,
+                classification=UNSET_CLASSIFICATION,
+                route=UNSET_ROUTE,
+                session_id=UNSET_SESSION_ID,
+                snapshot=snapshot,
+            ),
+            ctx=ctx,
+        )
+
+
+def _domain_from_csm_key(key: Any) -> str | None:
+    if not isinstance(key, str):
+        return None
+    if not key.endswith("_csm"):
+        return None
+    domain = key[:-4].strip().lower()
+    return domain if domain else None
+
+
+def _coerce_csm_value(key: Any, value: Any, *, source: str) -> int | None:
+    if isinstance(value, bool):
+        LOG.warning("%s payload csm field %r has invalid bool value.", source, key)
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    LOG.warning("%s payload csm field %r has non-int value %r.", source, key, value)
+    return None
 
 
 def make_control_get_version_info_handler(state: PanelState, emit: EmitFn, now: NowFn):

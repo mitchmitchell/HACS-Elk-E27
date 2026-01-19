@@ -1,7 +1,7 @@
 import pytest
 
-from elke27_lib.kernel import E27Kernel
 from elke27_lib import session as session_mod
+from elke27_lib.kernel import E27Kernel
 
 
 class _FakeSession:

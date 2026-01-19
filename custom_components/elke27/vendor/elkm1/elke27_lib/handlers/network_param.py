@@ -6,22 +6,22 @@ Read/observe-only handlers for the "network" domain.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from elke27_lib.dispatcher import DispatchContext
 from elke27_lib.events import (
-    ApiError,
-    AuthorizationRequiredEvent,
-    NetworkRssiUpdated,
-    NetworkSsidResultsUpdated,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    ApiError,
+    AuthorizationRequiredEvent,
+    NetworkRssiUpdated,
+    NetworkSsidResultsUpdated,
 )
-from elke27_lib.states import NetworkState, PanelState
-
+from elke27_lib.states import PanelState
 
 EmitFn = Callable[[object, DispatchContext], None]
 NowFn = Callable[[], float]
@@ -257,7 +257,7 @@ def _normalize_ssid_results(payload: Any, net_obj: Mapping[str, Any]) -> list[di
     return []
 
 
-def _normalize_ssid_entry(item: Any) -> Optional[dict]:
+def _normalize_ssid_entry(item: Any) -> dict | None:
     if isinstance(item, Mapping):
         return dict(item)
     if isinstance(item, str):
@@ -265,11 +265,8 @@ def _normalize_ssid_entry(item: Any) -> Optional[dict]:
     return None
 
 
-def _extract_rssi(payload: Optional[Mapping[str, Any]], net_obj: Mapping[str, Any]) -> Optional[int]:
-    if isinstance(payload, Mapping):
-        value = payload.get("rssi")
-    else:
-        value = net_obj.get("rssi")
+def _extract_rssi(payload: Mapping[str, Any] | None, net_obj: Mapping[str, Any]) -> int | None:
+    value = payload.get("rssi") if isinstance(payload, Mapping) else net_obj.get("rssi")
 
     if isinstance(value, int):
         return value

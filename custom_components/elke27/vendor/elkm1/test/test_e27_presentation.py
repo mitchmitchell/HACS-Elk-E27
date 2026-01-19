@@ -3,22 +3,23 @@
 from __future__ import annotations
 
 import os
+
 import pytest
 
 from elke27_lib.presentation import (
     API_LINK_IV,
     E27_MAGIC,
-    E27ProtocolError,
     PROTOCOL_ENCRYPTED_FLAG,
+    E27ProtocolError,
+    _aes128_cbc_encrypt,
     decrypt_api_link_response,
     decrypt_key_field_with_linkkey,
     decrypt_schema0_envelope,
     encrypt_schema0_envelope,
     protocol_is_encrypted,
     protocol_padding_len,
-    _aes128_cbc_encrypt,
 )
-from elke27_lib.util import swap_endianness, calculate_block_padding
+from elke27_lib.util import calculate_block_padding, swap_endianness
 
 
 def test_e27_presentation():

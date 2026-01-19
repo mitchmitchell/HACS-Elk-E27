@@ -5,26 +5,30 @@ from __future__ import annotations
 from elke27_lib.client import Elke27Client
 from elke27_lib.const import E27ErrorCode
 from elke27_lib.events import (
-    AreaConfiguredInventoryReady,
-    AuthorizationRequiredEvent,
-    KeypadConfiguredInventoryReady,
-    OutputConfiguredInventoryReady,
-    UserConfiguredInventoryReady,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    AreaConfiguredInventoryReady,
+    AuthorizationRequiredEvent,
+    KeypadConfiguredInventoryReady,
+    OutputConfiguredInventoryReady,
+    UserConfiguredInventoryReady,
     ZoneConfiguredInventoryReady,
 )
-from elke27_lib.handlers.area import make_area_get_attribs_handler
-from elke27_lib.handlers.area import make_area_get_configured_handler
-from elke27_lib.handlers.zone import make_zone_get_attribs_handler
-from elke27_lib.handlers.zone import make_zone_get_configured_handler
-from elke27_lib.handlers.user import make_user_get_configured_handler
-from elke27_lib.handlers.keypad import make_keypad_get_configured_handler
 from elke27_lib.handlers import area as area_handler
 from elke27_lib.handlers import zone as zone_handler
+from elke27_lib.handlers.area import (
+    make_area_get_attribs_handler,
+    make_area_get_configured_handler,
+)
+from elke27_lib.handlers.keypad import make_keypad_get_configured_handler
+from elke27_lib.handlers.user import make_user_get_configured_handler
+from elke27_lib.handlers.zone import (
+    make_zone_get_attribs_handler,
+    make_zone_get_configured_handler,
+)
 from elke27_lib.states import PanelState
 
 

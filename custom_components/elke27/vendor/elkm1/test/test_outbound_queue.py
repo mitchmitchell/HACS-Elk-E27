@@ -36,7 +36,7 @@ async def test_outbound_queue_throttle() -> None:
         )
 
     await asyncio.wait_for(done.wait(), timeout=2.0)
-    deltas = [b - a for a, b in zip(sent_times, sent_times[1:])]
+    deltas = [b - a for a, b in zip(sent_times, sent_times[1:], strict=False)]
     assert all(delta >= 0.04 for delta in deltas)
 
 

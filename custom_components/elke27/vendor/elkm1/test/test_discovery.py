@@ -45,7 +45,7 @@ async def test_async_scanner_specific_address(mock_discovery_aio_protocol):
     )
     try:
         _, protocol = await asyncio.wait_for(mock_discovery_aio_protocol(), timeout=2.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         if task.done():
             exc = task.exception()
             pytest.fail(f"async_scan completed early with exception: {exc!r}")
@@ -72,7 +72,7 @@ async def test_async_scanner_broadcast(mock_discovery_aio_protocol):
     )
     try:
         _, protocol = await asyncio.wait_for(mock_discovery_aio_protocol(), timeout=2.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         if task.done():
             exc = task.exception()
             pytest.fail(f"async_scan completed early with exception: {exc!r}")

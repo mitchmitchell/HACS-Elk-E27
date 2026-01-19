@@ -2,15 +2,15 @@ import pytest
 
 from elke27_lib.client import Elke27Client
 from elke27_lib.events import (
-    AreaConfiguredInventoryReady,
-    AreaStatusUpdated,
-    OutputConfiguredInventoryReady,
-    OutputStatusUpdated,
     UNSET_AT,
     UNSET_CLASSIFICATION,
     UNSET_ROUTE,
     UNSET_SEQ,
     UNSET_SESSION_ID,
+    AreaConfiguredInventoryReady,
+    AreaStatusUpdated,
+    OutputConfiguredInventoryReady,
+    OutputStatusUpdated,
     ZoneConfiguredInventoryReady,
     ZoneStatusUpdated,
 )

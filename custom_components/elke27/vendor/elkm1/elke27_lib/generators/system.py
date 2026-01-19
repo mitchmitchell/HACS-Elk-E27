@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Tuple
-
-
-ResponseKey = Tuple[str, str]
+ResponseKey = tuple[str, str]
 
 
 def generator_system_get_trouble() -> tuple[dict, ResponseKey]:
@@ -82,7 +79,11 @@ def generator_system_set_system_key(*, key: int) -> tuple[dict, ResponseKey]:
     return {"key": key}, ("system", "set_system_key")
 
 
-def generator_system_file_info(*, file_list: bool | None = None, file_num: int | None = None) -> tuple[dict, ResponseKey]:
+def generator_system_file_info(
+    *,
+    file_list: bool | None = None,
+    file_num: int | None = None,
+) -> tuple[dict, ResponseKey]:
     payload: dict[str, object] = {}
     if file_list is not None:
         if not isinstance(file_list, bool):

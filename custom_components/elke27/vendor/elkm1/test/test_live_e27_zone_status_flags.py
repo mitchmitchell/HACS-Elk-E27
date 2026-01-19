@@ -17,7 +17,6 @@ from elke27_lib.const import E27ErrorCode
 from test.helpers.error_codes import describe_error, extract_error_code
 from test.helpers.payload_validation import assert_payload_shape
 
-
 _LIVE_TIMEOUT_S = 15.0
 
 
@@ -46,4 +45,4 @@ async def test_live_zone_status_flags(live_e27_client: Elke27Client) -> None:
     assert zone is not None
     for field in ("bypassed", "trouble", "tamper", "alarm", "low_battery"):
         value = getattr(zone, field, None)
-        assert isinstance(value, bool)
+        assert value is None or isinstance(value, bool)

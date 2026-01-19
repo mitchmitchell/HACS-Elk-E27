@@ -27,22 +27,21 @@ Example:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import os
-import sys
 import time
-from typing import Optional
 
-from elke27_lib.session import Session, SessionConfig
 from elke27_lib.elk import Elk
 
+from elke27_lib.session import Session, SessionConfig
 
 LOG = logging.getLogger(__name__)
 
 ROUTE_CONTROL_GET_VERSION_INFO = ("control", "get_version_info")
 
 
-def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+def _env(name: str, default: str | None = None) -> str | None:
     v = os.environ.get(name)
     return v if v not in (None, "") else default
 
@@ -83,7 +82,7 @@ def main() -> int:
     LOG.info("HELLO complete: session_id=%s", info.session_id)
 
     # 4) Send request via Elk request registry
-    LOG.info("Sending request: %r", ROUTE_CTRL_GET_VERSION_INFO)
+    LOG.info("Sending request: %r", ROUTE_CONTROL_GET_VERSION_INFO)
     seq = elk.request(ROUTE_CONTROL_GET_VERSION_INFO)
     LOG.info("Sent seq=%s", seq)
 
@@ -135,10 +134,8 @@ def main() -> int:
     print(f"  firmware   = {elk.state.panel.firmware}")
     print(f"  serial     = {elk.state.panel.serial}")
 
-    try:
+    with contextlib.suppress(Exception):
         session.close()
-    except Exception:
-        pass
     return 1
 
 
@@ -146,4 +143,4 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except KeyboardInterrupt:
-        raise SystemExit(0)
+        raise SystemExit(0) from None

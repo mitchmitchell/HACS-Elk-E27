@@ -13,24 +13,40 @@ See docs/CLIENT_CONTRACT.md for the stable client contract.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import queue
-import types
 import threading
 import time
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+import types
 import types as types_mod
-from typing import Any, AsyncIterator, Callable, Collection, Generic, Iterable, Mapping, Optional, Sequence, TypeVar
+from collections.abc import (
+    AsyncIterator,
+    Callable,
+    Collection,
+    Iterable,
+    Mapping,
+    Sequence,
+)
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from typing import (
+    Any,
+    Generic,
+    TypeVar,
+)
 
-from .dispatcher import PagedBlock, RouteKey
-from .outbound import OutboundPriority
 from . import discovery as discovery_mod
 from . import linking as linking_mod
+from .dispatcher import PagedBlock, RouteKey
 from .errors import (
+    AuthorizationRequired,
+    ConnectionLost,
     CryptoError,
     E27AuthFailed,
+    E27Error,
+    E27ErrorContext,
     E27LinkInvalid,
     E27MissingContext,
     E27NotReady,
@@ -39,26 +55,57 @@ from .errors import (
     E27ProvisioningTimeout,
     E27Timeout,
     E27TransportError,
-    InvalidCredentials,
-    InvalidPinError,
-    NotAuthenticatedError,
-    PanelNotDisarmedError,
-    PermissionDeniedError,
-)
-from .redact import redact_for_diagnostics
-from .errors import (
-    Elke27Error,
     Elke27AuthError,
     Elke27ConnectionError,
     Elke27CryptoError,
     Elke27DisconnectedError,
+    Elke27Error,
     Elke27InvalidArgument,
     Elke27LinkRequiredError,
-    Elke27PinRequiredError,
     Elke27PermissionError,
-    Elke27ProtocolError as Elke27ProtocolErrorV2,
+    Elke27PinRequiredError,
     Elke27TimeoutError,
+    InvalidCredentials,
+    InvalidLinkKeys,
+    InvalidPin,
+    InvalidPinError,
+    MissingContext,
+    NotAuthenticatedError,
+    PanelNotDisarmedError,
+    PermissionDeniedError,
+    ProtocolError,
 )
+from .errors import (
+    Elke27ProtocolError as Elke27ProtocolErrorV2,
+)
+from .events import (
+    AreaAttribsUpdated,
+    AreaConfiguredInventoryReady,
+    AreaStatusUpdated,
+    AreaTableInfoUpdated,
+    AreaTroublesUpdated,
+    ConnectionStateChanged,
+    CsmSnapshotUpdated,
+    Event,
+    KeypadConfiguredInventoryReady,
+    OutputConfiguredInventoryReady,
+    OutputsStatusBulkUpdated,
+    OutputStatusUpdated,
+    OutputTableInfoUpdated,
+    PanelVersionInfoUpdated,
+    TstatTableInfoUpdated,
+    UserConfiguredInventoryReady,
+    ZoneAttribsUpdated,
+    ZoneConfiguredInventoryReady,
+    ZoneDefFlagsUpdated,
+    ZoneDefsUpdated,
+    ZonesStatusBulkUpdated,
+    ZoneStatusUpdated,
+    ZoneTableInfoUpdated,
+)
+from .generators.registry import COMMANDS, CommandSpec
+from .handlers.area import make_area_configured_merge
+from .handlers.zone import make_zone_configured_merge
 from .kernel import (
     DiscoverResult,
     E27Kernel,
@@ -68,55 +115,7 @@ from .kernel import (
     KernelNotLinkedError,
 )
 from .linking import E27Identity, E27LinkKeys
-from .errors import (
-    AuthorizationRequired,
-    ConnectionLost,
-    CryptoError,
-    E27Error,
-    E27ErrorContext,
-    E27AuthFailed,
-    E27LinkInvalid,
-    E27MissingContext,
-    E27NotReady,
-    E27ProvisioningRequired,
-    E27ProvisioningTimeout,
-    E27ProtocolError,
-    E27TransportError,
-    E27Timeout,
-    InvalidPin,
-    InvalidCredentials,
-    InvalidLinkKeys,
-    MissingContext,
-    NotAuthenticatedError,
-    InvalidPinError,
-    PanelNotDisarmedError,
-    PermissionDeniedError,
-    ProtocolError,
-)
-from .events import (
-    AreaAttribsUpdated,
-    AreaConfiguredInventoryReady,
-    AreaStatusUpdated,
-    AreaTableInfoUpdated,
-    ConnectionStateChanged,
-    Event,
-    KeypadConfiguredInventoryReady,
-    OutputConfiguredInventoryReady,
-    OutputStatusUpdated,
-    OutputTableInfoUpdated,
-    OutputsStatusBulkUpdated,
-    PanelVersionInfoUpdated,
-    TstatTableInfoUpdated,
-    UserConfiguredInventoryReady,
-    ZoneAttribsUpdated,
-    ZoneConfiguredInventoryReady,
-    ZoneStatusUpdated,
-    ZoneTableInfoUpdated,
-    ZonesStatusBulkUpdated,
-)
-from .generators.registry import COMMANDS
-from .handlers.area import make_area_configured_merge
-from .handlers.zone import make_zone_configured_merge
+from .outbound import OutboundPriority
 from .permissions import (
     PermissionLevel,
     canonical_generator_key,
@@ -124,20 +123,36 @@ from .permissions import (
     requires_disarmed,
     requires_pin,
 )
-from .session import SessionConfig, SessionNotReadyError, SessionIOError, SessionProtocolError
+from .redact import redact_for_diagnostics
+from .session import (
+    SessionConfig,
+    SessionIOError,
+    SessionNotReadyError,
+    SessionProtocolError,
+)
+from .states import PanelState, update_csm_snapshot
+from .types import (
+    AreaState as V2AreaState,
+)
 from .types import (
     ArmMode,
     ClientConfig,
+    CsmSnapshot,
     DiscoveredPanel,
     Elke27Event,
     EventType,
     LinkKeys,
-    PanelSnapshot,
+    OutputDefinition,
     PanelInfo,
+    PanelSnapshot,
     TableInfo,
-    AreaState as V2AreaState,
-    ZoneState as V2ZoneState,
+    ZoneDefinition,
+)
+from .types import (
     OutputState as V2OutputState,
+)
+from .types import (
+    ZoneState as V2ZoneState,
 )
 
 T = TypeVar("T")
@@ -146,15 +161,15 @@ T = TypeVar("T")
 @dataclass(frozen=True, slots=True)
 class Result(Generic[T]):
     ok: bool
-    data: Optional[T] = None
-    error: Optional[BaseException] = None
+    data: T | None = None
+    error: BaseException | None = None
 
     @classmethod
-    def success(cls, value: T) -> "Result[T]":
+    def success(cls, value: T) -> Result[T]:
         return cls(ok=True, data=value, error=None)
 
     @classmethod
-    def failure(cls, error: BaseException) -> "Result[T]":
+    def failure(cls, error: BaseException) -> Result[T]:
         return cls(ok=False, data=None, error=error)
 
     def unwrap(self) -> T:
@@ -184,7 +199,7 @@ _CLIENT_EXCEPTIONS = (
 
 
 def _iter_causes(exc: BaseException) -> Iterable[BaseException]:
-    current: Optional[BaseException] = exc
+    current: BaseException | None = exc
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
@@ -211,7 +226,7 @@ class _FilteredMapping(Mapping[int, Any]):
         return sum(1 for key in self._source if key in self._allowed)
 
 
-def _configured_ids_from_table(state: "PanelState", domain: str) -> Collection[int]:
+def _configured_ids_from_table(state: PanelState, domain: str) -> Collection[int]:
     info = state.table_info_by_domain.get(domain)
     if not isinstance(info, Mapping):
         return ()
@@ -232,29 +247,32 @@ class Elke27Client:
         self,
         config: ClientConfig | None = None,
         *,
-        kernel: Optional[E27Kernel] = None,
+        kernel: E27Kernel | None = None,
         now_monotonic: Callable[[], float] | None = None,
-        event_queue_maxlen: Optional[int] = None,
-        features: Optional[Sequence[str]] = None,
-        logger: Optional[logging.Logger] = None,
+        event_queue_maxlen: int | None = None,
+        features: Sequence[str] | None = None,
+        logger: logging.Logger | None = None,
         filter_attribs_to_configured: bool = True,
     ) -> None:
         self._log = logger or logging.getLogger(__name__)
         self._feature_modules = features
         self._v2_config = config
-        self._v2_client_identity: Optional[linking_mod.E27Identity] = None
+        self._v2_client_identity: linking_mod.E27Identity | None = None
         self._connected = False
-        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._event_loop: asyncio.AbstractEventLoop | None = None
         queue_size = config.event_queue_size if config and config.event_queue_size > 0 else 256
         self._event_queue = asyncio.Queue(maxsize=queue_size)
         self._event_seq_counter: int = 0
-        self._event_session_id: Optional[int] = None
+        self._event_session_id: int | None = None
         self._subscriber_callbacks: list[Callable[[Elke27Event], None]] = []
+        self._typed_subscriber_callbacks: list[Callable[[Event], None]] = []
         self._subscriber_lock = threading.Lock()
         self._subscriber_error_types: set[type] = set()
-        self._kernel_event_token: Optional[int] = None
+        self._kernel_event_token: int | None = None
         self._snapshot = PanelSnapshot.empty()
         self._snapshot_version = 0
+        self._last_auth_pin: int | None = None
+        self._pending_bypass_by_area: dict[int, float] = {}
         if event_queue_maxlen is None:
             event_queue_maxlen = config.event_queue_maxlen if config is not None else 0
         request_timeout_s = config.request_timeout_s if config is not None else 5.0
@@ -275,7 +293,7 @@ class Elke27Client:
             )
         else:
             self._kernel = kernel
-        self._auth_role: Optional[str] = None
+        self._auth_role: str | None = None
         self._ready_event = asyncio.Event()
         self._inventory_ready = {"area": False, "zone": False, "output": False}
         self._status_pending: dict[str, set[int]] = {
@@ -303,7 +321,7 @@ class Elke27Client:
     def is_ready(self) -> bool:
         return self.ready
 
-    def set_authenticated_role(self, role: Optional[str]) -> None:
+    def set_authenticated_role(self, role: str | None) -> None:
         """
         Set the current authenticated role ("any_user", "master", "installer") or None.
         """
@@ -327,11 +345,16 @@ class Elke27Client:
             return True
         try:
             await asyncio.wait_for(self._ready_event.wait(), timeout=timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False
         return True
 
-    def subscribe(self, callback: Callable[[Elke27Event], None], *, kinds: Optional[Iterable[str]] = None) -> Callable[[], None]:
+    def subscribe(
+        self,
+        callback: Callable[[Elke27Event], None],
+        *,
+        kinds: Iterable[str] | None = None,
+    ) -> Callable[[], None]:
         del kinds
         with self._subscriber_lock:
             if callback in self._subscriber_callbacks:
@@ -346,6 +369,26 @@ class Elke27Client:
             self._subscriber_callbacks.remove(callback)
         return True
 
+    def subscribe_typed(
+        self,
+        callback: Callable[[Event], None],
+        *,
+        kinds: Iterable[str] | None = None,
+    ) -> Callable[[], None]:
+        del kinds
+        with self._subscriber_lock:
+            if callback in self._typed_subscriber_callbacks:
+                return lambda: self.unsubscribe_typed(callback)
+            self._typed_subscriber_callbacks.append(callback)
+        return lambda: self.unsubscribe_typed(callback)
+
+    def unsubscribe_typed(self, callback: Callable[[Event], None]) -> bool:
+        with self._subscriber_lock:
+            if callback not in self._typed_subscriber_callbacks:
+                return False
+            self._typed_subscriber_callbacks.remove(callback)
+        return True
+
     def drain_events(self) -> list[Event]:
         return self._kernel.drain_events()
 
@@ -357,7 +400,7 @@ class Elke27Client:
     def _default_identity() -> linking_mod.E27Identity:
         return linking_mod.E27Identity(mn="222", sn="000000001", fwver="0.1", hwver="0.1", osver="0.1")
 
-    def _coerce_identity(self, identity: Optional[Mapping[str, str] | linking_mod.E27Identity]) -> linking_mod.E27Identity:
+    def _coerce_identity(self, identity: Mapping[str, str] | linking_mod.E27Identity | None) -> linking_mod.E27Identity:
         if identity is None:
             return self._default_identity()
         if isinstance(identity, linking_mod.E27Identity):
@@ -427,7 +470,7 @@ class Elke27Client:
         raise Elke27ProtocolErrorV2("Operation failed.") from None
 
     @staticmethod
-    def _arm_mode_from_string(value: Optional[str]) -> Optional[ArmMode]:
+    def _arm_mode_from_string(value: str | None) -> ArmMode | None:
         if not isinstance(value, str):
             return None
         lowered = value.lower()
@@ -488,6 +531,29 @@ class Elke27Client:
             )
         return types_mod.MappingProxyType(out)
 
+    def _build_zone_definitions(self) -> Mapping[int, ZoneDefinition]:
+        out: dict[int, ZoneDefinition] = {}
+        state = self._kernel.state
+        for zone_id, zone in state.zones.items():
+            definition = _resolve_zone_definition(state, zone.definition)
+            zone_type = None
+            kind = None
+            if isinstance(zone.attribs, Mapping):
+                zone_type_val = zone.attribs.get("zone_type") or zone.attribs.get("type")
+                if isinstance(zone_type_val, str):
+                    zone_type = zone_type_val
+                kind_val = zone.attribs.get("kind")
+                if isinstance(kind_val, str):
+                    kind = kind_val
+            out[zone_id] = ZoneDefinition(
+                zone_id=zone_id,
+                name=zone.name,
+                definition=definition,
+                zone_type=zone_type,
+                kind=kind,
+            )
+        return types_mod.MappingProxyType(out)
+
     def _build_output_map(self) -> Mapping[int, V2OutputState]:
         out: dict[int, V2OutputState] = {}
         for output_id, output in self._kernel.state.outputs.items():
@@ -498,23 +564,36 @@ class Elke27Client:
             )
         return types_mod.MappingProxyType(out)
 
+    def _build_output_definitions(self) -> Mapping[int, OutputDefinition]:
+        out: dict[int, OutputDefinition] = {}
+        for output_id, output in self._kernel.state.outputs.items():
+            out[output_id] = OutputDefinition(
+                output_id=output_id,
+                name=output.name,
+            )
+        return types_mod.MappingProxyType(out)
+
     def _replace_snapshot(
         self,
         *,
-        panel_info: Optional[PanelInfo] = None,
-        table_info: Optional[TableInfo] = None,
-        areas: Optional[Mapping[int, V2AreaState]] = None,
-        zones: Optional[Mapping[int, V2ZoneState]] = None,
-        outputs: Optional[Mapping[int, V2OutputState]] = None,
+        panel_info: PanelInfo | None = None,
+        table_info: TableInfo | None = None,
+        areas: Mapping[int, V2AreaState] | None = None,
+        zones: Mapping[int, V2ZoneState] | None = None,
+        zone_definitions: Mapping[int, ZoneDefinition] | None = None,
+        outputs: Mapping[int, V2OutputState] | None = None,
+        output_definitions: Mapping[int, OutputDefinition] | None = None,
     ) -> None:
         self._snapshot_version += 1
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self._snapshot = PanelSnapshot(
             panel=panel_info or self._snapshot.panel,
             table_info=table_info or self._snapshot.table_info,
             areas=areas or self._snapshot.areas,
             zones=zones or self._snapshot.zones,
+            zone_definitions=zone_definitions or self._snapshot.zone_definitions,
             outputs=outputs or self._snapshot.outputs,
+            output_definitions=output_definitions or self._snapshot.output_definitions,
             version=self._snapshot_version,
             updated_at=now,
         )
@@ -581,41 +660,87 @@ class Elke27Client:
 
     def _queue_bootstrap_attribs(self, domain: str) -> None:
         inv = self._kernel.state.inventory
-        if domain == "area":
-            if inv.configured_areas:
-                for area_id in sorted(inv.configured_areas):
-                    try:
-                        self._kernel.request(("area", "get_attribs"), area_id=area_id)
-                    except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
-                        continue
-        elif domain == "zone":
-            if inv.configured_zones:
-                for zone_id in sorted(inv.configured_zones):
-                    try:
-                        self._kernel.request(("zone", "get_attribs"), zone_id=zone_id)
-                    except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
-                        continue
-        elif domain == "output":
-            if inv.configured_outputs:
-                for output_id in sorted(inv.configured_outputs):
-                    try:
-                        self._kernel.request(("output", "get_attribs"), output_id=output_id)
-                    except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
-                        continue
-        elif domain == "user":
-            if inv.configured_users:
-                for user_id in sorted(inv.configured_users):
-                    try:
-                        self._kernel.request(("user", "get_attribs"), user_id=user_id)
-                    except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
-                        continue
-        elif domain == "keypad":
-            if inv.configured_keypads:
-                for keypad_id in sorted(inv.configured_keypads):
-                    try:
-                        self._kernel.request(("keypad", "get_attribs"), keypad_id=keypad_id)
-                    except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
-                        continue
+        if domain == "area" and inv.configured_areas:
+            for area_id in sorted(inv.configured_areas):
+                try:
+                    self._kernel.request(("area", "get_attribs"), area_id=area_id)
+                except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
+                    continue
+        elif domain == "zone" and inv.configured_zones:
+            for zone_id in sorted(inv.configured_zones):
+                try:
+                    self._kernel.request(("zone", "get_attribs"), zone_id=zone_id)
+                except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
+                    continue
+        elif domain == "output" and inv.configured_outputs:
+            for output_id in sorted(inv.configured_outputs):
+                try:
+                    self._kernel.request(("output", "get_attribs"), output_id=output_id)
+                except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
+                    continue
+        elif domain == "user" and inv.configured_users:
+            for user_id in sorted(inv.configured_users):
+                try:
+                    self._kernel.request(("user", "get_attribs"), user_id=user_id)
+                except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
+                    continue
+        elif domain == "keypad" and inv.configured_keypads:
+            for keypad_id in sorted(inv.configured_keypads):
+                try:
+                    self._kernel.request(("keypad", "get_attribs"), keypad_id=keypad_id)
+                except (E27Error, KeyError, RuntimeError, TypeError, ValueError):
+                    continue
+
+    def _refresh_bypassed_zones_for_area(self, area_id: int) -> None:
+        if area_id < 1:
+            return
+        requested = 0
+        for zone in self._kernel.state.zones.values():
+            if zone.area_id == area_id and zone.bypassed is True:
+                self._safe_request(("zone", "get_status"), zone_id=zone.zone_id)
+                requested += 1
+        if requested and self._log.isEnabledFor(logging.DEBUG):
+            self._log.debug(
+                "Requested zone.get_status for %s bypassed zones in area_id=%s",
+                requested,
+                area_id,
+            )
+
+    def _refresh_unbypassed_zones_for_area(self, area_id: int) -> None:
+        if area_id < 1:
+            return
+        requested = 0
+        for zone in self._kernel.state.zones.values():
+            if zone.area_id == area_id and zone.bypassed is not True:
+                self._safe_request(("zone", "get_status"), zone_id=zone.zone_id)
+                requested += 1
+        if requested and self._log.isEnabledFor(logging.DEBUG):
+            self._log.debug(
+                "Requested zone.get_status for %s non-bypassed zones in area_id=%s",
+                requested,
+                area_id,
+            )
+
+    def _refresh_all_zone_statuses_for_bypass_change(self, area_id: int) -> None:
+        if area_id < 1:
+            return
+        self._safe_request(("zone", "get_all_zones_status"))
+
+    def _record_local_zone_bypass(self, zone_id: int) -> None:
+        zone = self._kernel.state.zones.get(zone_id)
+        if zone is None or zone.area_id is None:
+            return
+        self._pending_bypass_by_area[zone.area_id] = self._kernel.now()
+
+    def _should_suppress_area_bypass_refresh(self, area_id: int) -> bool:
+        ts = self._pending_bypass_by_area.get(area_id)
+        if ts is None:
+            return False
+        now = self._kernel.now()
+        if now - ts <= 5.0:
+            return True
+        self._pending_bypass_by_area.pop(area_id, None)
+        return False
 
     def _mark_status_seen(self, domain: str, ids: Iterable[int]) -> None:
         pending = self._status_pending.get(domain)
@@ -628,26 +753,18 @@ class Elke27Client:
 
     def _enqueue_event(self, event: Elke27Event) -> None:
         if self._event_queue.full():
-            try:
+            with contextlib.suppress(asyncio.QueueEmpty):
                 self._event_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-        try:
+        with contextlib.suppress(asyncio.QueueFull):
             self._event_queue.put_nowait(event)
-        except asyncio.QueueFull:
-            pass
 
     def _signal_event_stream_end(self) -> None:
-        sentinel: Optional[Elke27Event] = None
+        sentinel: Elke27Event | None = None
         if self._event_queue.full():
-            try:
+            with contextlib.suppress(asyncio.QueueEmpty):
                 self._event_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-        try:
+        with contextlib.suppress(asyncio.QueueFull):
             self._event_queue.put_nowait(sentinel)
-        except asyncio.QueueFull:
-            pass
 
     def _map_event_type(self, evt: Event) -> EventType:
         if evt.kind == ConnectionStateChanged.KIND:
@@ -658,7 +775,7 @@ class Elke27Client:
             return EventType.ZONE
         if "output" in evt.kind:
             return EventType.OUTPUT
-        if "panel" in evt.kind or "table_info" in evt.kind:
+        if "panel" in evt.kind or "table_info" in evt.kind or "csm" in evt.kind:
             return EventType.PANEL
         return EventType.SYSTEM
 
@@ -676,10 +793,15 @@ class Elke27Client:
         event_type = self._map_event_type(evt)
         data = redact_for_diagnostics(asdict(evt))
         seq = self._next_event_seq(evt)
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now(UTC)
 
         if isinstance(evt, ConnectionStateChanged):
             if evt.connected:
+                self._log.warning(
+                    "Panel connection restored (reason=%s error_type=%s)",
+                    evt.reason,
+                    evt.error_type,
+                )
                 ready_evt = Elke27Event(
                     event_type=EventType.READY,
                     data={"connected": True},
@@ -693,9 +815,16 @@ class Elke27Client:
                     table_info=self._build_table_info(),
                     areas=self._build_area_map(),
                     zones=self._build_zone_map(),
+                    zone_definitions=self._build_zone_definitions(),
                     outputs=self._build_output_map(),
+                    output_definitions=self._build_output_definitions(),
                 )
             else:
+                self._log.error(
+                    "Panel connection lost (reason=%s error_type=%s)",
+                    evt.reason,
+                    evt.error_type,
+                )
                 disconnected_evt = Elke27Event(
                     event_type=EventType.DISCONNECTED,
                     data={"connected": False, "reason": evt.reason},
@@ -716,6 +845,7 @@ class Elke27Client:
         )
         self._enqueue_event(v2_evt)
 
+        skip_snapshot_update = False
         if evt.kind == AreaConfiguredInventoryReady.KIND:
             self._mark_inventory_ready("area")
         elif evt.kind == ZoneConfiguredInventoryReady.KIND:
@@ -728,6 +858,32 @@ class Elke27Client:
             self._queue_bootstrap_attribs("keypad")
         elif evt.kind == AreaStatusUpdated.KIND:
             self._mark_status_seen("area", [evt.area_id])
+            if not evt.changed_fields:
+                # Defensive refresh disabled per request.
+                # self._refresh_all_zone_statuses_for_bypass_change(evt.area_id)
+                # skip_snapshot_update = True
+                pass
+            if "num_bypassed_zones" in evt.changed_fields:
+                suppress_refresh = self._should_suppress_area_bypass_refresh(evt.area_id)
+                area = self._kernel.state.areas.get(evt.area_id)
+                if area is not None and not suppress_refresh and area.num_bypassed_zones is not None:
+                    # Defensive refresh disabled per request.
+                    # self._log.warning(
+                    #     "Area %s bypass count changed; refreshing zone status in bulk (missing zone updates)",
+                    #     evt.area_id,
+                    # )
+                    # self._refresh_all_zone_statuses_for_bypass_change(evt.area_id)
+                    pass
+        elif evt.kind == AreaTroublesUpdated.KIND:
+            # Defensive: unexpected broadcasts can hide missed zone status updates.
+            if getattr(evt, "classification", None) == "BROADCAST":
+                # Defensive refresh disabled per request.
+                # self._log.warning(
+                #     "Area %s troubles broadcast received; refreshing zone status in bulk (defensive)",
+                #     evt.area_id,
+                # )
+                # self._refresh_all_zone_statuses_for_bypass_change(evt.area_id)
+                pass
         elif evt.kind == ZoneStatusUpdated.KIND:
             self._mark_status_seen("zone", [evt.zone_id])
         elif evt.kind == ZonesStatusBulkUpdated.KIND:
@@ -746,25 +902,49 @@ class Elke27Client:
             AreaStatusUpdated.KIND,
             AreaAttribsUpdated.KIND,
             ZoneAttribsUpdated.KIND,
+            ZoneDefsUpdated.KIND,
+            ZoneDefFlagsUpdated.KIND,
             ZonesStatusBulkUpdated.KIND,
             OutputStatusUpdated.KIND,
             OutputsStatusBulkUpdated.KIND,
             ZoneStatusUpdated.KIND,
         }:
-            self._replace_snapshot(
-                panel_info=self._build_panel_info(),
-                table_info=self._build_table_info(),
-                areas=self._build_area_map(),
-                zones=self._build_zone_map(),
-                outputs=self._build_output_map(),
-            )
+            if evt.kind == AreaStatusUpdated.KIND and skip_snapshot_update:
+                self._maybe_set_ready()
+            else:
+                self._replace_snapshot(
+                    panel_info=self._build_panel_info(),
+                    table_info=self._build_table_info(),
+                    areas=self._build_area_map(),
+                    zones=self._build_zone_map(),
+                    zone_definitions=self._build_zone_definitions(),
+                    outputs=self._build_output_map(),
+                    output_definitions=self._build_output_definitions(),
+                )
         self._maybe_set_ready()
 
         with self._subscriber_lock:
             callbacks = list(self._subscriber_callbacks)
+            typed_callbacks = list(self._typed_subscriber_callbacks)
+        if self._log.isEnabledFor(logging.DEBUG) and evt.kind == ZoneStatusUpdated.KIND:
+            self._log.debug(
+                "Dispatching %s to %d typed subscribers (zone_id=%s changed=%s)",
+                evt.kind,
+                len(typed_callbacks),
+                getattr(evt, "zone_id", None),
+                getattr(evt, "changed_fields", None),
+            )
         for cb in callbacks:
             try:
                 cb(v2_evt)
+            except Exception as exc:  # noqa: BLE001
+                exc_type = type(exc)
+                if exc_type not in self._subscriber_error_types:
+                    self._subscriber_error_types.add(exc_type)
+                    self._log.warning("Subscriber callback failed: %s", exc_type.__name__)
+        for cb in typed_callbacks:
+            try:
+                cb(evt)
             except Exception as exc:  # noqa: BLE001
                 exc_type = type(exc)
                 if exc_type not in self._subscriber_error_types:
@@ -774,16 +954,14 @@ class Elke27Client:
     def _on_kernel_event(self, evt: Event) -> None:
         if self._event_loop is None:
             return
-        try:
+        with contextlib.suppress(RuntimeError):
             self._event_loop.call_soon_threadsafe(self._handle_kernel_event, evt)
-        except RuntimeError:
-            pass
 
     async def async_discover(
         self,
         *,
-        timeout_s: Optional[float] = None,
-        address: Optional[str] = None,
+        timeout_s: float | None = None,
+        address: str | None = None,
     ) -> list[DiscoveredPanel]:
         """Discover panels on the network (v2 public API)."""
         timeout = int(timeout_s) if timeout_s is not None else 10
@@ -813,8 +991,8 @@ class Elke27Client:
         *,
         access_code: str,
         passphrase: str,
-        client_identity: Optional[Mapping[str, str] | linking_mod.E27Identity] = None,
-        timeout_s: Optional[float] = None,
+        client_identity: Mapping[str, str] | linking_mod.E27Identity | None = None,
+        timeout_s: float | None = None,
     ) -> LinkKeys:
         """Provision link keys for a panel (v2 public API)."""
         if not isinstance(host, str) or not host:
@@ -859,16 +1037,28 @@ class Elke27Client:
         self._event_loop = asyncio.get_running_loop()
         self._ensure_kernel_subscription()
         identity = self._v2_client_identity or self._default_identity()
-        session_cfg = SessionConfig(host=host, port=port)
-        try:
-            await self._kernel.connect(
-                self._coerce_link_keys(link_keys),
-                panel={"host": host, "port": port},
-                client_identity=identity,
-                session_config=session_cfg,
-            )
-        except BaseException as exc:  # noqa: BLE001
-            self._raise_v2_error(exc, phase="connect")
+        session_cfg = SessionConfig(host=host, port=port, wire_log=True)
+        connect_exc: BaseException | None = None
+        for attempt in range(2):
+            try:
+                await self._kernel.connect(
+                    self._coerce_link_keys(link_keys),
+                    panel={"host": host, "port": port},
+                    client_identity=identity,
+                    session_config=session_cfg,
+                )
+                connect_exc = None
+                break
+            except BaseException as exc:  # noqa: BLE001
+                connect_exc = exc
+                self._log.error(
+                    "Connect failed (attempt %s/2): %s",
+                    attempt + 1,
+                    exc,
+                    exc_info=True,
+                )
+        if connect_exc is not None:
+            self._raise_v2_error(connect_exc, phase="connect")
         self._connected = True
         if self._snapshot.version == 0:
             self._replace_snapshot(
@@ -876,7 +1066,9 @@ class Elke27Client:
                 table_info=self._build_table_info(),
                 areas=self._build_area_map(),
                 zones=self._build_zone_map(),
+                zone_definitions=self._build_zone_definitions(),
                 outputs=self._build_output_map(),
+                output_definitions=self._build_output_definitions(),
             )
         self._maybe_set_ready()
 
@@ -905,6 +1097,95 @@ class Elke27Client:
     def snapshot(self) -> PanelSnapshot:
         """Return the latest immutable snapshot (v2 public API)."""
         return self._snapshot
+
+    def get_csm_snapshot(self) -> CsmSnapshot | None:
+        """Return the latest CSM snapshot if available (v2 public API)."""
+        return self._kernel.state.csm_snapshot
+
+    async def async_refresh_csm(self) -> CsmSnapshot:
+        """
+        Refresh CSM data by requesting domain/table snapshots (v2 public API).
+        """
+        if not self._connected or not self._kernel.state.panel.connected:
+            raise Elke27DisconnectedError("Client is not connected.")
+
+        loop = asyncio.get_running_loop()
+        done = asyncio.Event()
+        captured: CsmSnapshot | None = None
+
+        def _on_evt(evt: Event) -> None:
+            nonlocal captured
+            if evt.kind != CsmSnapshotUpdated.KIND:
+                return
+            captured = evt.snapshot
+            loop.call_soon_threadsafe(done.set)
+
+        token = self._kernel.subscribe(_on_evt, kinds={CsmSnapshotUpdated.KIND})
+        try:
+            try:
+                self._kernel.request_csm_refresh(auth_pin=self._last_auth_pin)
+            except BaseException as exc:  # noqa: BLE001
+                self._raise_v2_error(exc, phase="refresh_csm")
+            timeout_value = getattr(self._kernel, "_request_timeout_s", 5.0)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(done.wait(), timeout=timeout_value)
+        finally:
+            self._kernel.unsubscribe(token)
+
+        snapshot = captured or self._kernel.state.csm_snapshot
+        if snapshot is None:
+            snapshot = update_csm_snapshot(self._kernel.state) or self._kernel.state.csm_snapshot
+        if snapshot is None:
+            raise Elke27ProtocolErrorV2("CSM snapshot not available.")
+        return snapshot
+
+    async def async_refresh_domain_config(self, domain: str) -> None:
+        """
+        Refresh domain configuration with paging (v2 public API).
+        """
+        if not isinstance(domain, str) or not domain.strip():
+            raise Elke27InvalidArgument("domain must be a non-empty string.")
+        if not self._connected or not self._kernel.state.panel.connected:
+            raise Elke27DisconnectedError("Client is not connected.")
+
+        domain_key = domain.strip().lower()
+        if domain_key == "area":
+            self._refresh_area_config()
+        elif domain_key == "zone":
+            self._refresh_zone_config()
+        elif domain_key == "output":
+            self._refresh_output_config()
+        elif domain_key == "tstat":
+            self._refresh_tstat_config()
+        else:
+            raise Elke27InvalidArgument(f"Unsupported domain for refresh: {domain}")
+
+    def _refresh_area_config(self) -> None:
+        self._safe_request(("area", "get_table_info"))
+        self._safe_request(("area", "get_configured"), block_id=1)
+
+    def _refresh_zone_config(self) -> None:
+        self._safe_request(("zone", "get_table_info"))
+        self._safe_request(("zone", "get_configured"), block_id=1)
+        self._safe_request(("zone", "get_defs"), block_id=1)
+        if self._kernel.state.inventory.configured_zones:
+            for zone_id in sorted(self._kernel.state.inventory.configured_zones):
+                self._safe_request(("zone", "get_attribs"), zone_id=zone_id)
+
+    def _refresh_output_config(self) -> None:
+        self._safe_request(("output", "get_table_info"))
+        self._safe_request(("output", "get_configured"), block_id=1)
+
+    def _refresh_tstat_config(self) -> None:
+        self._safe_request(("tstat", "get_table_info"))
+
+    def _safe_request(self, route: RouteKey, /, **kwargs: Any) -> None:
+        if self._kernel.requests.get(route) is None:
+            return
+        try:
+            self._kernel.request(route, **kwargs)
+        except BaseException as exc:  # noqa: BLE001
+            self._raise_v2_error(exc, phase="refresh_domain_config")
 
     async def async_set_output(self, output_id: int, *, on: bool) -> None:
         """Set an output on or off (v2 public API)."""
@@ -1002,7 +1283,7 @@ class Elke27Client:
         *,
         panel: Mapping[str, Any] | None = None,
         client_identity: E27Identity | None = None,
-        session_config: Optional[SessionConfig] = None,
+        session_config: SessionConfig | None = None,
     ) -> Result[None]:
         try:
             await asyncio.to_thread(self._kernel.load_features_blocking, self._feature_modules)
@@ -1049,7 +1330,7 @@ class Elke27Client:
         command_key: str,
         /,
         *,
-        timeout_s: Optional[float] = None,
+        timeout_s: float | None = None,
         **params: Any,
     ) -> Result[Mapping[str, Any]]:
         if command_key == "control_authenticate":
@@ -1076,6 +1357,7 @@ class Elke27Client:
             else:
                 return Result.failure(InvalidPinError("PIN must be a non-empty digit string."))
 
+            self._last_auth_pin = pin_int
             return await self._async_authenticate(pin=pin_int, timeout_s=timeout_s)
 
         spec = COMMANDS.get(command_key)
@@ -1092,11 +1374,8 @@ class Elke27Client:
         if permission_error is not None:
             return Result.failure(permission_error)
 
-        if requires_disarmed(permission_level):
-            if not self._all_areas_disarmed():
-                return Result.failure(
-                    Elke27PermissionError("This action requires all areas to be disarmed.")
-                )
+        if requires_disarmed(permission_level) and not self._all_areas_disarmed():
+            return Result.failure(Elke27PermissionError("This action requires all areas to be disarmed."))
 
         if requires_pin(permission_level):
             pin_value = params.get("pin")
@@ -1173,6 +1452,11 @@ class Elke27Client:
                 detail = f"command_key={command_key}"
                 return Result.failure(self._normalize_error(exc, phase="execute", detail=detail))
 
+            if spec.key == "zone_set_status":
+                zone_id = params.get("zone_id")
+                if isinstance(zone_id, int) and zone_id > 0:
+                    self._record_local_zone_bypass(zone_id)
+
             loop = asyncio.get_running_loop()
             seq = self._kernel._next_seq()
             future = self._kernel._pending_responses.create(
@@ -1204,7 +1488,7 @@ class Elke27Client:
             try:
                 await sent_event.wait()
                 msg = await asyncio.wait_for(future, timeout=timeout_value)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._kernel._pending_responses.drop(seq)
                 return Result.failure(E27Timeout(f"async_execute timeout waiting for {command_key} seq={seq}"))
             except asyncio.CancelledError:
@@ -1241,8 +1525,8 @@ class Elke27Client:
 
         timeout_value = timeout_s if timeout_s is not None else getattr(self._kernel, "_request_timeout_s", 5.0)
         block_id = spec.first_block
-        block_count: Optional[int] = None
-        blocks: list["PagedBlock"] = []
+        block_count: int | None = None
+        blocks: list[PagedBlock] = []
 
         while True:
             params_with_block = dict(params)
@@ -1287,7 +1571,7 @@ class Elke27Client:
             try:
                 await sent_event.wait()
                 msg = await asyncio.wait_for(future, timeout=timeout_value)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._kernel._pending_responses.drop(seq)
                 return Result.failure(E27Timeout(f"async_execute timeout waiting for {command_key} seq={seq}"))
             except asyncio.CancelledError:
@@ -1343,6 +1627,11 @@ class Elke27Client:
         auth_queue = opaque if opaque is not None else queue.Queue(maxsize=1)
         if not hasattr(auth_queue, "get"):
             return Result.failure(ProtocolError("Authenticate opaque must support get()."))
+        pin_value = kwargs.get("pin")
+        if isinstance(pin_value, str) and pin_value.isdigit():
+            self._last_auth_pin = int(pin_value)
+        elif isinstance(pin_value, int):
+            self._last_auth_pin = pin_value
         try:
             seq = self._kernel.request(route, pending=True, opaque=auth_queue, **kwargs)
         except _CLIENT_EXCEPTIONS as exc:
@@ -1365,7 +1654,7 @@ class Elke27Client:
             return Result.failure(InvalidPin(f"Authenticate failed with error_code={error_code}"))
         return Result.failure(InvalidPin("Authenticate failed with unknown error."))
 
-    async def _async_authenticate(self, *, pin: int, timeout_s: Optional[float]) -> Result[Mapping[str, Any]]:
+    async def _async_authenticate(self, *, pin: int, timeout_s: float | None) -> Result[Mapping[str, Any]]:
         loop = asyncio.get_running_loop()
         seq = self._kernel._next_seq()
         expected_route: RouteKey = ("authenticate", "__root__")
@@ -1399,7 +1688,7 @@ class Elke27Client:
         try:
             await sent_event.wait()
             msg = await asyncio.wait_for(future, timeout=timeout_value)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._kernel._pending_responses.drop(seq)
             return Result.failure(E27Timeout("Authenticate response timed out."))
         except asyncio.CancelledError:
@@ -1424,7 +1713,7 @@ class Elke27Client:
         return Result.success(response_payload)
 
 
-    def pump_once(self, *, timeout_s: float = 0.5) -> Result[Optional[dict[str, Any]]]:
+    def pump_once(self, *, timeout_s: float = 0.5) -> Result[dict[str, Any] | None]:
         try:
             msg = self._kernel.session.pump_once(timeout_s=timeout_s)
             return Result.success(msg)
@@ -1472,8 +1761,8 @@ class Elke27Client:
         self,
         exc: BaseException,
         *,
-        phase: Optional[str] = None,
-        detail: Optional[str] = None,
+        phase: str | None = None,
+        detail: str | None = None,
     ) -> E27Error:
         context = self._error_context(phase=phase, detail=detail)
 
@@ -1517,9 +1806,9 @@ class Elke27Client:
 
         return E27Error(str(exc) or "E27 operation failed.", context=context, cause=exc)
 
-    def _error_context(self, *, phase: Optional[str], detail: Optional[str]) -> E27ErrorContext:
-        host: Optional[str] = None
-        port: Optional[int] = None
+    def _error_context(self, *, phase: str | None, detail: str | None) -> E27ErrorContext:
+        host: str | None = None
+        port: int | None = None
 
         session = getattr(self._kernel, "_session", None)
         if session is not None:
@@ -1535,7 +1824,7 @@ class Elke27Client:
         )
 
     @staticmethod
-    def _extract_error_code(msg: Mapping[str, Any], expected_route: RouteKey) -> Optional[int]:
+    def _extract_error_code(msg: Mapping[str, Any], expected_route: RouteKey) -> int | None:
         domain, command = expected_route
         domain_obj = msg.get(domain)
         if not isinstance(domain_obj, Mapping):
@@ -1584,7 +1873,7 @@ class Elke27Client:
         self,
         command_key: str,
         min_permission: PermissionLevel,
-    ) -> Optional[E27Error]:
+    ) -> E27Error | None:
         if self._kernel.state.panel.session_id is None:
             return NotAuthenticatedError(f"{command_key}: missing session/encryption key.")
         return None
@@ -1606,9 +1895,13 @@ class Elke27Client:
             pin_param = signature.parameters.get("pin")
             if pin_param is None and "pin" in coerced and not accepts_kwargs:
                 coerced.pop("pin", None)
-            elif pin_param is not None and isinstance(pin_value, str) and pin_value.isdigit():
-                if pin_param.annotation is int:
-                    coerced["pin"] = int(pin_value)
+            elif (
+                pin_param is not None
+                and isinstance(pin_value, str)
+                and pin_value.isdigit()
+                and pin_param.annotation is int
+            ):
+                coerced["pin"] = int(pin_value)
         return coerced
 
     def _all_areas_disarmed(self) -> bool:
@@ -1643,13 +1936,25 @@ class Elke27Client:
         return None
 
     @staticmethod
-    def _coerce_block_count(value: Any) -> Optional[int]:
+    def _coerce_block_count(value: Any) -> int | None:
         if isinstance(value, int):
             return value if value >= 1 else None
         if isinstance(value, str) and value.isdigit():
             count = int(value)
             return count if count >= 1 else None
         return None
+
+
+def _resolve_zone_definition(state: Any, value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, int):
+        entry = getattr(state, "zone_defs_by_id", {}).get(value)
+        if isinstance(entry, Mapping):
+            definition = entry.get("definition")
+            if definition is not None:
+                return str(definition)
+    return None
 
 
 def _merge_output_status_strings(blocks: list[PagedBlock], block_count: int) -> Mapping[str, Any]:

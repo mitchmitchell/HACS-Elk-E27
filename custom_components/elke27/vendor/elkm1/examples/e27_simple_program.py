@@ -21,10 +21,8 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
 
-from elke27_lib import Elk
-from elke27_lib import linking
+from elke27_lib import Elk, linking
 from elke27_lib.events import PanelVersionInfoUpdated
 from elke27_lib.session import SessionConfig
 
@@ -37,12 +35,12 @@ class E27Credentials:
     passphrase: str
 
 
-def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+def _env(name: str, default: str | None = None) -> str | None:
     import os
     return os.environ.get(name, default)
 
 
-def _env_any(names: list[str], default: Optional[str] = None) -> Optional[str]:
+def _env_any(names: list[str], default: str | None = None) -> str | None:
     for name in names:
         value = _env(name)
         if value:
@@ -50,7 +48,7 @@ def _env_any(names: list[str], default: Optional[str] = None) -> Optional[str]:
     return default
 
 
-def _truthy(value: Optional[str]) -> bool:
+def _truthy(value: str | None) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "on"}

@@ -13,7 +13,6 @@ from elke27_lib.handlers.user import (
     make_user_get_configured_handler,
 )
 
-
 ROUTE_USER_GET_CONFIGURED = ("user", "get_configured")
 ROUTE_USER_GET_ATTRIBS = ("user", "get_attribs")
 

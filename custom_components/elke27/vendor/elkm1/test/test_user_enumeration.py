@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from elke27_lib.client import _merge_configured_users
 from elke27_lib.const import E27ErrorCode
-from elke27_lib.handlers.user import make_user_get_attribs_handler, make_user_get_configured_handler
+from elke27_lib.handlers.user import (
+    make_user_get_attribs_handler,
+    make_user_get_configured_handler,
+)
 from elke27_lib.states import PanelState
 
 

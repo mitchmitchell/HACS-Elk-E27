@@ -22,15 +22,15 @@ Key points (DDR-0036 aligned):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
 import json
 import logging
 import time
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
-
-RouteKey = Tuple[str, str]
+RouteKey = tuple[str, str]
 
 
 class MessageKind(str, Enum):
@@ -50,9 +50,9 @@ class DispatchSeverity(str, Enum):
 class DispatchError:
     code: str
     message: str
-    domain: Optional[str] = None
-    name: Optional[str] = None
-    keys: Tuple[str, ...] = ()
+    domain: str | None = None
+    name: str | None = None
+    keys: tuple[str, ...] = ()
     severity: DispatchSeverity = DispatchSeverity.WARNING
 
 
@@ -63,8 +63,8 @@ class PendingRequest:
     Policy (timeouts/retries/backoff) belongs above Dispatcher.
     """
     seq: int
-    expected_route: Optional[RouteKey] = None
-    created_at: Optional[float] = None
+    expected_route: RouteKey | None = None
+    created_at: float | None = None
     opaque: Any = None
 
 
@@ -73,7 +73,7 @@ class PagedTransferKey:
     """
     Correlation key for paged transfers (ADR-0013).
     """
-    session_id: Optional[int]
+    session_id: int | None
     transfer_id: int
     route: RouteKey
 
@@ -84,24 +84,24 @@ class PagedBlock:
     payload: Mapping[str, Any]
 
 
-PagedMergeFn = Callable[[List[PagedBlock], int], Mapping[str, Any]]
+PagedMergeFn = Callable[[list[PagedBlock], int], Mapping[str, Any]]
 PagedRequestBlockFn = Callable[[int, PagedTransferKey], None]
 
 
 @dataclass(frozen=True)
 class PagedRouteSpec:
     merge_fn: PagedMergeFn
-    request_block: Optional[PagedRequestBlockFn]
+    request_block: PagedRequestBlockFn | None
     timeout_s: float
 
 
 @dataclass
 class PagedTransfer:
     key: PagedTransferKey
-    total_count: Optional[int]
+    total_count: int | None
     created_at: float
     last_update_at: float
-    received_blocks: Dict[int, Mapping[str, Any]] = field(default_factory=dict)
+    received_blocks: dict[int, Mapping[str, Any]] = field(default_factory=dict)
     requested_blocks: set[int] = field(default_factory=set)
 
 
@@ -111,23 +111,23 @@ class DispatchContext:
     Diagnostics-only context. No policy.
     """
     kind: MessageKind
-    seq: Optional[int]
-    session_id: Optional[int]
+    seq: int | None
+    session_id: int | None
     route: RouteKey
     classification: str  # "BROADCAST" | "RESPONSE" | "UNSOLICITED" | "UNKNOWN"
-    response_match: Optional[PendingRequest] = None
-    raw_route: Optional[RouteKey] = None  # original route before any error routing (usually same as route)
+    response_match: PendingRequest | None = None
+    raw_route: RouteKey | None = None  # original route before any error routing (usually same as route)
 
 
 @dataclass
 class DispatchResult:
     route: RouteKey
     kind: MessageKind
-    seq: Optional[int]
-    session_id: Optional[int]
+    seq: int | None
+    session_id: int | None
     classification: str
-    response_match: Optional[PendingRequest] = None
-    errors: List[DispatchError] = field(default_factory=list)
+    response_match: PendingRequest | None = None
+    errors: list[DispatchError] = field(default_factory=list)
     handled: bool = False
 
 
@@ -181,10 +181,10 @@ class Dispatcher:
         now: Callable[[], float] = time.monotonic,
         paged_timeout_s: float = 10.0,
     ) -> None:
-        self._handlers: Dict[RouteKey, List[DispatchHandler]] = {}
-        self._pending: Dict[int, PendingRequest] = {}
-        self._paged_routes: Dict[RouteKey, PagedRouteSpec] = {}
-        self._paged_transfers: Dict[PagedTransferKey, PagedTransfer] = {}
+        self._handlers: dict[RouteKey, list[DispatchHandler]] = {}
+        self._pending: dict[int, PendingRequest] = {}
+        self._paged_routes: dict[RouteKey, PagedRouteSpec] = {}
+        self._paged_transfers: dict[PagedTransferKey, PagedTransfer] = {}
         self._now = now
         self._paged_timeout_s = paged_timeout_s
 
@@ -212,8 +212,8 @@ class Dispatcher:
         route: RouteKey,
         *,
         merge_fn: PagedMergeFn,
-        request_block: Optional[PagedRequestBlockFn] = None,
-        timeout_s: Optional[float] = None,
+        request_block: PagedRequestBlockFn | None = None,
+        timeout_s: float | None = None,
     ) -> None:
         """
         Register a paged route for ADR-0013 reassembly.
@@ -245,7 +245,7 @@ class Dispatcher:
     def add_pending(self, pending: PendingRequest) -> None:
         self._pending[pending.seq] = pending
 
-    def match_pending(self, seq: int, *, pop: bool = True) -> Optional[PendingRequest]:
+    def match_pending(self, seq: int, *, pop: bool = True) -> PendingRequest | None:
         """
         Seq correlation is seq-first. The default policy is one-shot (pop=True).
         """
@@ -274,13 +274,13 @@ class Dispatcher:
         route, route_errors = self._extract_route(msg)
         seq, kind, seq_errors = self._classify_kind(msg)
 
-        errors: List[DispatchError] = []
+        errors: list[DispatchError] = []
         errors.extend(route_errors)
         errors.extend(seq_errors)
 
         # Correlation / classification
         classification = "UNKNOWN"
-        response_match: Optional[PendingRequest] = None
+        response_match: PendingRequest | None = None
         if kind == MessageKind.BROADCAST:
             classification = "BROADCAST"
         elif kind == MessageKind.DIRECTED and seq is not None:
@@ -330,6 +330,13 @@ class Dispatcher:
         msg = paged_msg
 
         # Normal dispatch fan-out (assembled messages only for paged routes)
+        if LOG.isEnabledFor(logging.DEBUG) and ctx.route[0] == "zone":
+            LOG.debug(
+                "dispatch zone message: route=%s classification=%s seq=%s",
+                ctx.route,
+                ctx.classification,
+                ctx.seq,
+            )
         result.handled = self._dispatch_normal(msg, ctx)
 
         # Emit dispatch errors (after normal routing)
@@ -342,8 +349,8 @@ class Dispatcher:
         self,
         msg: Mapping[str, Any],
         ctx: DispatchContext,
-        response_match: Optional[PendingRequest],
-    ) -> Optional[Mapping[str, Any]]:
+        response_match: PendingRequest | None,
+    ) -> Mapping[str, Any] | None:
         route = ctx.route
         if route not in self._paged_routes:
             return msg
@@ -420,7 +427,16 @@ class Dispatcher:
                     continue
                 try:
                     spec.request_block(next_block, transfer_key)
-                except Exception:
+                except Exception as exc:
+                    LOG.warning(
+                        "Paged request_block failed: route=%s.%s block=%s key=%s error=%s",
+                        route[0],
+                        route[1],
+                        next_block,
+                        transfer_key,
+                        exc,
+                        exc_info=True,
+                    )
                     break
                 transfer.requested_blocks.add(next_block)
                 break
@@ -441,16 +457,16 @@ class Dispatcher:
     def _paged_transfer_key(
         self,
         route: RouteKey,
-        session_id: Optional[int],
-        response_match: Optional[PendingRequest],
-    ) -> Optional[PagedTransferKey]:
+        session_id: int | None,
+        response_match: PendingRequest | None,
+    ) -> PagedTransferKey | None:
         if response_match is not None and isinstance(response_match.opaque, PagedTransferKey):
             return response_match.opaque
         if response_match is not None and isinstance(response_match.seq, int):
             return PagedTransferKey(session_id=session_id, transfer_id=response_match.seq, route=route)
         return None
 
-    def _extract_paged_payload(self, msg: Mapping[str, Any], route: RouteKey) -> Optional[Mapping[str, Any]]:
+    def _extract_paged_payload(self, msg: Mapping[str, Any], route: RouteKey) -> Mapping[str, Any] | None:
         domain, name = route
         domain_obj = msg.get(domain)
         if not isinstance(domain_obj, Mapping):
@@ -481,9 +497,9 @@ class Dispatcher:
 
     # --- Internal: routing + classification ---
 
-    def _extract_route(self, msg: Mapping[str, Any]) -> Tuple[RouteKey, List[DispatchError]]:
-        errors: List[DispatchError] = []
-        root_non_meta = [k for k in msg.keys() if k not in META_KEYS]
+    def _extract_route(self, msg: Mapping[str, Any]) -> tuple[RouteKey, list[DispatchError]]:
+        errors: list[DispatchError] = []
+        root_non_meta = [k for k in msg if k not in META_KEYS]
 
         if self._is_root_error_envelope(msg):
             return (ERROR_DOMAIN, ERROR_ROOT), errors
@@ -550,7 +566,10 @@ class Dispatcher:
         errors.append(
             DispatchError(
                 code=ERR_UNEXPECTED_VALUE_TYPE,
-                message=f"Domain '{domain}' value is unexpected type '{type(v).__name__}'; routing to domain-level handler.",
+                message=(
+                    f"Domain '{domain}' value is unexpected type '{type(v).__name__}'; "
+                    "routing to domain-level handler."
+                ),
                 domain=domain,
                 name="__value__",
             )
@@ -601,11 +620,11 @@ class Dispatcher:
             "payload",
             "detail",
         }
-        root_non_meta = [k for k in msg.keys() if k not in META_KEYS]
+        root_non_meta = [k for k in msg if k not in META_KEYS]
         return all(k in allowed_keys for k in root_non_meta)
 
-    def _classify_kind(self, msg: Mapping[str, Any]) -> Tuple[Optional[int], MessageKind, List[DispatchError]]:
-        errors: List[DispatchError] = []
+    def _classify_kind(self, msg: Mapping[str, Any]) -> tuple[int | None, MessageKind, list[DispatchError]]:
+        errors: list[DispatchError] = []
 
         # Missing seq is allowed and yields UNKNOWN without error (bootstrap/hello often lack root seq).
         if "seq" not in msg:
@@ -638,7 +657,7 @@ class Dispatcher:
         return None, MessageKind.UNKNOWN, errors
 
     @staticmethod
-    def _get_int(msg: Mapping[str, Any], key: str) -> Optional[int]:
+    def _get_int(msg: Mapping[str, Any], key: str) -> int | None:
         v = msg.get(key)
         return v if isinstance(v, int) else None
 
@@ -720,8 +739,15 @@ class Dispatcher:
         for h in list(handlers):
             try:
                 handled = bool(h(msg, ctx))
-            except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+            except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
                 # Contract: handler exceptions do not break dispatcher.
+                LOG.warning(
+                    "Handler error: route=%s msg_keys=%s error=%s",
+                    route,
+                    tuple(msg.keys()),
+                    exc,
+                    exc_info=True,
+                )
                 handled = False
             handled_any |= handled
         return handled_any

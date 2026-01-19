@@ -15,15 +15,15 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any
 
 import pytest
 
 # Adjust import path if your session module lives elsewhere.
 # The tests are written to be resilient by monkeypatching module-level dependencies.
-from elke27_lib import linking, session as session_mod
+from elke27_lib import linking
+from elke27_lib import session as session_mod
 
 
 @dataclass
@@ -39,11 +39,11 @@ class _FakeSocket:
     """
 
     def __init__(self) -> None:
-        self.connected_to: Optional[tuple[str, int]] = None
-        self.timeouts: List[float] = []
+        self.connected_to: tuple[str, int] | None = None
+        self.timeouts: list[float] = []
         self.closed: bool = False
-        self.sent: List[bytes] = []
-        self._recv_queue: List[bytes] = []
+        self.sent: list[bytes] = []
+        self._recv_queue: list[bytes] = []
 
     def settimeout(self, t: float) -> None:
         self.timeouts.append(t)
@@ -248,7 +248,12 @@ def test_recv_json_deframes_decrypts_and_parses(monkeypatch: pytest.MonkeyPatch)
     # Provide a valid frame_no_crc: [proto][len_lo][len_hi][ciphertext...]
     monkeypatch.setattr(s, "_recv_one_frame_no_crc", lambda *, timeout_s: b"\x84\x05\x00" + b"ABCDE")
 
-    def _fake_decrypt_schema0_envelope(*, session_key: bytes, protocol_byte: int, ciphertext: bytes) -> _DecryptEnvelope:
+    def _fake_decrypt_schema0_envelope(
+        *,
+        session_key: bytes,
+        protocol_byte: int,
+        ciphertext: bytes,
+    ) -> _DecryptEnvelope:
         assert session_key == bytes.fromhex(s.info.session_key_hex)
         assert protocol_byte == 0x84
         assert ciphertext == b"ABCDE"
@@ -331,6 +336,180 @@ def test_recv_one_frame_no_crc_uses_deframe_state_and_feed(monkeypatch: pytest.M
     assert feed_calls[0][1] == b"chunk1"
     assert feed_calls[1][0] is s._deframe_state
     assert feed_calls[1][1] == b"chunk2"
+
+
+def test_recv_one_frame_no_crc_queues_multiple_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+    s, _ = _make_session_ready(monkeypatch)
+
+    recv_calls: list[bytes] = []
+    chunks = [b"chunk1"]
+
+    def _fake_recv_some(*, max_bytes: int) -> bytes:
+        assert max_bytes == s.cfg.recv_max_bytes
+        recv_calls.append(b"call")
+        return chunks.pop(0)
+
+    monkeypatch.setattr(s, "_recv_some", _fake_recv_some)
+
+    def _fake_deframe_feed(state: Any, chunk: bytes) -> list[_DeframeResult]:
+        assert state is s._deframe_state
+        assert chunk == b"chunk1"
+        return [
+            _DeframeResult(ok=True, frame_no_crc=b"\x80\x01\x00A"),
+            _DeframeResult(ok=True, frame_no_crc=b"\x81\x01\x00B"),
+        ]
+
+    monkeypatch.setattr(session_mod, "deframe_feed", _fake_deframe_feed)
+
+    frame1 = s._recv_one_frame_no_crc(timeout_s=0.5)
+    frame2 = s._recv_one_frame_no_crc(timeout_s=0.5)
+
+    assert frame1 == b"\x80\x01\x00A"
+    assert frame2 == b"\x81\x01\x00B"
+    assert len(recv_calls) == 1
+
+
+def test_recv_json_drains_multi_frame_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
+    s, _ = _make_session_ready(monkeypatch)
+
+    chunks = [b"chunk1"]
+
+    def _fake_recv_some(*, max_bytes: int) -> bytes:
+        assert max_bytes == s.cfg.recv_max_bytes
+        return chunks.pop(0)
+
+    monkeypatch.setattr(s, "_recv_some", _fake_recv_some)
+
+    def _fake_deframe_feed(state: Any, chunk: bytes) -> list[_DeframeResult]:
+        assert state is s._deframe_state
+        assert chunk == b"chunk1"
+        return [
+            _DeframeResult(ok=True, frame_no_crc=b"\x84\x05\x00AAAAA"),
+            _DeframeResult(ok=True, frame_no_crc=b"\x84\x05\x00BBBBB"),
+        ]
+
+    monkeypatch.setattr(session_mod, "deframe_feed", _fake_deframe_feed)
+
+    payloads = [
+        b'{"zone":1}',
+        b'{"zone":2}',
+    ]
+
+    def _fake_decrypt_schema0_envelope(*, session_key: bytes, protocol_byte: int, ciphertext: bytes) -> _DecryptEnvelope:
+        assert protocol_byte == 0x84
+        return _DecryptEnvelope(payload=payloads.pop(0))
+
+    monkeypatch.setattr(session_mod, "decrypt_schema0_envelope", _fake_decrypt_schema0_envelope)
+
+    first = s.recv_json(timeout_s=0.5)
+    second = s.recv_json(timeout_s=0.5)
+
+    assert first == {"zone": 1}
+    assert second == {"zone": 2}
+
+
+def test_recv_json_skips_invalid_then_reads_next_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    s, _ = _make_session_ready(monkeypatch)
+
+    chunks = [b"chunk1"]
+
+    def _fake_recv_some(*, max_bytes: int) -> bytes:
+        assert max_bytes == s.cfg.recv_max_bytes
+        return chunks.pop(0)
+
+    monkeypatch.setattr(s, "_recv_some", _fake_recv_some)
+
+    def _fake_deframe_feed(state: Any, chunk: bytes) -> list[_DeframeResult]:
+        assert state is s._deframe_state
+        assert chunk == b"chunk1"
+        return [
+            _DeframeResult(ok=True, frame_no_crc=b"\x84\x05\x00AAAAA"),
+            _DeframeResult(ok=False),
+            _DeframeResult(ok=True, frame_no_crc=b"\x84\x05\x00BBBBB"),
+        ]
+
+    monkeypatch.setattr(session_mod, "deframe_feed", _fake_deframe_feed)
+
+    payloads = [
+        b'{"zone":3}',
+        b'{"zone":4}',
+    ]
+
+    def _fake_decrypt_schema0_envelope(*, session_key: bytes, protocol_byte: int, ciphertext: bytes) -> _DecryptEnvelope:
+        assert protocol_byte == 0x84
+        return _DecryptEnvelope(payload=payloads.pop(0))
+
+    monkeypatch.setattr(session_mod, "decrypt_schema0_envelope", _fake_decrypt_schema0_envelope)
+
+    first = s.recv_json(timeout_s=0.5)
+    second = s.recv_json(timeout_s=0.5)
+
+    assert first == {"zone": 3}
+    assert second == {"zone": 4}
+
+
+def test_recv_json_handles_partial_frame_then_next_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
+    s, _ = _make_session_ready(monkeypatch)
+
+    chunks = [b"chunk1", b"chunk2"]
+
+    def _fake_recv_some(*, max_bytes: int) -> bytes:
+        assert max_bytes == s.cfg.recv_max_bytes
+        return chunks.pop(0)
+
+    monkeypatch.setattr(s, "_recv_some", _fake_recv_some)
+
+    def _fake_deframe_feed(state: Any, chunk: bytes) -> list[_DeframeResult]:
+        assert state is s._deframe_state
+        if chunk == b"chunk1":
+            return []
+        return [_DeframeResult(ok=True, frame_no_crc=b"\x84\x05\x00HELLO")]
+
+    monkeypatch.setattr(session_mod, "deframe_feed", _fake_deframe_feed)
+
+    monkeypatch.setattr(
+        session_mod,
+        "decrypt_schema0_envelope",
+        lambda *, session_key, protocol_byte, ciphertext: _DecryptEnvelope(payload=b'{"zone":5}'),
+    )
+
+    obj = s.recv_json(timeout_s=0.5)
+    assert obj == {"zone": 5}
+
+
+def test_recv_json_delivers_after_decrypt_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    s, _ = _make_session_ready(monkeypatch)
+
+    chunks = [b"chunk1"]
+
+    def _fake_recv_some(*, max_bytes: int) -> bytes:
+        assert max_bytes == s.cfg.recv_max_bytes
+        return chunks.pop(0)
+
+    monkeypatch.setattr(s, "_recv_some", _fake_recv_some)
+
+    def _fake_deframe_feed(state: Any, chunk: bytes) -> list[_DeframeResult]:
+        assert state is s._deframe_state
+        assert chunk == b"chunk1"
+        return [
+            _DeframeResult(ok=True, frame_no_crc=b"\x84\x05\x00AAAAA"),
+            _DeframeResult(ok=True, frame_no_crc=b"\x84\x05\x00BBBBB"),
+        ]
+
+    monkeypatch.setattr(session_mod, "deframe_feed", _fake_deframe_feed)
+
+    def _fake_decrypt_schema0_envelope(*, session_key: bytes, protocol_byte: int, ciphertext: bytes) -> _DecryptEnvelope:
+        if ciphertext == b"AAAAA":
+            raise session_mod.SessionProtocolError("decrypt failed")
+        return _DecryptEnvelope(payload=b'{"zone":6}')
+
+    monkeypatch.setattr(session_mod, "decrypt_schema0_envelope", _fake_decrypt_schema0_envelope)
+
+    with pytest.raises(session_mod.SessionProtocolError, match=r"decrypt failed"):
+        s.recv_json(timeout_s=0.5)
+
+    obj = s.recv_json(timeout_s=0.5)
+    assert obj == {"zone": 6}
 
 
 def test_pump_once_timeout_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:

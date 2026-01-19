@@ -21,14 +21,16 @@ Related DDRs:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final, Tuple
+from typing import Final
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from .errors import E27ErrorContext, E27ProtocolError
-from .util import swap_endianness, calculate_block_padding  # swap_endianness is the 32-bit word swap
-
+from .util import (  # swap_endianness is the 32-bit word swap
+    calculate_block_padding,
+    swap_endianness,
+)
 
 # Fixed IV used by E27 for AES-128-CBC in observed flows
 API_LINK_IV: Final[bytes] = bytes(range(16))  # 00 01 02 ... 0f (Java initVectorBytes)
@@ -199,7 +201,7 @@ def encrypt_schema0_envelope(
     head: int = 0,
     envelope_seq: int = 0,
     iv: bytes = API_LINK_IV,
-) -> Tuple[int, bytes]:
+) -> tuple[int, bytes]:
     """
     Build and encrypt a schema-0 envelope.
 
@@ -274,7 +276,7 @@ def decrypt_api_link_response(
     ciphertext: bytes,
     tempkey_hex: str,
     iv: bytes = API_LINK_IV,
-) -> Tuple[int, bytes]:
+) -> tuple[int, bytes]:
     """
     Decrypt the api_link response payload.
 

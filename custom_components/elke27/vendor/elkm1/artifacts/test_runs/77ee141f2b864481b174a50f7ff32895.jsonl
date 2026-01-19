@@ -1,0 +1,3 @@
+{"run_id": "77ee141f2b864481b174a50f7ff32895", "test_id": "test/test_e27_area_info_live.py::test_live_area_info", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T04:54:20Z", "meta": {"pid": 5884}}
+{"run_id": "77ee141f2b864481b174a50f7ff32895", "test_id": "test/test_e27_area_info_live.py::test_live_area_info", "record_type": "test_end", "t_ms": 248, "ts_utc": "2026-01-01T04:54:20Z", "outcome": "pass", "error": null}
+{"run_id": "77ee141f2b864481b174a50f7ff32895", "test_id": "test/test_e27_configured_names_live.py::test_live_configured_names", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-01T04:54:20Z", "meta": {"pid": 5884}}

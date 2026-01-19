@@ -6,17 +6,17 @@ Feature module: output
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from elke27_lib.handlers.output import (
     make_output_configured_merge,
-    make_output_get_configured_handler,
     make_output_get_all_outputs_status_handler,
     make_output_get_attribs_handler,
+    make_output_get_configured_handler,
     make_output_get_status_handler,
     make_output_get_table_info_handler,
 )
-
 
 ROUTE_OUTPUT_GET_STATUS = ("output", "get_status")
 ROUTE_OUTPUT_GET_ALL_OUTPUTS_STATUS = ("output", "get_all_outputs_status")

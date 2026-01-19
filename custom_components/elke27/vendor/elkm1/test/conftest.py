@@ -1,18 +1,18 @@
 # test/conftest.py
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import os
 import pathlib
 import uuid
+from collections.abc import AsyncIterator, Generator
 from dataclasses import dataclass
-from typing import AsyncIterator, Generator, Optional
 
 import pytest
 
-from test.helpers.reporter import Reporter
 from elke27_lib.client import Elke27Client
 from elke27_lib.linking import E27Identity
+from test.helpers.reporter import Reporter
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ class _LiveCredentials:
     passphrase: str
 
 
-def _get_env(name: str) -> Optional[str]:
+def _get_env(name: str) -> str | None:
     value = os.environ.get(name)
     if value is None or value.strip() == "":
         return None
@@ -44,7 +44,6 @@ async def live_e27_client(request: pytest.FixtureRequest) -> AsyncIterator[Elke2
     port = int(_get_env("ELKE27_PORT") or "2101")
 
     client = Elke27Client()
-    panel = {"host": host, "port": port}
     identity = E27Identity(
         mn=_get_env("ELKE27_MN") or "CODEx",
         sn=_get_env("ELKE27_SN") or "LIVE",
@@ -93,7 +92,7 @@ def _get_or_create_run_id(cfg: pytest.Config) -> str:
     run_id = getattr(cfg, "_e27_run_id", None)
     if not run_id:
         run_id = uuid.uuid4().hex
-        setattr(cfg, "_e27_run_id", run_id)
+        cfg._e27_run_id = run_id
     return run_id
 
 
@@ -106,7 +105,7 @@ def _get_or_create_report_path(cfg: pytest.Config) -> pathlib.Path:
         artifacts_dir = base_dir
         artifacts_dir.mkdir(parents=True, exist_ok=True)
         p = artifacts_dir / f"{_get_or_create_run_id(cfg)}.jsonl"
-        setattr(cfg, "_e27_report_path", p)
+        cfg._e27_report_path = p
     return p
 
 
@@ -204,7 +203,7 @@ def reporter(request: pytest.FixtureRequest, e27_run_id: str) -> Generator[Repor
 
 
 def _finalize_reporter_for_item(item: pytest.Item) -> None:
-    r: Optional[Reporter] = getattr(item, "_e27_reporter", None)  # type: ignore[attr-defined]
+    r: Reporter | None = getattr(item, "_e27_reporter", None)  # type: ignore[attr-defined]
     if r is None:
         return
 
@@ -244,10 +243,8 @@ def _finalize_reporter_for_item(item: pytest.Item) -> None:
     r.finalize()
 
     # Prevent double-finalization if pytest calls teardown hooks unusually
-    try:
+    with contextlib.suppress(Exception):
         delattr(item, "_e27_reporter")  # type: ignore[attr-defined]
-    except Exception:
-        pass
 
 
 def pytest_runtest_teardown(item: pytest.Item, nextitem) -> None:
@@ -295,10 +292,4 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
 @pytest.fixture()
 def fail_setup():
-    assert False, "intentional setup failure"
-
-
-@pytest.fixture()
-def fail_teardown():
-    yield
-    assert False, "intentional teardown failure"
+    raise AssertionError("intentional setup failure")
