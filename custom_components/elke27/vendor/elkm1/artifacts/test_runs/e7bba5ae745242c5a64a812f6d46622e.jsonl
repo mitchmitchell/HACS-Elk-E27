@@ -1,0 +1,2 @@
+{"run_id": "e7bba5ae745242c5a64a812f6d46622e", "test_id": "test/test_live_e27_zone_names.py::test_live_zone_names_from_configured", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-04T04:03:53Z", "meta": {"pid": 43764}}
+{"run_id": "e7bba5ae745242c5a64a812f6d46622e", "test_id": "test/test_live_e27_zone_names.py::test_live_zone_names_from_configured", "record_type": "test_end", "t_ms": 1, "ts_utc": "2026-01-04T04:03:53Z", "outcome": "unknown", "error": null}

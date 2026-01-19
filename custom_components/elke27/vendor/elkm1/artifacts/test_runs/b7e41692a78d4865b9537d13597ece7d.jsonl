@@ -1,0 +1,2 @@
+{"run_id": "b7e41692a78d4865b9537d13597ece7d", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_on_persist", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-14T04:29:12Z", "meta": {"pid": 75258}}
+{"run_id": "b7e41692a78d4865b9537d13597ece7d", "test_id": "test/test_live_e27_chime.py::test_live_area_chime_on_persist", "record_type": "test_end", "t_ms": 7581, "ts_utc": "2026-01-14T04:29:19Z", "outcome": "pass", "error": null}

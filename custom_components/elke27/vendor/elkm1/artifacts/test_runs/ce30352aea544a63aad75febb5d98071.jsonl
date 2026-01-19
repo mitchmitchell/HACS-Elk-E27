@@ -1,0 +1,2 @@
+{"run_id": "ce30352aea544a63aad75febb5d98071", "test_id": "test/test_live_e27_log.py::test_live_log_domain", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-19T05:44:40Z", "meta": {"pid": 11598}}
+{"run_id": "ce30352aea544a63aad75febb5d98071", "test_id": "test/test_live_e27_log.py::test_live_log_domain", "record_type": "test_end", "t_ms": 22897, "ts_utc": "2026-01-19T05:45:03Z", "outcome": "pass", "error": null}
