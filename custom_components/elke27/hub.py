@@ -14,11 +14,7 @@ from elke27_lib import ArmMode, ClientConfig, Elke27Client, LinkKeys
 from elke27_lib.errors import Elke27LinkRequiredError, Elke27PinRequiredError
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import (
-    ConfigEntryAuthFailed,
-    ConfigEntryNotReady,
-    HomeAssistantError,
-)
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 
 from .const import READY_TIMEOUT
 from .identity import build_client_identity
@@ -36,7 +32,6 @@ class Elke27Hub:
         port: int,
         link_keys_json: str,
         integration_serial: str,
-        pin: str | None,
         panel_name: str | None,
     ) -> None:
         """Initialize the hub wrapper."""
@@ -45,7 +40,6 @@ class Elke27Hub:
         self._port = port
         self._link_keys_json = link_keys_json
         self._integration_serial = integration_serial
-        self._pin = pin
         self._panel_name = panel_name
         self._client: Elke27Client | None = None
         self._connection_unsubscribe: Callable[[], None] | None = None
@@ -97,10 +91,6 @@ class Elke27Hub:
                 )
             self._client = client
 
-            def _raise_auth_failed(error: object | None) -> None:
-                message = str(error) if error is not None else "Invalid PIN"
-                raise ConfigEntryAuthFailed(message)
-
             def _raise_not_ready() -> None:
                 raise ConfigEntryNotReady(
                     "The client did not become ready before timeout"
@@ -113,13 +103,6 @@ class Elke27Hub:
                     if panel_name:
                         self._panel_name = panel_name
                         _LOGGER.debug("Discovered panel name: %s", panel_name)
-                if self._pin:
-                    auth_result = await client.async_execute(
-                        "control_authenticate", pin=int(self._pin)
-                    )
-                    if not getattr(auth_result, "ok", False):
-                        error = getattr(auth_result, "error", None)
-                        _raise_auth_failed(error)
                 ready = await client.wait_ready(timeout_s=READY_TIMEOUT)
                 if not ready:
                     _raise_not_ready()
@@ -244,15 +227,19 @@ class Elke27Hub:
             result = await self._hass.async_add_executor_job(method, *args, **kwargs)
         return bool(result) if isinstance(result, bool) else True
 
-    async def async_set_zone_bypass(self, zone_id: int, bypassed: bool) -> bool:
+    async def async_set_zone_bypass(
+        self, zone_id: int, bypassed: bool, *, pin: str | None = None
+    ) -> bool:
         """Request a zone bypass change."""
         client = self._client
         if client is None:
             return False
-        pin = self._pin
-        if not pin:
+        if pin is None:
             raise Elke27PinRequiredError("PIN required to bypass zones.")
-        pin_value = int(pin)
+        try:
+            pin_value = int(pin)
+        except (TypeError, ValueError) as err:
+            raise HomeAssistantError("Code must be numeric.") from err
         _LOGGER.debug(
             "Sending zone bypass request: zone_id=%s bypassed=%s pin=%s",
             zone_id,
@@ -306,7 +293,11 @@ class Elke27Hub:
 
         if mode is ArmMode.ARMED_STAY:
             arm_state = "ARMED_STAY"
-        elif mode is ArmMode.ARMED_AWAY:
+        elif (
+            mode is ArmMode.ARMED_AWAY
+            or (isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS")
+            or getattr(ArmMode, "ARMED_CUSTOM_BYPASS", None) is mode
+        ):
             arm_state = "ARMED_AWAY"
         else:
             raise HomeAssistantError("Arm mode is not supported.")
@@ -427,7 +418,7 @@ class Elke27Hub:
             _LOGGER.debug("Reconnect attempt %s starting", self._reconnect_attempts + 1)
             try:
                 await self._async_connect()
-            except (ConfigEntryAuthFailed, Elke27LinkRequiredError) as err:
+            except Elke27LinkRequiredError as err:
                 _LOGGER.error("Reconnect aborted: %s", err)
                 return
             except Exception as err:  # noqa: BLE001
