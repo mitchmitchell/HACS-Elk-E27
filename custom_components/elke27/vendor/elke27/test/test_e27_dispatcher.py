@@ -1,0 +1,369 @@
+from collections.abc import Mapping
+from typing import cast
+
+from elke27_lib.const import E27ErrorCode
+from elke27_lib.dispatcher import (
+    ERR_DOMAIN_EMPTY,
+    ERR_DOMAIN_MULTI,
+    ERR_INVALID_SEQ,
+    ERR_ROOT_EMPTY,
+    ERR_ROOT_MULTI,
+    ERR_UNEXPECTED_VALUE_TYPE,
+    ERROR_ALL,
+    ERROR_DOMAIN,
+    ERROR_ROOT,
+    DispatchContext,
+    Dispatcher,
+    MessageKind,
+    PagedBlock,
+    PagedTransferKey,
+    PendingRequest,
+)
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Mapping[str, object], DispatchContext]] = []
+
+    def handler(self, msg: Mapping[str, object], ctx: DispatchContext) -> bool:
+        self.calls.append((msg, ctx))
+        return True
+
+
+def _zone_empty_msg(seq: int) -> dict[str, object]:
+    zone_payload: dict[str, object] = {}
+    return {"zone": zone_payload, "seq": seq}
+
+
+def _zone_status_msg(seq: int | str | None = None) -> dict[str, object]:
+    status_payload: dict[str, object] = {}
+    zone_payload: dict[str, object] = {"status": status_payload}
+    msg: dict[str, object] = {"zone": zone_payload}
+    if seq is not None:
+        msg["seq"] = seq
+    return msg
+
+
+# ---------------------------------------------------------------------------
+# routing tests
+# ---------------------------------------------------------------------------
+
+
+def test_simple_domain_and_command_route():
+    d = Dispatcher()
+    r = Recorder()
+    d.register(("zone", "status"), r.handler)
+
+    msg: dict[str, object] = {"zone": {"status": {"id": 1}}, "seq": 1}
+    result = d.dispatch(msg)
+
+    assert result.route == ("zone", "status")
+    assert result.kind == MessageKind.DIRECTED
+    assert result.classification == "UNSOLICITED"
+    assert result.handled is True
+    assert len(result.errors) == 0
+    assert len(r.calls) == 1
+
+
+def test_domain_empty_dict_routes_to_empty_and_emits_error():
+    d = Dispatcher()
+    r = Recorder()
+    e = Recorder()
+
+    d.register(("zone", "__root__"), r.handler)
+    d.register((ERROR_DOMAIN, ERR_DOMAIN_EMPTY), e.handler)
+
+    msg = _zone_empty_msg(1)
+    result = d.dispatch(msg)
+
+    assert result.route == ("zone", "__empty__")
+    assert any(err.code == ERR_DOMAIN_EMPTY for err in result.errors)
+    assert len(r.calls) == 1
+    assert len(e.calls) == 1
+    err_msg = e.calls[0][0]
+    error_domain = cast(Mapping[str, Mapping[str, object]], err_msg["__error__"])
+    payload = error_domain[ERR_DOMAIN_EMPTY].get("payload")
+    assert isinstance(payload, str)
+    assert '"zone":{}' in payload
+
+
+def test_domain_multi_key_routes_to_root():
+    d = Dispatcher()
+    r = Recorder()
+
+    d.register(("zone", "__root__"), r.handler)
+
+    msg: dict[str, object] = {"zone": {"a": 1, "b": 2}, "seq": 1}
+    result = d.dispatch(msg)
+
+    assert result.route == ("zone", "__root__")
+    assert any(err.code == ERR_DOMAIN_MULTI for err in result.errors)
+    assert len(r.calls) == 1
+
+
+def test_domain_root_error_routes_to_error_without_dispatch_error():
+    d = Dispatcher()
+
+    msg: dict[str, object] = {
+        "seq": 1,
+        "network": {"error_code": E27ErrorCode.ELKERR_NOAUTH, "error_message": "no authorization"},
+    }
+    result = d.dispatch(msg)
+
+    assert result.route == ("network", "error")
+    assert not any(err.code == ERR_DOMAIN_MULTI for err in result.errors)
+
+
+def test_domain_unexpected_value_type():
+    d = Dispatcher()
+    r = Recorder()
+
+    d.register(("zone", "__root__"), r.handler)
+
+    msg: dict[str, object] = {"zone": True, "seq": 1}
+    result = d.dispatch(msg)
+
+    assert result.route == ("zone", "__value__")
+    assert any(err.code == ERR_UNEXPECTED_VALUE_TYPE for err in result.errors)
+    assert len(r.calls) == 1
+
+
+def test_root_empty():
+    d = Dispatcher()
+    e = Recorder()
+
+    d.register((ERROR_DOMAIN, ERR_ROOT_EMPTY), e.handler)
+
+    msg: dict[str, object] = {"seq": 1}
+    result = d.dispatch(msg)
+
+    assert result.route == ("__root__", "__empty__")
+    assert any(err.code == ERR_ROOT_EMPTY for err in result.errors)
+    assert len(e.calls) == 1
+    err_msg = e.calls[0][0]
+    error_domain = cast(Mapping[str, Mapping[str, object]], err_msg["__error__"])
+    payload = error_domain[ERR_ROOT_EMPTY].get("payload")
+    assert isinstance(payload, str)
+    assert '"seq":1' in payload
+
+
+def test_root_multi_domain():
+    d = Dispatcher()
+    e = Recorder()
+
+    d.register((ERROR_DOMAIN, ERR_ROOT_MULTI), e.handler)
+
+    area_payload: dict[str, object] = {}
+    zone_payload: dict[str, object] = {}
+    msg: dict[str, object] = {"zone": zone_payload, "area": area_payload, "seq": 1}
+    result = d.dispatch(msg)
+
+    assert result.route == ("__root__", "__multi__")
+    assert any(err.code == ERR_ROOT_MULTI for err in result.errors)
+    assert len(e.calls) == 1
+
+
+def test_root_error_envelope_routes_to_panel_error():
+    d = Dispatcher()
+    r = Recorder()
+
+    d.register((ERROR_DOMAIN, ERROR_ROOT), r.handler)
+
+    msg: dict[str, object] = {"seq": 0, "error_code": 11008, "error_message": "no authorization"}
+    result = d.dispatch(msg)
+
+    assert result.route == (ERROR_DOMAIN, ERROR_ROOT)
+    assert result.kind == MessageKind.BROADCAST
+    assert result.classification == "BROADCAST"
+    assert result.handled is True
+    assert not any(err.code == ERR_ROOT_MULTI for err in result.errors)
+    assert len(r.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# seq + classification tests
+# ---------------------------------------------------------------------------
+
+
+def test_missing_seq_is_unknown_without_error():
+    d = Dispatcher()
+    r = Recorder()
+    d.register(("zone", "status"), r.handler)
+
+    msg = _zone_status_msg()
+    result = d.dispatch(msg)
+
+    assert result.kind == MessageKind.UNKNOWN
+    assert result.classification == "UNKNOWN"
+    assert len(result.errors) == 0
+
+
+def test_broadcast_seq_zero():
+    d = Dispatcher()
+    r = Recorder()
+    d.register(("zone", "status"), r.handler)
+
+    msg = _zone_status_msg(0)
+    result = d.dispatch(msg)
+
+    assert result.kind == MessageKind.BROADCAST
+    assert result.classification == "BROADCAST"
+    assert len(r.calls) == 1
+
+
+def test_invalid_seq_type_emits_error():
+    d = Dispatcher()
+    e = Recorder()
+
+    d.register((ERROR_DOMAIN, ERR_INVALID_SEQ), e.handler)
+
+    msg = _zone_status_msg("abc")
+    result = d.dispatch(msg)
+
+    assert any(err.code == ERR_INVALID_SEQ for err in result.errors)
+    assert len(e.calls) == 1
+
+
+def test_negative_seq_emits_error_and_unknown():
+    d = Dispatcher()
+    e = Recorder()
+
+    d.register((ERROR_DOMAIN, ERR_INVALID_SEQ), e.handler)
+
+    msg = _zone_status_msg(-1)
+    result = d.dispatch(msg)
+
+    assert result.kind == MessageKind.UNKNOWN
+    assert any(err.code == ERR_INVALID_SEQ for err in result.errors)
+    assert len(e.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# pending correlation tests
+# ---------------------------------------------------------------------------
+
+
+def test_pending_request_is_matched_and_popped():
+    d = Dispatcher()
+    r = Recorder()
+
+    d.register(("zone", "status"), r.handler)
+
+    pending = PendingRequest(seq=42)
+    d.add_pending(pending)
+
+    msg = _zone_status_msg(42)
+    result = d.dispatch(msg)
+
+    assert result.classification == "RESPONSE"
+    assert result.response_match is pending
+    assert d.match_pending(42, pop=False) is None
+
+
+def test_directed_without_pending_is_unsolicited():
+    d = Dispatcher()
+
+    msg = _zone_status_msg(99)
+    result = d.dispatch(msg)
+
+    assert result.classification == "UNSOLICITED"
+
+
+# ---------------------------------------------------------------------------
+# error envelope tests
+# ---------------------------------------------------------------------------
+
+
+def test_error_envelope_shape_and_raw_route():
+    d = Dispatcher()
+    e = Recorder()
+
+    d.register((ERROR_DOMAIN, ERR_DOMAIN_EMPTY), e.handler)
+    d.register((ERROR_DOMAIN, ERROR_ALL), e.handler)
+
+    msg = _zone_empty_msg(5)
+    d.dispatch(msg)
+
+    assert len(e.calls) == 2
+
+    err_msg, ctx = e.calls[0]
+
+    assert ERROR_DOMAIN in err_msg
+    error_domain = cast(Mapping[str, Mapping[str, object]], err_msg[ERROR_DOMAIN])
+    code = next(iter(error_domain))
+    payload = error_domain[code]
+
+    assert payload["message"]
+    assert payload["domain"] == "zone"
+    assert payload["severity"]
+    assert ctx.raw_route == ("zone", "__empty__")
+    assert ctx.route == (ERROR_DOMAIN, ERR_DOMAIN_EMPTY)
+
+
+# ---------------------------------------------------------------------------
+# handler isolation
+# ---------------------------------------------------------------------------
+
+
+def test_handler_exception_does_not_break_dispatch():
+    d = Dispatcher()
+    good = Recorder()
+
+    def bad_handler(_msg: Mapping[str, object], _ctx: DispatchContext) -> bool:
+        raise RuntimeError("boom")
+
+    d.register(("zone", "status"), bad_handler)
+    d.register(("zone", "status"), good.handler)
+
+    msg = _zone_status_msg(1)
+    result = d.dispatch(msg)
+
+    assert result.handled is True
+    assert len(good.calls) == 1
+
+
+def test_paged_reassembly_out_of_order() -> None:
+    d = Dispatcher()
+    r = Recorder()
+    route = ("zone", "get_configured")
+
+    def _merge(blocks: list[PagedBlock], block_count: int) -> dict[str, object]:
+        merged: list[int] = []
+        for block in blocks:
+            zones = block.payload.get("zones", [])
+            if isinstance(zones, list):
+                merged.extend(cast(list[int], zones))
+        return {"zones": merged, "block_count": block_count}
+
+    d.register_paged(route, merge_fn=_merge)
+    d.register(route, r.handler)
+
+    key = PagedTransferKey(session_id=1, transfer_id=99, route=route)
+    d.add_pending(PendingRequest(seq=10, opaque=key))
+    d.add_pending(PendingRequest(seq=11, opaque=key))
+
+    msg2 = {
+        "seq": 11,
+        "session_id": 1,
+        "zone": {"get_configured": {"block_id": 2, "block_count": 2, "zones": [3]}},
+    }
+    d.dispatch(msg2)
+    assert len(r.calls) == 0
+
+    msg1 = {
+        "seq": 10,
+        "session_id": 1,
+        "zone": {"get_configured": {"block_id": 1, "block_count": 2, "zones": [1, 2]}},
+    }
+    d.dispatch(msg1)
+    assert len(r.calls) == 1
+    assembled = cast(Mapping[str, Mapping[str, Mapping[str, object]]], r.calls[0][0])
+    zones = cast(
+        Mapping[str, object],
+        cast(Mapping[str, object], assembled["zone"])["get_configured"],
+    )["zones"]
+    assert zones == [1, 2, 3]

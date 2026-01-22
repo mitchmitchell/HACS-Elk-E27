@@ -1,2 +1,0 @@
-{"run_id": "90f0ba62884e49eba0c5eed2a0770770", "test_id": "test/test_e27_configured_names_live.py::test_live_configured_names", "record_type": "test_start", "t_ms": 0, "ts_utc": "2025-12-30T03:19:25Z", "meta": {"pid": 36219}}
-{"run_id": "90f0ba62884e49eba0c5eed2a0770770", "test_id": "test/test_e27_configured_names_live.py::test_live_configured_names", "record_type": "test_end", "t_ms": 69779, "ts_utc": "2025-12-30T03:20:35Z", "outcome": "pass", "error": null}

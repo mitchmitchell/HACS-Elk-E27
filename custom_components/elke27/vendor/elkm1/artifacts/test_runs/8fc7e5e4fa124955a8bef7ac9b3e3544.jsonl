@@ -1,2 +1,0 @@
-{"run_id": "8fc7e5e4fa124955a8bef7ac9b3e3544", "test_id": "test/test_live_e27_zone_status_flags.py::test_live_zone_status_flags", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-14T04:37:11Z", "meta": {"pid": 76493}}
-{"run_id": "8fc7e5e4fa124955a8bef7ac9b3e3544", "test_id": "test/test_live_e27_zone_status_flags.py::test_live_zone_status_flags", "record_type": "test_end", "t_ms": 8782, "ts_utc": "2026-01-14T04:37:20Z", "outcome": "pass", "error": null}

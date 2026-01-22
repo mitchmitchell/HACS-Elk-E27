@@ -1,2 +1,0 @@
-{"run_id": "998292c886c64314a427e9a688b0bbe6", "test_id": "test/test_live_e27_system_status.py::test_live_system_status_snapshot", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-14T04:30:59Z", "meta": {"pid": 75548}}
-{"run_id": "998292c886c64314a427e9a688b0bbe6", "test_id": "test/test_live_e27_system_status.py::test_live_system_status_snapshot", "record_type": "test_end", "t_ms": 7537, "ts_utc": "2026-01-14T04:31:07Z", "outcome": "pass", "error": null}

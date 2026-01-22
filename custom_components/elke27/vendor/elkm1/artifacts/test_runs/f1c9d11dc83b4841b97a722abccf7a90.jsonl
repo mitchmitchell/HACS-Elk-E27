@@ -1,2 +1,0 @@
-{"run_id": "f1c9d11dc83b4841b97a722abccf7a90", "test_id": "test/test_live_e27_users_download.py::test_live_users_download", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-04T05:54:48Z", "meta": {"pid": 64161}}
-{"run_id": "f1c9d11dc83b4841b97a722abccf7a90", "test_id": "test/test_live_e27_users_download.py::test_live_users_download", "record_type": "test_end", "t_ms": 10192, "ts_utc": "2026-01-04T05:54:58Z", "outcome": "pass", "error": null}

@@ -1,2 +1,0 @@
-{"run_id": "59491b8d78754187b7852e423361fcbe", "test_id": "test/test_live_e27_zone_names.py::test_live_zone_names_from_configured", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-04T06:53:47Z", "meta": {"pid": 72500}}
-{"run_id": "59491b8d78754187b7852e423361fcbe", "test_id": "test/test_live_e27_zone_names.py::test_live_zone_names_from_configured", "record_type": "test_end", "t_ms": 11262, "ts_utc": "2026-01-04T06:53:58Z", "outcome": "pass", "error": null}

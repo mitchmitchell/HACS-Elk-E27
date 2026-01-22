@@ -1,2 +1,0 @@
-{"run_id": "c33ba7b1f765495e958b4ba01418db0e", "test_id": "test/test_live_e27_rules_download.py::test_live_rules_download", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-02T02:56:40Z", "meta": {"pid": 26833}}
-{"run_id": "c33ba7b1f765495e958b4ba01418db0e", "test_id": "test/test_live_e27_rules_download.py::test_live_rules_download", "record_type": "test_end", "t_ms": 3981, "ts_utc": "2026-01-02T02:56:44Z", "outcome": "pass", "error": null}

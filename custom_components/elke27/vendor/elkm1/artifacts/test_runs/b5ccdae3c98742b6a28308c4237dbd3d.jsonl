@@ -1,2 +1,0 @@
-{"run_id": "b5ccdae3c98742b6a28308c4237dbd3d", "test_id": "test/test_live_e27_arm_stay_then_disarm.py::test_live_arm_stay_then_disarm", "record_type": "test_start", "t_ms": 0, "ts_utc": "2026-01-11T09:26:54Z", "meta": {"pid": 59420}}
-{"run_id": "b5ccdae3c98742b6a28308c4237dbd3d", "test_id": "test/test_live_e27_arm_stay_then_disarm.py::test_live_arm_stay_then_disarm", "record_type": "test_end", "t_ms": 9471, "ts_utc": "2026-01-11T09:27:03Z", "outcome": "pass", "error": null}
