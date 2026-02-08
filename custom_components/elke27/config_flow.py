@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from elke27_lib import ClientConfig, Elke27Client, LinkKeys
+from elke27_lib import ClientConfig, LinkKeys
+from elke27_lib.client import Elke27Client
 from elke27_lib.discovery import AIOELKDiscovery
 from elke27_lib.errors import (
     Elke27AuthError,
@@ -37,6 +39,7 @@ CONF_ACCESS_CODE = "access_code"
 CONF_PASSPHRASE = "passphrase"
 CONF_PANEL_INFO = "panel_info"
 CONF_TABLE_INFO = "table_info"
+CONF_RESCAN = "__rescan__"
 
 STEP_MANUAL_DATA_SCHEMA = vol.Schema(
     {
@@ -111,41 +114,73 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle discovery-based setup."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            panel_idx = int(user_input[CONF_PANEL])
-            if not self._discovered_panels or panel_idx >= len(self._discovered_panels):
+            data_schema = self._discovery_schema()
+            if CONF_PANEL in user_input:
+                panel_idx_raw = user_input[CONF_PANEL]
+                if panel_idx_raw == CONF_RESCAN:
+                    self._discovered_panels = None
+                    return await self.async_step_discover(None)
+                panel_idx = int(panel_idx_raw)
+                if not self._discovered_panels or panel_idx >= len(
+                    self._discovered_panels
+                ):
+                    errors["base"] = "no_panels_found"
+                    return self.async_show_form(
+                        step_id="discover",
+                        data_schema=self._discovery_schema(),
+                        errors=errors,
+                    )
+                panel = self._discovered_panels[panel_idx]
+                host = getattr(panel, "panel_host", None) or getattr(panel, "host", None)
+                port = getattr(panel, "port", None) or DEFAULT_PORT
+                if not host:
+                    errors["base"] = "no_panels_found"
+                    return self.async_show_form(
+                        step_id="discover",
+                        data_schema=self._discovery_schema(),
+                        errors=errors,
+                    )
+                self._selected_host = host
+                self._selected_port = int(port)
+                self._selected_panel = panel
+            else:
+                data_schema = STEP_LINK_DATA_SCHEMA
+            if self._selected_panel is None:
                 errors["base"] = "no_panels_found"
                 return self.async_show_form(
                     step_id="discover",
-                    data_schema=self._discovery_schema(),
+                    data_schema=data_schema,
                     errors=errors,
                 )
-            panel = self._discovered_panels[panel_idx]
-            host = getattr(panel, "panel_host", None)
-            port = getattr(panel, "port", None) or DEFAULT_PORT
-            if not host:
-                errors["base"] = "no_panels_found"
-                return self.async_show_form(
-                    step_id="discover",
-                    data_schema=self._discovery_schema(),
-                    errors=errors,
-                )
-            self._selected_host = host
-            self._selected_port = int(port)
-            self._selected_panel = panel
-            self._async_abort_entries_match({CONF_HOST: host, CONF_PORT: port})
+            if self._is_panel_configured(self._selected_panel):
+                return self.async_abort(reason="already_configured")
             return await self._async_link_and_create_entry(
                 access_code=user_input[CONF_ACCESS_CODE],
                 passphrase=user_input[CONF_PASSPHRASE],
                 errors=errors,
                 step_id="discover",
-                data_schema=self._discovery_schema(),
+                data_schema=data_schema,
             )
 
         if self._discovered_panels is None:
             discovery = AIOELKDiscovery()
-            self._discovered_panels = await discovery.async_scan()
+            self._discovered_panels = self._dedupe_panels(
+                await discovery.async_scan()
+            )
         if not self._discovered_panels:
             errors["base"] = "no_panels_found"
+        if self._discovered_panels and len(self._discovered_panels) == 1:
+            panel = self._discovered_panels[0]
+            self._selected_panel = panel
+            self._selected_host = getattr(panel, "panel_host", None) or getattr(
+                panel, "host", None
+            )
+            self._selected_port = int(getattr(panel, "port", None) or DEFAULT_PORT)
+            return self.async_show_form(
+                step_id="discover",
+                data_schema=STEP_LINK_DATA_SCHEMA,
+                errors=errors,
+            )
 
         return self.async_show_form(
             step_id="discover",
@@ -154,7 +189,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reauth(
-        self, user_input: dict[str, Any] | None = None
+        self, entry_data: Mapping[str, Any]
     ) -> ConfigFlowResult:
         """Handle reauth for missing or invalid link keys."""
         entry_id = self.context.get("entry_id")
@@ -163,14 +198,18 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             if entry_id is not None
             else None
         )
-        return await self.async_step_relink(user_input)
+        return await self.async_step_relink(None)
 
     async def async_step_relink(
-        self, user_input: dict[str, Any] | None = None
+        self, user_input: Mapping[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Relink using access code and passphrase."""
         errors: dict[str, str] = {}
-        if user_input is not None:
+        if (
+            user_input is not None
+            and CONF_ACCESS_CODE in user_input
+            and CONF_PASSPHRASE in user_input
+        ):
             entry = self._reauth_entry
             if entry is None:
                 return self.async_abort(reason="missing_context")
@@ -311,9 +350,18 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def _discovery_schema(self) -> vol.Schema:
         options = [
-            {"value": str(idx), "label": _panel_label(panel)}
+            {
+                "value": str(idx),
+                "label": _panel_label(
+                    panel, already_configured=self._is_panel_configured(panel)
+                ),
+            }
             for idx, panel in enumerate(self._discovered_panels or [])
         ]
+        if options:
+            options.insert(0, {"value": CONF_RESCAN, "label": "Rescan for panels"})
+        else:
+            options = [{"value": CONF_RESCAN, "label": "Rescan for panels"}]
         return vol.Schema(
             {
                 vol.Required(CONF_PANEL): selector(
@@ -322,11 +370,42 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_ACCESS_CODE): selector(
                     {"text": {"type": "password"}}
                 ),
-                vol.Required(CONF_PASSPHRASE): selector(
-                    {"text": {"type": "password"}}
-                ),
+                vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
             }
         )
+
+    def _dedupe_panels(self, panels: list[Any]) -> list[Any]:
+        deduped: list[Any] = []
+        seen: set[tuple[str, str]] = set()
+        for panel in panels:
+            key = self._panel_key(panel)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(panel)
+        return deduped
+
+    def _panel_key(self, panel: Any) -> tuple[str, str]:
+        mac = getattr(panel, "panel_mac", None) or getattr(panel, "mac", None)
+        serial = getattr(panel, "panel_serial", None) or getattr(panel, "serial", None)
+        host = getattr(panel, "panel_host", None) or getattr(panel, "host", None)
+        port = getattr(panel, "port", None) or DEFAULT_PORT
+        if mac:
+            return ("mac", str(mac))
+        if serial:
+            return ("serial", str(serial))
+        return ("host", f"{host}:{port}")
+
+    def _is_panel_configured(self, panel: Any) -> bool:
+        host = getattr(panel, "panel_host", None) or getattr(panel, "host", None)
+        port = getattr(panel, "port", None) or DEFAULT_PORT
+        if not host:
+            return False
+        entries = self.hass.config_entries.async_entries(DOMAIN)
+        for entry in entries:
+            if entry.data.get(CONF_HOST) == host and entry.data.get(CONF_PORT) == port:
+                return True
+        return False
 
 
 def _create_client() -> Elke27Client:
@@ -338,7 +417,7 @@ def _panel_to_dict(panel: Any | None) -> dict[str, Any]:
     """Normalize a discovered panel entry into a dict."""
     if panel is None:
         return {}
-    if is_dataclass(panel):
+    if is_dataclass(panel) and not isinstance(panel, type):
         return _normalize_panel_keys(asdict(panel))
     if isinstance(panel, dict):
         return _normalize_panel_keys(dict(panel))
@@ -382,7 +461,7 @@ def _panel_name(panel_info: dict[str, Any]) -> str | None:
     )
 
 
-def _panel_label(panel: Any) -> str:
+def _panel_label(panel: Any, already_configured: bool = False) -> str:
     name = (
         getattr(panel, "panel_name", None)
         or getattr(panel, "name", None)
@@ -390,20 +469,29 @@ def _panel_label(panel: Any) -> str:
         or getattr(panel, "serial", None)
     )
     host = getattr(panel, "panel_host", None) or getattr(panel, "host", None)
-    if name and host:
-        return f"{name} ({host})"
-    if host:
-        return str(host)
-    if name:
-        return str(name)
-    return "Panel"
+    model = getattr(panel, "panel_model", None) or getattr(panel, "model", None)
+    mac = getattr(panel, "panel_mac", None) or getattr(panel, "mac", None)
+    details = ", ".join(
+        value
+        for value in (
+            str(model) if model else None,
+            str(mac) if mac else None,
+            str(host) if host else None,
+        )
+        if value
+    )
+    base = str(name) if name else "Panel"
+    label = f"{base} ({details})" if details else base
+    if already_configured:
+        return f"{label} (already configured)"
+    return label
 
 
 def _snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
     """Serialize a snapshot to a dict."""
     if snapshot is None:
         return {}
-    if is_dataclass(snapshot):
+    if is_dataclass(snapshot) and not isinstance(snapshot, type):
         return asdict(snapshot)
     if isinstance(snapshot, dict):
         return dict(snapshot)
