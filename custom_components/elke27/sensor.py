@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
@@ -31,7 +32,7 @@ class Elke27SensorDescription(SensorEntityDescription):
 
     key: str
     numeric_id: int
-    value_fn: Callable[[Elke27Hub, Any | None], Any]
+    value_fn: Callable[[Elke27Hub, Any | None], StateType | None]
 
 
 SENSORS: tuple[Elke27SensorDescription, ...] = (
@@ -48,9 +49,7 @@ SENSORS: tuple[Elke27SensorDescription, ...] = (
         numeric_id=2,
         translation_key="panel_ready",
         device_class=SensorDeviceClass.ENUM,
-        value_fn=lambda hub, snapshot: (
-            "connected" if hub.is_ready else "disconnected"
-        ),
+        value_fn=lambda hub, snapshot: "connected" if hub.is_ready else "disconnected",
     ),
 )
 
@@ -74,6 +73,7 @@ async def async_setup_entry(
 class Elke27Sensor(CoordinatorEntity[Elke27DataUpdateCoordinator], SensorEntity):
     """Representation of an Elke27 sensor."""
 
+    entity_description: Elke27SensorDescription
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
 
@@ -88,7 +88,7 @@ class Elke27Sensor(CoordinatorEntity[Elke27DataUpdateCoordinator], SensorEntity)
         super().__init__(coordinator)
         self._hub = hub
         self._entry = entry
-        self.entity_description = description
+        self.entity_description: Elke27SensorDescription = description
         self._attr_device_class = description.device_class
         self._attr_translation_key = description.translation_key
         self._attr_unique_id = build_unique_id(
@@ -99,6 +99,6 @@ class Elke27Sensor(CoordinatorEntity[Elke27DataUpdateCoordinator], SensorEntity)
         self._attr_device_info = device_info_for_entry(hub, coordinator, entry)
 
     @property
-    def native_value(self) -> Any:
+    def native_value(self) -> StateType | None:
         """Return the current value."""
         return self.entity_description.value_fn(self._hub, self.coordinator.data)

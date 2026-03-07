@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-# ruff: noqa: E402
+import asyncio
 import contextlib
 import logging
-from pathlib import Path
-import sys
-
-#_VENDOR_PATH = Path(__file__).resolve().parent / "vendor" / "elkm1"
-#if _VENDOR_PATH.exists() and str(_VENDOR_PATH) not in sys.path:
-#    sys.path.insert(0, str(_VENDOR_PATH))
 
 from elke27_lib.errors import (
     Elke27ConnectionError,
@@ -37,6 +31,9 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [
     Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
+    Platform.CLIMATE,
+    Platform.LIGHT,
+    Platform.LOCK,
     Platform.SENSOR,
     Platform.SWITCH,
 ]
@@ -86,6 +83,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = Elke27DataUpdateCoordinator(hass, hub, entry)
     await coordinator.async_start()
     await coordinator.async_refresh_now()
+    domains_to_prime = ("light", "lock", "tstat")
+    refresh_domain_config = getattr(hub, "refresh_domain_config", None)
+    if callable(refresh_domain_config):
+        prime_results = await asyncio.gather(
+            *(refresh_domain_config(domain) for domain in domains_to_prime),
+            return_exceptions=True,
+        )
+        for domain, result in zip(domains_to_prime, prime_results, strict=True):
+            if isinstance(result, Exception):
+                _LOGGER.debug("Initial refresh for %s failed: %s", domain, result)
+
+    snapshot = hub.get_snapshot() if hasattr(hub, "get_snapshot") else None
+    if hasattr(coordinator, "async_set_updated_data"):
+        coordinator.async_set_updated_data(snapshot)
+    else:
+        coordinator.data = snapshot
     await _async_migrate_unique_ids(hass, entry, unique_base(hub, coordinator, entry))
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

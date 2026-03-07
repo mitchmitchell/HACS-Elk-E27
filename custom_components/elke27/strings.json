@@ -81,6 +81,21 @@
         "name": "Zone"
       }
     },
+    "climate": {
+      "thermostat": {
+        "name": "Thermostat"
+      }
+    },
+    "light": {
+      "light": {
+        "name": "Light"
+      }
+    },
+    "lock": {
+      "lock": {
+        "name": "Lock"
+      }
+    },
     "sensor": {
       "panel_name": {
         "name": "Panel Name"

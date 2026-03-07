@@ -234,6 +234,147 @@ class Elke27Hub:
             result = await self._hass.async_add_executor_job(method, output_id, state)
         return bool(result) if isinstance(result, bool) else True
 
+    async def async_set_light(
+        self, light_id: int, state: bool, *, level: int | None = None
+    ) -> bool:
+        """Request a light state change if supported."""
+        client = self._client
+        if client is None:
+            return False
+
+        method = getattr(client, "async_set_light", None)
+        if method is None:
+            method = getattr(client, "set_light", None)
+        if method is not None:
+            params = inspect.signature(method).parameters
+            if "on" in params:
+                if inspect.iscoroutinefunction(method):
+                    result = await method(light_id, on=state)
+                else:
+                    result = await self._hass.async_add_executor_job(
+                        partial(method, light_id, on=state)
+                    )
+            elif inspect.iscoroutinefunction(method):
+                result = await method(light_id, state)
+            else:
+                result = await self._hass.async_add_executor_job(
+                    method, light_id, state
+                )
+            return bool(result) if isinstance(result, bool) else True
+
+        status = "ON" if state else "OFF"
+        payload: dict[str, Any] = {
+            "light_id": light_id,
+            "status": status,
+        }
+        if state:
+            payload["level"] = level if level is not None else 99
+        if not state:
+            payload["level"] = 0
+        result = await client.async_execute("light_set_status", **payload)
+        if not getattr(result, "ok", False):
+            error = getattr(result, "error", None)
+            if error is not None:
+                raise error
+            return False
+        return True
+
+    async def async_set_lock(self, lock_id: int, locked: bool) -> bool:
+        """Request a lock state change if supported."""
+        client = self._client
+        if client is None:
+            return False
+
+        method = getattr(client, "async_set_lock", None)
+        if method is None:
+            method = getattr(client, "set_lock", None)
+        if method is not None:
+            params = inspect.signature(method).parameters
+            if "locked" in params:
+                if inspect.iscoroutinefunction(method):
+                    result = await method(lock_id, locked=locked)
+                else:
+                    result = await self._hass.async_add_executor_job(
+                        partial(method, lock_id, locked=locked)
+                    )
+            elif "on" in params:
+                if inspect.iscoroutinefunction(method):
+                    result = await method(lock_id, on=locked)
+                else:
+                    result = await self._hass.async_add_executor_job(
+                        partial(method, lock_id, on=locked)
+                    )
+            elif inspect.iscoroutinefunction(method):
+                result = await method(lock_id, locked)
+            else:
+                result = await self._hass.async_add_executor_job(
+                    method, lock_id, locked
+                )
+            return bool(result) if isinstance(result, bool) else True
+
+        status = "ON" if locked else "OFF"
+        result = await client.async_execute(
+            "lock_set_status",
+            lock_id=lock_id,
+            status=status,
+        )
+        if not getattr(result, "ok", False):
+            error = getattr(result, "error", None)
+            if error is not None:
+                raise error
+            return False
+        return True
+
+    async def async_set_tstat_status(
+        self,
+        tstat_id: int,
+        *,
+        mode: str | None = None,
+        fan_mode: str | None = None,
+        cool_setpoint: int | None = None,
+        heat_setpoint: int | None = None,
+    ) -> bool:
+        """Request thermostat status changes if supported."""
+        client = self._client
+        if client is None:
+            return False
+
+        kwargs: dict[str, Any] = {
+            "mode": mode,
+            "fan_mode": fan_mode,
+            "cool_setpoint": cool_setpoint,
+            "heat_setpoint": heat_setpoint,
+        }
+        filtered_kwargs = {
+            key: value for key, value in kwargs.items() if value is not None
+        }
+        if not filtered_kwargs:
+            return True
+
+        method = getattr(client, "async_set_tstat_status", None)
+        if method is None:
+            method = getattr(client, "set_tstat_status", None)
+        if method is not None:
+            if inspect.iscoroutinefunction(method):
+                result = await method(tstat_id, **filtered_kwargs)
+            else:
+                result = await self._hass.async_add_executor_job(
+                    partial(method, tstat_id, **filtered_kwargs)
+                )
+            return bool(result) if isinstance(result, bool) else True
+
+        result = await client.async_execute(
+            "tstat_set_status",
+            tstat_id=tstat_id,
+            **filtered_kwargs,
+        )
+        if not getattr(result, "ok", False):
+            error = getattr(result, "error", None)
+            if error is not None:
+                raise error
+            return False
+        return True
+
     async def async_set_zone_bypass(
         self, zone_id: int, bypassed: bool, *, pin: str | None = None
     ) -> bool:
@@ -286,7 +427,15 @@ class Elke27Hub:
         #     )
         return True
 
-    async def async_arm_area(self, area_id: int, mode: Any, pin: str | None) -> bool:
+    async def async_arm_area(
+        self,
+        area_id: int,
+        mode: Any,
+        pin: str | None,
+        *,
+        auto_stay_cancel: bool = False,
+        exit_delay_cancel: bool = False,
+    ) -> bool:
         """Request an area arming change if supported."""
         client = self._client
         if client is None:
@@ -308,11 +457,31 @@ class Elke27Hub:
             arm_state = "ARMED_AWAY"
         else:
             raise HomeAssistantError("Arm mode is not supported.")
+
+        method = getattr(client, "async_arm_area", None)
+        if callable(method):
+            with contextlib.suppress(TypeError, ValueError):
+                params = inspect.signature(method).parameters
+                kwargs: dict[str, Any] = {}
+                if "auto_stay_cancel" in params:
+                    kwargs["auto_stay_cancel"] = auto_stay_cancel
+                if "exit_delay_cancel" in params:
+                    kwargs["exit_delay_cancel"] = exit_delay_cancel
+                if inspect.iscoroutinefunction(method):
+                    result = await method(area_id, pin, mode, **kwargs)
+                else:
+                    result = await self._hass.async_add_executor_job(
+                        partial(method, area_id, pin, mode, **kwargs)
+                    )
+                return bool(result) if isinstance(result, bool) else True
+
         result = await client.async_execute(
             "area_set_arm_state",
             area_id=area_id,
             arm_state=arm_state,
             pin=pin_value,
+            auto_stay_cancel=auto_stay_cancel,
+            exit_delay_cancel=exit_delay_cancel,
         )
         if not getattr(result, "ok", False):
             error = getattr(result, "error", None)
@@ -344,7 +513,14 @@ class Elke27Hub:
                 unsubscribe()
             self._typed_callbacks[cb] = None
 
-    async def async_disarm_area(self, area_id: int, pin: str | None) -> bool:
+    async def async_disarm_area(
+        self,
+        area_id: int,
+        pin: str | None,
+        *,
+        auto_stay_cancel: bool = False,
+        exit_delay_cancel: bool = False,
+    ) -> bool:
         """Request an area disarming change if supported."""
         client = self._client
         if client is None:
@@ -356,11 +532,30 @@ class Elke27Hub:
         except (TypeError, ValueError) as err:
             raise HomeAssistantError("Code must be numeric.") from err
 
+        method = getattr(client, "async_disarm_area", None)
+        if callable(method):
+            with contextlib.suppress(TypeError, ValueError):
+                params = inspect.signature(method).parameters
+                kwargs: dict[str, Any] = {}
+                if "auto_stay_cancel" in params:
+                    kwargs["auto_stay_cancel"] = auto_stay_cancel
+                if "exit_delay_cancel" in params:
+                    kwargs["exit_delay_cancel"] = exit_delay_cancel
+                if inspect.iscoroutinefunction(method):
+                    result = await method(area_id, pin, **kwargs)
+                else:
+                    result = await self._hass.async_add_executor_job(
+                        partial(method, area_id, pin, **kwargs)
+                    )
+                return bool(result) if isinstance(result, bool) else True
+
         result = await client.async_execute(
             "area_set_arm_state",
             area_id=area_id,
             arm_state="DISARMED",
             pin=pin_value,
+            auto_stay_cancel=auto_stay_cancel,
+            exit_delay_cancel=exit_delay_cancel,
         )
         if not getattr(result, "ok", False):
             error = getattr(result, "error", None)
