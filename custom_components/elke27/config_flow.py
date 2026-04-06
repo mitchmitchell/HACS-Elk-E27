@@ -40,6 +40,9 @@ CONF_PASSPHRASE = "passphrase"
 CONF_PANEL_INFO = "panel_info"
 CONF_TABLE_INFO = "table_info"
 CONF_RESCAN = "__rescan__"
+CONF_SETUP_METHOD = "setup_method"
+SETUP_METHOD_DISCOVER = "discover"
+SETUP_METHOD_MANUAL = "manual"
 
 STEP_MANUAL_DATA_SCHEMA = vol.Schema(
     {
@@ -57,6 +60,25 @@ STEP_LINK_DATA_SCHEMA = vol.Schema(
 )
 
 STEP_REAUTH_DATA_SCHEMA = STEP_LINK_DATA_SCHEMA
+
+STEP_USER_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_SETUP_METHOD, default=SETUP_METHOD_DISCOVER): selector(
+            {
+                "select": {
+                    "options": [
+                        {
+                            "value": SETUP_METHOD_DISCOVER,
+                            "label": "Discover panels",
+                        },
+                        {"value": SETUP_METHOD_MANUAL, "label": "Manual setup"},
+                    ],
+                    "mode": "list",
+                }
+            }
+        )
+    }
+)
 
 
 class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -77,9 +99,14 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial step."""
-        return self.async_show_menu(
+        if user_input is not None:
+            if user_input[CONF_SETUP_METHOD] == SETUP_METHOD_MANUAL:
+                return await self.async_step_manual()
+            return await self.async_step_discover()
+
+        return self.async_show_form(
             step_id="user",
-            menu_options=["discover", "manual"],
+            data_schema=STEP_USER_DATA_SCHEMA,
         )
 
     async def async_step_manual(

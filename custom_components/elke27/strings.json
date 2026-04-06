@@ -66,11 +66,13 @@
         "title": "Relink panel"
       },
       "user": {
-        "description": "Choose how you want to add the panel. Discover panels searches your network for Elk E27 devices. Manual setup lets you enter a host name or IP address.",
-        "menu_options": {
-          "discover": "Discover panels",
-          "manual": "Manual setup"
+        "data": {
+          "setup_method": "Setup method"
         },
+        "data_description": {
+          "setup_method": "Choose whether to search your network for panels or enter the panel address yourself."
+        },
+        "description": "Choose how you want to add the panel. Discover panels searches your network for Elk E27 devices. Manual setup lets you enter a host name or IP address.",
         "title": "Set up Elk E27 Alarm Panel"
       }
     }
