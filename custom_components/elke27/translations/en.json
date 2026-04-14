@@ -17,7 +17,7 @@
         "data": {
           "access_code": "Access code (used for linking, NOT a PIN)",
           "panel": "Panel",
-          "passphrase": "Passphrase",
+          "passphrase": "Passphrase"
         },
         "data_description": {
           "access_code": "The panel access code used during linking. It is not a PIN.",
