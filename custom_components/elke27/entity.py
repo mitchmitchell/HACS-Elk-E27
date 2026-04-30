@@ -30,9 +30,7 @@ def sanitize_name(name: str | None) -> str | None:
     return name
 
 
-def get_panel_field(
-    snapshot: Any | None, panel_name: str | None, field: str
-) -> Any:
+def get_panel_field(snapshot: Any | None, panel_name: str | None, field: str) -> Any:
     """Return a field from the current panel snapshot."""
     if field == "name" and panel_name:
         return sanitize_name(panel_name)

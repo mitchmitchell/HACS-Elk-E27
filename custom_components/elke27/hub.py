@@ -93,9 +93,7 @@ class Elke27Hub:
 
             def _raise_not_ready() -> None:
                 msg = "The client did not become ready before timeout"
-                raise ConfigEntryNotReady(
-                    msg
-                )
+                raise ConfigEntryNotReady(msg)
 
             try:
                 await client.async_connect(self._host, self._port, link_keys)
@@ -281,9 +279,7 @@ class Elke27Hub:
             return False
         return True
 
-    async def async_set_lock(
-        self, lock_id: int, *, locked: bool
-    ) -> bool:
+    async def async_set_lock(self, lock_id: int, *, locked: bool) -> bool:
         """Request a lock state change if supported."""
         client = self._client
         if client is None:

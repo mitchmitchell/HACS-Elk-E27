@@ -132,9 +132,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         try:
             if ATTR_BRIGHTNESS in kwargs:
                 level = _level_from_kwargs(kwargs)
-                await self._hub.async_set_light(
-                    self._light_id, state=True, level=level
-                )
+                await self._hub.async_set_light(self._light_id, state=True, level=level)
             else:
                 await self._hub.async_set_light(
                     self._light_id, state=True, level=_ELK_MAX_DIM_LEVEL

@@ -68,6 +68,7 @@ PLATFORMS: list[Platform] = [
 async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
     """Set up the Elke27 domain services."""
     if not hass.services.has_service(DOMAIN, SERVICE_ALARM_ARM_AUTOMATIC):
+
         async def _handle_alarm_arm_automatic(call: ServiceCall) -> None:
             await _async_handle_alarm_arm_automatic(hass, call)
 
