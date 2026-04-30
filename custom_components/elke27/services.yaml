@@ -1,0 +1,33 @@
+alarm_arm_automatic:
+  target:
+    entity:
+      domain: alarm_control_panel
+      integration: elke27
+  fields:
+    mode:
+      name: Arming mode
+      description: Arm mode to use for the automatic arming request.
+      required: true
+      selector:
+        select:
+          options:
+            - away
+            - home
+    code:
+      name: Code
+      description: Alarm code to arm the area.
+      required: true
+      selector:
+        text:
+    skip_exit_delay:
+      name: Skip exit delay
+      description: Skip the normal exit countdown when arming.
+      default: false
+      selector:
+        boolean:
+    ignore_stay_no_exit:
+      name: Ignore stay no exit
+      description: When arming away, ignore the panel's stay no exit option.
+      default: false
+      selector:
+        boolean:
