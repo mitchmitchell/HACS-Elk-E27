@@ -17,13 +17,17 @@ from elke27_lib.errors import (
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.const import ATTR_ENTITY_ID, CONF_HOST, CONF_PORT, Platform
+from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers.target import (
+    TargetSelection,
+    async_extract_referenced_entity_ids,
+)
 
 from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, CONF_PANEL, DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
@@ -44,9 +48,8 @@ ATTR_CODE = "code"
 ATTR_SKIP_EXIT_DELAY = "skip_exit_delay"
 ATTR_IGNORE_STAY_NO_EXIT = "ignore_stay_no_exit"
 
-SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA = vol.Schema(
+SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Required(ATTR_MODE): vol.In(("away", "home")),
         vol.Required(ATTR_CODE): cv.string,
         vol.Optional(ATTR_SKIP_EXIT_DELAY, default=False): cv.boolean,
@@ -195,7 +198,6 @@ async def _async_handle_alarm_arm_automatic(
     hass: HomeAssistant, call: ServiceCall
 ) -> None:
     """Handle the Elke27 automation arming service."""
-    entity_id = call.data[ATTR_ENTITY_ID]
     mode_name = call.data[ATTR_MODE]
     code = call.data[ATTR_CODE]
     skip_exit_delay = call.data[ATTR_SKIP_EXIT_DELAY]
@@ -205,6 +207,38 @@ async def _async_handle_alarm_arm_automatic(
         msg = "`ignore_stay_no_exit` is only valid with `mode: away`"
         raise ServiceValidationError(msg)
 
+    entity_ids = _entity_ids_from_service_call(hass, call)
+    if not entity_ids:
+        msg = "No Elke27 alarm control panel target was provided"
+        raise ServiceValidationError(msg)
+
+    for entity_id in entity_ids:
+        await _async_arm_automatic_entity(
+            hass,
+            entity_id,
+            mode_name,
+            code,
+            skip_exit_delay=skip_exit_delay,
+            ignore_stay_no_exit=ignore_stay_no_exit,
+        )
+
+
+def _entity_ids_from_service_call(hass: HomeAssistant, call: ServiceCall) -> list[str]:
+    """Extract target entity IDs from a service call."""
+    referenced = async_extract_referenced_entity_ids(hass, TargetSelection(call.data))
+    return sorted(referenced.referenced | referenced.indirectly_referenced)
+
+
+async def _async_arm_automatic_entity(
+    hass: HomeAssistant,
+    entity_id: str,
+    mode_name: str,
+    code: str,
+    *,
+    skip_exit_delay: bool,
+    ignore_stay_no_exit: bool,
+) -> None:
+    """Handle the automatic arming service for one entity."""
     entity_entry = er.async_get(hass).async_get(entity_id)
     if (
         entity_entry is None
