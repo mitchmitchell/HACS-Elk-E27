@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 import contextlib
 from enum import Enum
 from functools import partial
 import inspect
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib import ArmMode, ClientConfig, LinkKeys
 from elke27_lib.client import Elke27Client
@@ -20,6 +19,9 @@ from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 
 from .const import READY_TIMEOUT
 from .identity import build_client_identity
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,16 +88,13 @@ class Elke27Hub:
             # Elke27Client v2 does not expose a public identity setter yet.
             coerce_identity = getattr(client, "_coerce_identity", None)
             if callable(coerce_identity):
-                setattr(
-                    client,
-                    "_v2_client_identity",
-                    coerce_identity(client_identity),
-                )
+                client._v2_client_identity = coerce_identity(client_identity)  # noqa: SLF001
             self._client = client
 
             def _raise_not_ready() -> None:
+                msg = "The client did not become ready before timeout"
                 raise ConfigEntryNotReady(
-                    "The client did not become ready before timeout"
+                    msg
                 )
 
             try:
@@ -163,21 +162,24 @@ class Elke27Hub:
         """Refresh the panel CSM snapshot."""
         client = self._client
         if client is None:
-            raise HomeAssistantError("Client is not connected.")
+            msg = "Client is not connected."
+            raise HomeAssistantError(msg)
         return await client.async_refresh_csm()
 
     async def refresh_domain_config(self, domain: str) -> None:
         """Refresh a domain configuration snapshot."""
         client = self._client
         if client is None:
-            raise HomeAssistantError("Client is not connected.")
+            msg = "Client is not connected."
+            raise HomeAssistantError(msg)
         await client.async_refresh_domain_config(domain)
 
     def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], None]:
         """Subscribe to client events."""
         client = self._client
         if client is None:
-            raise HomeAssistantError("Client is not connected.")
+            msg = "Client is not connected."
+            raise HomeAssistantError(msg)
         return client.subscribe(listener)
 
     def subscribe_typed(self, listener: Callable[[Any], None]) -> Callable[[], None]:
@@ -205,7 +207,7 @@ class Elke27Hub:
             return False
         return client.unsubscribe_typed(listener)
 
-    async def async_set_output(self, output_id: int, state: bool) -> bool:
+    async def async_set_output(self, output_id: int, *, state: bool) -> bool:
         """Request an output state change if supported."""
         client = self._client
         if client is None:
@@ -235,7 +237,7 @@ class Elke27Hub:
         return bool(result) if isinstance(result, bool) else True
 
     async def async_set_light(
-        self, light_id: int, state: bool, *, level: int | None = None
+        self, light_id: int, *, state: bool, level: int | None = None
     ) -> bool:
         """Request a light state change if supported."""
         client = self._client
@@ -279,7 +281,9 @@ class Elke27Hub:
             return False
         return True
 
-    async def async_set_lock(self, lock_id: int, locked: bool) -> bool:
+    async def async_set_lock(
+        self, lock_id: int, *, locked: bool
+    ) -> bool:
         """Request a lock state change if supported."""
         client = self._client
         if client is None:
@@ -376,18 +380,20 @@ class Elke27Hub:
         return True
 
     async def async_set_zone_bypass(
-        self, zone_id: int, bypassed: bool, *, pin: str | None = None
+        self, zone_id: int, *, bypassed: bool, pin: str | None = None
     ) -> bool:
         """Request a zone bypass change."""
         client = self._client
         if client is None:
             return False
         if pin is None:
-            raise Elke27PinRequiredError("PIN required to bypass zones.")
+            msg = "PIN required to bypass zones."
+            raise Elke27PinRequiredError(msg)
         try:
             pin_value = int(pin)
         except (TypeError, ValueError) as err:
-            raise HomeAssistantError("Code must be numeric.") from err
+            msg = "Code must be numeric."
+            raise HomeAssistantError(msg) from err
         _LOGGER.debug(
             "Sending zone bypass request: zone_id=%s bypassed=%s pin=%s",
             zone_id,
@@ -415,16 +421,6 @@ class Elke27Hub:
             if error is not None:
                 raise error
             return False
-        # status_result = await client.async_execute(
-        #     "zone_get_status",
-        #     zone_id=zone_id,
-        # )
-        # if not getattr(status_result, "ok", False):
-        #     _LOGGER.debug(
-        #         "Zone status refresh failed for zone %s: %s",
-        #         zone_id,
-        #         getattr(status_result, "error", None),
-        #     )
         return True
 
     async def async_arm_area(
@@ -441,11 +437,13 @@ class Elke27Hub:
         if client is None:
             return False
         if pin is None:
-            raise Elke27PinRequiredError("PIN required to arm areas.")
+            msg = "PIN required to arm areas."
+            raise Elke27PinRequiredError(msg)
         try:
             pin_value = int(pin)
         except (TypeError, ValueError) as err:
-            raise HomeAssistantError("Code must be numeric.") from err
+            msg = "Code must be numeric."
+            raise HomeAssistantError(msg) from err
 
         if mode is ArmMode.ARMED_STAY:
             arm_state = "ARMED_STAY"
@@ -456,7 +454,8 @@ class Elke27Hub:
         ):
             arm_state = "ARMED_AWAY"
         else:
-            raise HomeAssistantError("Arm mode is not supported.")
+            msg = "Arm mode is not supported."
+            raise HomeAssistantError(msg)
 
         method = getattr(client, "async_arm_area", None)
         if callable(method):
@@ -526,11 +525,13 @@ class Elke27Hub:
         if client is None:
             return False
         if pin is None:
-            raise Elke27PinRequiredError("PIN required to disarm areas.")
+            msg = "PIN required to disarm areas."
+            raise Elke27PinRequiredError(msg)
         try:
             pin_value = int(pin)
         except (TypeError, ValueError) as err:
-            raise HomeAssistantError("Code must be numeric.") from err
+            msg = "Code must be numeric."
+            raise HomeAssistantError(msg) from err
 
         method = getattr(client, "async_disarm_area", None)
         if callable(method):
@@ -620,8 +621,8 @@ class Elke27Hub:
             _LOGGER.debug("Reconnect attempt %s starting", self._reconnect_attempts + 1)
             try:
                 await self._async_connect()
-            except Elke27LinkRequiredError as err:
-                _LOGGER.error("Reconnect aborted: %s", err)
+            except Elke27LinkRequiredError:
+                _LOGGER.exception("Reconnect aborted")
                 return
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Reconnect attempt failed: %s", err)

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable
 import contextlib
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
-from .hub import Elke27Hub
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from homeassistant.config_entries import ConfigEntry
+
+    from .hub import Elke27Hub
 
 try:  # pragma: no cover - optional import for local test runs without the lib.
     from elke27_lib.events import (

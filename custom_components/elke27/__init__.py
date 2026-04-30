@@ -7,7 +7,6 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING
 
-import voluptuous as vol
 from elke27_lib import ArmMode
 from elke27_lib.errors import (
     Elke27ConnectionError,
@@ -15,6 +14,8 @@ from elke27_lib.errors import (
     Elke27LinkRequiredError,
     Elke27TimeoutError,
 )
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID, CONF_HOST, CONF_PORT, Platform
 from homeassistant.exceptions import (
@@ -22,8 +23,7 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     ServiceValidationError,
 )
-from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 
 from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, CONF_PANEL, DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
@@ -68,7 +68,6 @@ PLATFORMS: list[Platform] = [
 async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
     """Set up the Elke27 domain services."""
     if not hass.services.has_service(DOMAIN, SERVICE_ALARM_ARM_AUTOMATIC):
-
         async def _handle_alarm_arm_automatic(call: ServiceCall) -> None:
             await _async_handle_alarm_arm_automatic(hass, call)
 
@@ -88,8 +87,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     link_keys_json = entry.data.get(CONF_LINK_KEYS_JSON)
     panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
     if not link_keys_json:
-        message = "Link keys are missing; relink required"
-        raise ConfigEntryAuthFailed(message)
+        msg = "Link keys are missing; relink required"
+        raise ConfigEntryAuthFailed(msg)
     integration_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
     entry_data = dict(entry.data)
     pin_removed = entry_data.pop("pin", None)
@@ -112,14 +111,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await hub.async_connect()
     except Elke27LinkRequiredError as err:
-        message = "Linking credentials are invalid; relink required"
-        raise ConfigEntryAuthFailed(message) from err
+        msg = "Linking credentials are invalid; relink required"
+        raise ConfigEntryAuthFailed(msg) from err
     except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError) as err:
         _LOGGER.exception("Failed to set up connection to %s:%s", host, port)
         with contextlib.suppress(Exception):
             await hub.async_disconnect()
-        message = "The client did not become ready; check host and port"
-        raise ConfigEntryNotReady(message) from err
+        msg = "The client did not become ready; check host and port"
+        raise ConfigEntryNotReady(msg) from err
 
     coordinator = Elke27DataUpdateCoordinator(hass, hub, entry)
     await coordinator.async_start()
@@ -202,8 +201,8 @@ async def _async_handle_alarm_arm_automatic(
     ignore_stay_no_exit = call.data[ATTR_IGNORE_STAY_NO_EXIT]
 
     if ignore_stay_no_exit and mode_name != "away":
-        message = "`ignore_stay_no_exit` is only valid with `mode: away`"
-        raise ServiceValidationError(message)
+        msg = "`ignore_stay_no_exit` is only valid with `mode: away`"
+        raise ServiceValidationError(msg)
 
     entity_entry = er.async_get(hass).async_get(entity_id)
     if (
@@ -211,21 +210,21 @@ async def _async_handle_alarm_arm_automatic(
         or entity_entry.platform != DOMAIN
         or entity_entry.domain != Platform.ALARM_CONTROL_PANEL
     ):
-        message = f"Entity {entity_id} is not an Elke27 alarm control panel"
-        raise ServiceValidationError(message)
+        msg = f"Entity {entity_id} is not an Elke27 alarm control panel"
+        raise ServiceValidationError(msg)
 
     config_entry = hass.config_entries.async_get_entry(entity_entry.config_entry_id)
     if config_entry is None:
-        message = f"Config entry for {entity_id} was not found"
-        raise ServiceValidationError(message)
+        msg = f"Config entry for {entity_id} was not found"
+        raise ServiceValidationError(msg)
     if config_entry.state is not ConfigEntryState.LOADED:
-        message = f"Config entry for {entity_id} is not loaded"
-        raise ServiceValidationError(message)
+        msg = f"Config entry for {entity_id} is not loaded"
+        raise ServiceValidationError(msg)
 
     runtime_data: Elke27RuntimeData | None = config_entry.runtime_data
     if runtime_data is None:
-        message = f"Runtime data for {entity_id} is unavailable"
-        raise ServiceValidationError(message)
+        msg = f"Runtime data for {entity_id} is unavailable"
+        raise ServiceValidationError(msg)
 
     await runtime_data.hub.async_arm_area(
         _area_id_from_unique_id(entity_entry.unique_id),
@@ -242,19 +241,19 @@ def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:
         return ArmMode.ARMED_AWAY
     if mode_name == "home":
         return ArmMode.ARMED_STAY
-    message = f"Unsupported arming mode: {mode_name}"
-    raise ServiceValidationError(message)
+    msg = f"Unsupported arming mode: {mode_name}"
+    raise ServiceValidationError(msg)
 
 
 def _area_id_from_unique_id(unique_id: str) -> int:
     """Extract an area ID from an Elke27 alarm entity unique ID."""
     prefix = ":area:"
     if prefix not in unique_id:
-        message = "Entity unique ID is not a recognized Elke27 area identifier"
-        raise ServiceValidationError(message)
+        msg = "Entity unique ID is not a recognized Elke27 area identifier"
+        raise ServiceValidationError(msg)
     area_id_str = unique_id.rsplit(prefix, 1)[1]
     try:
         return int(area_id_str)
     except ValueError as err:
-        message = f"Invalid Elke27 area ID in unique ID: {unique_id}"
-        raise ServiceValidationError(message) from err
+        msg = f"Invalid Elke27 area ID in unique ID: {unique_id}"
+        raise ServiceValidationError(msg) from err

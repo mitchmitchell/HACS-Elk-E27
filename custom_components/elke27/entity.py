@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
@@ -14,8 +13,12 @@ from homeassistant.helpers.device_registry import (
 )
 
 from .const import CONF_INTEGRATION_SERIAL, DOMAIN, MANUFACTURER_NUMBER
-from .coordinator import Elke27DataUpdateCoordinator
-from .hub import Elke27Hub
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+
+    from .coordinator import Elke27DataUpdateCoordinator
+    from .hub import Elke27Hub
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9 _-]")
 
@@ -24,11 +27,12 @@ def sanitize_name(name: str | None) -> str | None:
     """Normalize entity names to Home Assistant-safe characters."""
     if name is None:
         return None
-    # return _NAME_SAFE_RE.sub("_", name)
     return name
 
 
-def get_panel_field(snapshot: Any | None, panel_name: str | None, field: str) -> Any:
+def get_panel_field(
+    snapshot: Any | None, panel_name: str | None, field: str
+) -> Any:
     """Return a field from the current panel snapshot."""
     if field == "name" and panel_name:
         return sanitize_name(panel_name)

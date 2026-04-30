@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib import ArmMode
 from elke27_lib.errors import Elke27PinRequiredError
@@ -15,16 +15,19 @@ from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelState,
     CodeFormat,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
-from .hub import Elke27Hub
-from .models import Elke27RuntimeData
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+
+    from .hub import Elke27Hub
+    from .models import Elke27RuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,7 +35,7 @@ PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
+    _hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
@@ -175,10 +178,13 @@ class Elke27AreaAlarmControlPanel(
         code = _normalize_code(code)
         for zone_id, _ in _faulted_zones(self.coordinator.data):
             try:
-                await self._hub.async_set_zone_bypass(zone_id, True, pin=code)
+                await self._hub.async_set_zone_bypass(
+                    zone_id, bypassed=True, pin=code
+                )
             except Elke27PinRequiredError as err:
+                msg = "PIN required to perform this action."
                 raise HomeAssistantError(
-                    "PIN required to perform this action."
+                    msg
                 ) from err
         await self._async_arm(ArmMode.ARMED_AWAY, code)
 
@@ -188,7 +194,8 @@ class Elke27AreaAlarmControlPanel(
         try:
             await self._hub.async_disarm_area(self._area_id, code)
         except Elke27PinRequiredError as err:
-            raise HomeAssistantError("PIN required to perform this action.") from err
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
     async def _async_arm(self, mode: ArmMode, code: str | None) -> None:
         """Arm the area using the requested mode."""
@@ -196,7 +203,8 @@ class Elke27AreaAlarmControlPanel(
         try:
             await self._hub.async_arm_area(self._area_id, mode, code)
         except Elke27PinRequiredError as err:
-            raise HomeAssistantError("PIN required to perform this action.") from err
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
     def _log_missing(self) -> None:
         """Log when the area snapshot is missing."""
@@ -328,5 +336,6 @@ def _normalize_code(code: str | None) -> str | None:
         return None
     normalized = code.strip()
     if not normalized.isdigit():
-        raise HomeAssistantError("Code must be numeric.")
+        msg = "Code must be numeric."
+        raise HomeAssistantError(msg)
     return normalized

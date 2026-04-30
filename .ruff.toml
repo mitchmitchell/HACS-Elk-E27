@@ -13,10 +13,21 @@ ignore = [
     "D212", # multi-line-summary-first-line (incompatible with formatter)
     "COM812", # incompatible with formatter
     "ISC001", # incompatible with formatter
+    "PLR0911", # too-many-return-statements; upstream Home Assistant permits this
+    "PLR0912", # too-many-branches; upstream Home Assistant permits this
+    "PLR0913", # too-many-arguments; upstream Home Assistant permits this
+    "PLR0915", # too-many-statements; upstream Home Assistant permits this
+    "S105", # hardcoded-password-string; used for config key constants
 ]
 
 [lint.flake8-pytest-style]
 fixture-parentheses = false
+
+[lint.isort]
+force-sort-within-sections = true
+known-first-party = ["homeassistant"]
+combine-as-imports = true
+split-on-trailing-comma = false
 
 [lint.pyupgrade]
 keep-runtime-typing = true

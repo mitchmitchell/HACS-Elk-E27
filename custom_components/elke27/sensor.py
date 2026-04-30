@@ -2,26 +2,30 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, get_panel_field, unique_base
-from .hub import Elke27Hub
-from .models import Elke27RuntimeData
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+    from homeassistant.helpers.typing import StateType
+
+    from .hub import Elke27Hub
+    from .models import Elke27RuntimeData
 
 PARALLEL_UPDATES = 0
 
@@ -49,13 +53,13 @@ SENSORS: tuple[Elke27SensorDescription, ...] = (
         numeric_id=2,
         translation_key="panel_ready",
         device_class=SensorDeviceClass.ENUM,
-        value_fn=lambda hub, snapshot: "connected" if hub.is_ready else "disconnected",
+        value_fn=lambda hub, _snapshot: "connected" if hub.is_ready else "disconnected",
     ),
 )
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
+    _hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:

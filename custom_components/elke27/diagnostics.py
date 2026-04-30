@@ -7,20 +7,23 @@ from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 import enum
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib import redact_for_diagnostics
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.core import HomeAssistant
 
 from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, MANUFACTURER_NUMBER
-from .models import Elke27RuntimeData
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+
+    from .models import Elke27RuntimeData
 
 
 async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
+    _hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     data: Elke27RuntimeData | None = entry.runtime_data

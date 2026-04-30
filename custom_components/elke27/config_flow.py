@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib import ClientConfig, LinkKeys
 from elke27_lib.client import Elke27Client
@@ -34,6 +33,9 @@ from .const import (
     READY_TIMEOUT,
 )
 from .identity import async_get_integration_serial, build_client_identity
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 CONF_ACCESS_CODE = "access_code"
 CONF_PASSPHRASE = "passphrase"
@@ -216,7 +218,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reauth(
-        self, entry_data: Mapping[str, Any]
+        self, _entry_data: Mapping[str, Any]
     ) -> ConfigFlowResult:
         """Handle reauth for missing or invalid link keys."""
         entry_id = self.context.get("entry_id")
@@ -488,7 +490,7 @@ def _panel_name(panel_info: dict[str, Any]) -> str | None:
     )
 
 
-def _panel_label(panel: Any, already_configured: bool = False) -> str:
+def _panel_label(panel: Any, *, already_configured: bool = False) -> str:
     name = (
         getattr(panel, "panel_name", None)
         or getattr(panel, "name", None)

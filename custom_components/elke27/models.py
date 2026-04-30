@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from .coordinator import Elke27DataUpdateCoordinator
-from .hub import Elke27Hub
+if TYPE_CHECKING:
+    from .coordinator import Elke27DataUpdateCoordinator
+    from .hub import Elke27Hub
 
 
 @dataclass(slots=True)

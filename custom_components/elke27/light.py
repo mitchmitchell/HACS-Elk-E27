@@ -4,21 +4,24 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from elke27_lib.errors import Elke27PinRequiredError
 
 from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode, LightEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
-from .hub import Elke27Hub
-from .models import Elke27RuntimeData
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+
+    from .hub import Elke27Hub
+    from .models import Elke27RuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +30,7 @@ _ELK_MAX_DIM_LEVEL = 99
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
+    _hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
@@ -69,7 +72,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
     """Representation of an Elke27 light."""
 
     _attr_color_mode = ColorMode.BRIGHTNESS
-    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+    _attr_supported_color_modes: ClassVar[set[ColorMode]] = {ColorMode.BRIGHTNESS}
     _attr_has_entity_name = True
     _attr_translation_key = "light"
 
@@ -129,20 +132,24 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         try:
             if ATTR_BRIGHTNESS in kwargs:
                 level = _level_from_kwargs(kwargs)
-                await self._hub.async_set_light(self._light_id, True, level=level)
+                await self._hub.async_set_light(
+                    self._light_id, state=True, level=level
+                )
             else:
                 await self._hub.async_set_light(
-                    self._light_id, True, level=_ELK_MAX_DIM_LEVEL
+                    self._light_id, state=True, level=_ELK_MAX_DIM_LEVEL
                 )
         except Elke27PinRequiredError as err:
-            raise HomeAssistantError("PIN required to perform this action.") from err
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
-    async def async_turn_off(self, **kwargs: Any) -> None:
+    async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the light off if supported by the client."""
         try:
-            await self._hub.async_set_light(self._light_id, False, level=0)
+            await self._hub.async_set_light(self._light_id, state=False, level=0)
         except Elke27PinRequiredError as err:
-            raise HomeAssistantError("PIN required to perform this action.") from err
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
     @property
     def available(self) -> bool:

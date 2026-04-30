@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from elke27_lib.errors import Elke27PinRequiredError
 
@@ -18,17 +18,20 @@ from homeassistant.components.climate import (
     HVACAction,
     HVACMode,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
-from .hub import Elke27Hub
-from .models import Elke27RuntimeData
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+
+    from .hub import Elke27Hub
+    from .models import Elke27RuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,10 +57,11 @@ _TSTAT_TO_FAN_MODE: dict[str, str] = {
     "AUTO": FAN_AUTO,
     "ON": FAN_ON,
 }
+_IMPLIED_DECIMAL_TEMP_THRESHOLD = 200
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
+    _hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
@@ -106,13 +110,13 @@ class Elke27Thermostat(
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE_RANGE | ClimateEntityFeature.FAN_MODE
     )
-    _attr_hvac_modes = [
+    _attr_hvac_modes: ClassVar[list[HVACMode]] = [
         HVACMode.OFF,
         HVACMode.HEAT,
         HVACMode.COOL,
         HVACMode.HEAT_COOL,
     ]
-    _attr_fan_modes = [FAN_AUTO, FAN_ON]
+    _attr_fan_modes: ClassVar[list[str]] = [FAN_AUTO, FAN_ON]
     _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
     _attr_min_temp = 40
     _attr_max_temp = 99
@@ -219,21 +223,25 @@ class Elke27Thermostat(
         """Set a new HVAC mode."""
         mode = _HVAC_TO_TSTAT_MODE.get(hvac_mode)
         if mode is None:
-            raise HomeAssistantError("HVAC mode is not supported.")
+            msg = "HVAC mode is not supported."
+            raise HomeAssistantError(msg)
         try:
             await self._hub.async_set_tstat_status(self._tstat_id, mode=mode)
         except Elke27PinRequiredError as err:
-            raise HomeAssistantError("PIN required to perform this action.") from err
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set a new fan mode."""
         value = _FAN_TO_TSTAT_MODE.get(fan_mode)
         if value is None:
-            raise HomeAssistantError("Fan mode is not supported.")
+            msg = "Fan mode is not supported."
+            raise HomeAssistantError(msg)
         try:
             await self._hub.async_set_tstat_status(self._tstat_id, fan_mode=value)
         except Elke27PinRequiredError as err:
-            raise HomeAssistantError("PIN required to perform this action.") from err
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set target temperatures."""
@@ -243,14 +251,15 @@ class Elke27Thermostat(
         if ATTR_TARGET_TEMP_LOW in kwargs:
             low = kwargs[ATTR_TARGET_TEMP_LOW]
             if isinstance(low, int | float):
-                heat_setpoint = int(round(low))
+                heat_setpoint = round(low)
         if ATTR_TARGET_TEMP_HIGH in kwargs:
             high = kwargs[ATTR_TARGET_TEMP_HIGH]
             if isinstance(high, int | float):
-                cool_setpoint = int(round(high))
+                cool_setpoint = round(high)
 
         if heat_setpoint is None and cool_setpoint is None:
-            raise HomeAssistantError("At least one target temperature is required.")
+            msg = "At least one target temperature is required."
+            raise HomeAssistantError(msg)
 
         try:
             await self._hub.async_set_tstat_status(
@@ -259,7 +268,8 @@ class Elke27Thermostat(
                 cool_setpoint=cool_setpoint,
             )
         except Elke27PinRequiredError as err:
-            raise HomeAssistantError("PIN required to perform this action.") from err
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
     def _log_missing(self) -> None:
         """Log when the thermostat snapshot is missing."""
@@ -299,7 +309,7 @@ def _normalize_temperature(value: Any) -> float | None:
     """Normalize thermostat temperatures to display units."""
     if not isinstance(value, int | float):
         return None
-    # Some panels report temperature with one implied decimal place (e.g. 806 -> 80.6 F).
-    if abs(value) >= 200:
+    # Some panels report temperature with one implied decimal place.
+    if abs(value) >= _IMPLIED_DECIMAL_TEMP_THRESHOLD:
         return float(value) / 10.0
     return float(value)

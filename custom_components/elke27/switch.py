@@ -4,21 +4,24 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib.errors import Elke27PinRequiredError
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
-from .hub import Elke27Hub
-from .models import Elke27RuntimeData
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+
+    from .hub import Elke27Hub
+    from .models import Elke27RuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +29,7 @@ PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
+    _hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
@@ -113,19 +116,21 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
             and _get_output(self.coordinator.data, self._output_id) is not None
         )
 
-    async def async_turn_on(self, **kwargs: Any) -> None:
+    async def async_turn_on(self, **_kwargs: Any) -> None:
         """Turn the output on if supported by the client."""
         try:
-            await self._hub.async_set_output(self._output_id, True)
+            await self._hub.async_set_output(self._output_id, state=True)
         except Elke27PinRequiredError as err:
-            raise HomeAssistantError("PIN required to perform this action.") from err
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
-    async def async_turn_off(self, **kwargs: Any) -> None:
+    async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the output off if supported by the client."""
         try:
-            await self._hub.async_set_output(self._output_id, False)
+            await self._hub.async_set_output(self._output_id, state=False)
         except Elke27PinRequiredError as err:
-            raise HomeAssistantError("PIN required to perform this action.") from err
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
     def _log_missing(self) -> None:
         """Log when the output snapshot is missing."""
