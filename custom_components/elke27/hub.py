@@ -331,8 +331,8 @@ class Elke27Hub:
         *,
         mode: str | None = None,
         fan_mode: str | None = None,
-        cool_setpoint: int | None = None,
-        heat_setpoint: int | None = None,
+        cool_setpoint: float | None = None,
+        heat_setpoint: float | None = None,
     ) -> bool:
         """Request thermostat status changes if supported."""
         client = self._client

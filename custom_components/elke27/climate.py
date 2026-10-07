@@ -24,7 +24,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
-from .temperature import encode_temperature_setpoint, normalize_temperature
+from .temperature import normalize_temperature
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -241,17 +241,18 @@ class Elke27Thermostat(
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set target temperatures."""
-        heat_setpoint: int | None = None
-        cool_setpoint: int | None = None
+        # The E27 API takes whole degrees; elke27 rounds fractional values.
+        heat_setpoint: float | None = None
+        cool_setpoint: float | None = None
 
         if ATTR_TARGET_TEMP_LOW in kwargs:
             low = kwargs[ATTR_TARGET_TEMP_LOW]
             if isinstance(low, int | float):
-                heat_setpoint = encode_temperature_setpoint(low)
+                heat_setpoint = float(low)
         if ATTR_TARGET_TEMP_HIGH in kwargs:
             high = kwargs[ATTR_TARGET_TEMP_HIGH]
             if isinstance(high, int | float):
-                cool_setpoint = encode_temperature_setpoint(high)
+                cool_setpoint = float(high)
 
         if heat_setpoint is None and cool_setpoint is None:
             msg = "At least one target temperature is required."

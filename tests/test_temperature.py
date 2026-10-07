@@ -27,26 +27,18 @@ temperature = _load_temperature_module()
 class TemperatureTest(unittest.TestCase):
     """Test thermostat temperature conversions."""
 
-    def test_encode_temperature_setpoint_uses_protocol_tenths(self) -> None:
-        """Encode Home Assistant Fahrenheit setpoints as E27 protocol tenths."""
-        cases = (
-            (70.4, 704),
-            (70, 700),
-            (68, 680),
-            (80, 800),
-        )
-        for degrees, protocol_value in cases:
-            with self.subTest(degrees=degrees):
-                assert (  # noqa: S101
-                    temperature.encode_temperature_setpoint(degrees) == protocol_value
-                )
+    def test_setpoint_encoder_removed(self) -> None:
+        """Setpoints are passed as degrees; elke27 sends whole degrees."""
+        assert not hasattr(temperature, "encode_temperature_setpoint")  # noqa: S101
 
     def test_normalize_temperature_preserves_existing_read_behavior(self) -> None:
         """Normalize raw panel values without changing existing whole-degree reads."""
         cases = (
             (704, 70.4),
             (700, 70.0),
+            (680, 68.0),
             (68, 68.0),
+            (71.5, 71.5),
             (80, 80.0),
         )
         for raw_value, degrees in cases:
