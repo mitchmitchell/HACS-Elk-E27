@@ -53,6 +53,7 @@ SENSORS: tuple[Elke27SensorDescription, ...] = (
         numeric_id=2,
         translation_key="panel_ready",
         device_class=SensorDeviceClass.ENUM,
+        options=["connected", "disconnected"],
         value_fn=lambda hub, _snapshot: "connected" if hub.is_ready else "disconnected",
     ),
 )
