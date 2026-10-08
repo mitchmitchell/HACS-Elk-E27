@@ -390,11 +390,11 @@ class Elke27Hub:
         except (TypeError, ValueError) as err:
             msg = "Code must be numeric."
             raise HomeAssistantError(msg) from err
+        # Never log the user code.
         _LOGGER.debug(
-            "Sending zone bypass request: zone_id=%s bypassed=%s pin=%s",
+            "Sending zone bypass request: zone_id=%s bypassed=%s",
             zone_id,
             bypassed,
-            pin_value,
         )
         timeout_s = 15.0
         start = self._hass.loop.time()

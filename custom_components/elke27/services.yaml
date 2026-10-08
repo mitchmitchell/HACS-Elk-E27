@@ -1,4 +1,9 @@
 alarm_arm_automatic:
+  name: Arm automatic
+  description: >-
+    Arms Elk E27 areas from automations, such as geofence- or occupancy-based
+    arming when everyone leaves. The panel bypasses any open (faulted) zones
+    and cancels auto-stay and the exit delay.
   target:
     entity:
       domain: alarm_control_panel
@@ -6,7 +11,7 @@ alarm_arm_automatic:
   fields:
     mode:
       name: Arming mode
-      description: Arm mode to use for the automatic arming request.
+      description: Arm away or arm home (stay).
       required: true
       selector:
         select:
@@ -15,7 +20,7 @@ alarm_arm_automatic:
             - home
     code:
       name: Code
-      description: Alarm code to arm the area.
+      description: Numeric alarm user code used to arm the area.
       required: true
       selector:
         text:

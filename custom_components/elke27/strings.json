@@ -10,7 +10,7 @@
       "invalid_auth": "Unable to authenticate with the panel. Check the access code, passphrase, and network connectivity.",
       "link_required": "The panel requires linking. Enter the access code and passphrase again.",
       "no_panels_found": "No panels were discovered. Confirm the panel is online, then try again or set it up manually.",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
+      "unknown": "Unexpected error"
     },
     "step": {
       "discover": {
@@ -100,15 +100,31 @@
     },
     "sensor": {
       "panel_name": {
-        "name": "Panel Name"
+        "name": "Panel name"
       },
       "panel_ready": {
-        "name": "Panel State"
+        "name": "Panel ready"
       }
     },
     "switch": {
       "output": {
         "name": "Output"
+      }
+    }
+  },
+  "services": {
+    "alarm_arm_automatic": {
+      "name": "Arm automatic",
+      "description": "Arms Elk E27 areas from automations, such as geofence- or occupancy-based arming when everyone leaves. The panel bypasses any open (faulted) zones and cancels auto-stay and the exit delay.",
+      "fields": {
+        "mode": {
+          "name": "Arming mode",
+          "description": "Arm away or arm home (stay)."
+        },
+        "code": {
+          "name": "Code",
+          "description": "Numeric alarm user code used to arm the area."
+        }
       }
     }
   }

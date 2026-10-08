@@ -44,7 +44,7 @@ People *love* thorough bug reports. I'm not even kidding.
 
 ## Use a Consistent Coding Style
 
-Use [black](https://github.com/ambv/black) to make sure the code follows the style.
+Use [Ruff](https://docs.astral.sh/ruff/) to make sure the code follows the style. Run `scripts/lint` (it runs `ruff format` and `ruff check --fix`) before opening a pull request.
 
 ## Test your code modification
 
