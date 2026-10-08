@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 SERVICE_ALARM_ARM_AUTOMATIC = "alarm_arm_automatic"
 ATTR_MODE = "mode"
 ATTR_CODE = "code"
