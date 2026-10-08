@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING, Any
 
 from elke27_lib import ArmMode, ClientConfig, LinkKeys
 from elke27_lib.client import Elke27Client
-from elke27_lib.errors import Elke27LinkRequiredError, Elke27PinRequiredError
+from elke27_lib.errors import (
+    Elke27Error,
+    Elke27InvalidArgument,
+    Elke27LinkRequiredError,
+    Elke27PinRequiredError,
+)
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
@@ -428,69 +433,28 @@ class Elke27Hub:
         auto_stay_cancel: bool = False,
         exit_delay_cancel: bool = False,
     ) -> bool:
-        """Request an area arming change if supported."""
+        """Arm an area through the elke27 client."""
         client = self._client
         if client is None:
             return False
         if pin is None:
             msg = "PIN required to arm areas."
             raise Elke27PinRequiredError(msg)
+        pin_value = _validated_pin(pin)
+        arm_mode = _library_arm_mode(mode)
         try:
-            pin_value = int(pin)
-        except (TypeError, ValueError) as err:
-            msg = "Code must be numeric."
-            raise HomeAssistantError(msg) from err
-
-        if mode is ArmMode.ARMED_STAY:
-            arm_state = "ARMED_STAY"
-        elif (
-            mode is ArmMode.ARMED_AWAY
-            or (isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS")
-            or getattr(ArmMode, "ARMED_CUSTOM_BYPASS", None) is mode
-        ):
-            arm_state = "ARMED_AWAY"
-        else:
-            msg = "Arm mode is not supported."
-            raise HomeAssistantError(msg)
-
-        method = getattr(client, "async_arm_area", None)
-        if callable(method):
-            with contextlib.suppress(TypeError, ValueError):
-                params = inspect.signature(method).parameters
-                kwargs: dict[str, Any] = {}
-                if "auto_stay_cancel" in params:
-                    kwargs["auto_stay_cancel"] = auto_stay_cancel
-                if "exit_delay_cancel" in params:
-                    kwargs["exit_delay_cancel"] = exit_delay_cancel
-                if inspect.iscoroutinefunction(method):
-                    result = await method(area_id, pin, mode, **kwargs)
-                else:
-                    result = await self._hass.async_add_executor_job(
-                        partial(method, area_id, pin, mode, **kwargs)
-                    )
-                return bool(result) if isinstance(result, bool) else True
-
-        result = await client.async_execute(
-            "area_set_arm_state",
-            area_id=area_id,
-            arm_state=arm_state,
-            pin=pin_value,
-            auto_stay_cancel=auto_stay_cancel,
-            exit_delay_cancel=exit_delay_cancel,
-        )
-        if not getattr(result, "ok", False):
-            error = getattr(result, "error", None)
-            error_message = getattr(error, "user_message", None) or getattr(
-                error, "message", None
-            )
-            _LOGGER.warning(
-                "Area arming failed for area %s: %s",
+            await client.async_arm_area(
                 area_id,
-                error_message or error,
+                mode=arm_mode,
+                pin=pin_value,
+                auto_stay_cancel=auto_stay_cancel,
+                exit_delay_cancel=exit_delay_cancel,
             )
-            if error is not None:
-                raise HomeAssistantError(error_message or str(error)) from error
-            return False
+        except Elke27PinRequiredError:
+            raise
+        except (Elke27Error, Elke27InvalidArgument) as err:
+            _LOGGER.debug("Area arming failed for area %s: %s", area_id, err)
+            raise HomeAssistantError(_error_message(err)) from err
         return True
 
     def _resubscribe_typed_callbacks(self) -> None:
@@ -516,57 +480,26 @@ class Elke27Hub:
         auto_stay_cancel: bool = False,
         exit_delay_cancel: bool = False,
     ) -> bool:
-        """Request an area disarming change if supported."""
+        """Disarm an area through the elke27 client."""
         client = self._client
         if client is None:
             return False
         if pin is None:
             msg = "PIN required to disarm areas."
             raise Elke27PinRequiredError(msg)
+        pin_value = _validated_pin(pin)
         try:
-            pin_value = int(pin)
-        except (TypeError, ValueError) as err:
-            msg = "Code must be numeric."
-            raise HomeAssistantError(msg) from err
-
-        method = getattr(client, "async_disarm_area", None)
-        if callable(method):
-            with contextlib.suppress(TypeError, ValueError):
-                params = inspect.signature(method).parameters
-                kwargs: dict[str, Any] = {}
-                if "auto_stay_cancel" in params:
-                    kwargs["auto_stay_cancel"] = auto_stay_cancel
-                if "exit_delay_cancel" in params:
-                    kwargs["exit_delay_cancel"] = exit_delay_cancel
-                if inspect.iscoroutinefunction(method):
-                    result = await method(area_id, pin, **kwargs)
-                else:
-                    result = await self._hass.async_add_executor_job(
-                        partial(method, area_id, pin, **kwargs)
-                    )
-                return bool(result) if isinstance(result, bool) else True
-
-        result = await client.async_execute(
-            "area_set_arm_state",
-            area_id=area_id,
-            arm_state="DISARMED",
-            pin=pin_value,
-            auto_stay_cancel=auto_stay_cancel,
-            exit_delay_cancel=exit_delay_cancel,
-        )
-        if not getattr(result, "ok", False):
-            error = getattr(result, "error", None)
-            error_message = getattr(error, "user_message", None) or getattr(
-                error, "message", None
-            )
-            _LOGGER.warning(
-                "Area disarm failed for area %s: %s",
+            await client.async_disarm_area(
                 area_id,
-                error_message or error,
+                pin=pin_value,
+                auto_stay_cancel=auto_stay_cancel,
+                exit_delay_cancel=exit_delay_cancel,
             )
-            if error is not None:
-                raise HomeAssistantError(error_message or str(error)) from error
-            return False
+        except Elke27PinRequiredError:
+            raise
+        except (Elke27Error, Elke27InvalidArgument) as err:
+            _LOGGER.debug("Area disarm failed for area %s: %s", area_id, err)
+            raise HomeAssistantError(_error_message(err)) from err
         return True
 
     def _handle_connection_event(self, event: Any) -> None:
@@ -633,6 +566,35 @@ class Elke27Hub:
                 delay,
             )
             await asyncio.sleep(delay)
+
+
+def _validated_pin(pin: str) -> str:
+    """Return the user code as a digit string, or raise if it is not numeric."""
+    value = str(pin).strip()
+    if not value.isdigit():
+        msg = "Code must be numeric."
+        raise HomeAssistantError(msg)
+    return value
+
+
+def _library_arm_mode(mode: Any) -> ArmMode:
+    """Map an integration arm request to the elke27 arm mode."""
+    # Custom bypass: the entity bypasses open zones first, then arms away.
+    if mode is ArmMode.ARMED_STAY:
+        return ArmMode.ARMED_STAY
+    if (
+        mode is ArmMode.ARMED_AWAY
+        or (isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS")
+        or getattr(ArmMode, "ARMED_CUSTOM_BYPASS", None) is mode
+    ):
+        return ArmMode.ARMED_AWAY
+    msg = "Arm mode is not supported."
+    raise HomeAssistantError(msg)
+
+
+def _error_message(err: Exception) -> str:
+    """Return a user-facing message for a library error."""
+    return getattr(err, "user_message", None) or str(err) or type(err).__name__
 
 
 def _event_type(event: Any) -> str | None:
