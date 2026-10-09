@@ -211,14 +211,22 @@ class DefinitiveRefusalTest(unittest.TestCase):
     def test_classification(self) -> None:
         """Panel codes, PIN and argument errors are definitive; transport is not."""
         from elke27_lib.errors import (  # noqa: PLC0415
+            Elke27AuthError,
+            Elke27ConnectionError,
             Elke27DisconnectedError,
             Elke27InvalidArgument,
+            Elke27LinkRequiredError,
             Elke27PanelError,
+            Elke27PermissionError,
             Elke27PinRequiredError,
+            Elke27ProtocolError,
             Elke27TimeoutError,
         )
 
-        from custom_components.elke27.hub import is_definitive_refusal  # noqa: PLC0415
+        from custom_components.elke27.hub import (  # noqa: PLC0415
+            is_already_armed_refusal,
+            is_definitive_refusal,
+        )
 
         def _wrapped(cause: BaseException) -> HomeAssistantError:
             err = HomeAssistantError(str(cause))
@@ -232,3 +240,18 @@ class DefinitiveRefusalTest(unittest.TestCase):
         assert not is_definitive_refusal(_wrapped(Elke27TimeoutError("timeout")))
         assert not is_definitive_refusal(_wrapped(Elke27DisconnectedError("drop")))
         assert not is_definitive_refusal(_wrapped(RuntimeError("unknown")))
+        # Raised by elke27 only before the arm is sent.
+        assert is_definitive_refusal(_wrapped(Elke27PermissionError("denied")))
+        assert is_definitive_refusal(_wrapped(Elke27AuthError("auth")))
+        # Can come from the receive path, or is unreachable: kept uncertain.
+        assert not is_definitive_refusal(_wrapped(Elke27ConnectionError("not ready")))
+        assert not is_definitive_refusal(_wrapped(Elke27LinkRequiredError("link")))
+        assert not is_definitive_refusal(
+            _wrapped(Elke27ProtocolError("Failed to arm area."))
+        )
+        # 11028 is a panel code, but callers must not roll back on it.
+        already = _wrapped(Elke27PanelError(11028, "not allowed when armed"))
+        assert is_already_armed_refusal(already)
+        assert not is_already_armed_refusal(
+            _wrapped(Elke27PanelError(11015, "not ready"))
+        )

@@ -40,6 +40,8 @@ from .hub import (
     PIN_REQUIRED_REASON,
     Elke27Hub,
     ZoneBypassFailedError,
+    area_is_armed,
+    is_already_armed_refusal,
     is_definitive_refusal,
     zone_bypass_label,
 )
@@ -358,11 +360,18 @@ async def _async_arm_automatic_locked(
         )
         raise HomeAssistantError(msg) from cause
 
-    # Read the snapshot inside the lock so an earlier call's changes are seen.
+    # Read the live client snapshot inside the lock, not the debounced
+    # coordinator copy, so an earlier call's bypasses and arming are seen.
+    snapshot = hub.get_snapshot()
+    if snapshot is None:
+        await _fail("arm", ARM_NOT_SENT_REASON, cause=None)
+    if area_is_armed(snapshot, area_id):
+        # Already armed (for example by a call queued just before this one):
+        # nothing to do, and nothing is bypassed, armed or rolled back.
+        _LOGGER.debug("Area %s is already armed; automatic arming skipped", area_id)
+        return
     try:
-        bypassed = await hub.async_bypass_faulted_zones(
-            area_id, runtime_data.coordinator.data, code
-        )
+        bypassed = await hub.async_bypass_faulted_zones(area_id, snapshot, code)
     except ZoneBypassFailedError as err:
         await _fail(
             "bypass", err.reason, zone=err.zone, bypassed=err.bypassed_zones, cause=err
@@ -379,7 +388,8 @@ async def _async_arm_automatic_locked(
     except Elke27PinRequiredError as err:
         await _fail("arm", PIN_REQUIRED_REASON, bypassed=bypassed, cause=err)
     except HomeAssistantError as err:
-        if not is_definitive_refusal(err):
+        # "Already armed" means the area may rely on these bypasses: keep them.
+        if is_already_armed_refusal(err) or not is_definitive_refusal(err):
             _uncertain(str(err), bypassed, err)
         await _fail("arm", str(err), bypassed=bypassed, cause=err)
     if not sent:
@@ -529,9 +539,17 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
             hass, entity_id, Platform.BINARY_SENSOR, "zone"
         )
         zone_id = _numeric_id_from_unique_id(entity_entry.unique_id, "zone")
-        acknowledged = await runtime_data.hub.async_set_zone_bypass(
-            zone_id, bypassed=bypass, pin=code
-        )
+        hub = runtime_data.hub
+        snapshot = hub.get_snapshot()
+        zone = snapshot.zones.get(zone_id) if snapshot is not None else None
+        area_id = zone.area_id if zone is not None else None
+        # Share the area lock with automatic arming so a rollback cannot race
+        # a manual bypass. Zones with no known area are not serialized.
+        lock = hub.area_arm_lock(area_id) if area_id else contextlib.nullcontext()
+        async with lock:
+            acknowledged = await hub.async_set_zone_bypass(
+                zone_id, bypassed=bypass, pin=code
+            )
         if not acknowledged:
             msg = f"Zone {zone_id} bypass was not acknowledged; is the panel connected?"
             raise HomeAssistantError(msg)

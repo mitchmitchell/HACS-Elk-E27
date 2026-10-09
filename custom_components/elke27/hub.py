@@ -18,10 +18,12 @@ from elke27_lib import (
 )
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
+    Elke27AuthError,
     Elke27Error,
     Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27PanelError,
+    Elke27PermissionError,
     Elke27PinRequiredError,
 )
 
@@ -553,19 +555,61 @@ class ZoneBypassFailedError(HomeAssistantError):
         super().__init__(message)
 
 
+# The panel answers "not allowed when armed" (ELKERR_NOT_ALLOWED_WHEN_ARMED).
+PANEL_ERROR_ALREADY_ARMED = 11028
+
+_ARMED_MODES = frozenset({ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY, ArmMode.ARMED_NIGHT})
+
+
+def area_is_armed(snapshot: PanelSnapshot | None, area_id: int) -> bool:
+    """Return True when the snapshot shows the area in any armed state."""
+    if snapshot is None:
+        return False
+    area = snapshot.areas.get(area_id)
+    return area is not None and area.arm_mode in _ARMED_MODES
+
+
+def panel_error_code(err: BaseException | None) -> int | None:
+    """Return the panel error code on an error or its cause chain."""
+    while err is not None:
+        code = getattr(err, "panel_error_code", None)
+        if code is not None:
+            return int(code)
+        err = err.__cause__
+    return None
+
+
+def is_already_armed_refusal(err: BaseException) -> bool:
+    """Return True when the panel refused because the area is already armed."""
+    return panel_error_code(err) == PANEL_ERROR_ALREADY_ARMED
+
+
 def is_definitive_refusal(err: BaseException) -> bool:
     """
     Return True when a failed command is known not to have taken effect.
 
     Definitive: a panel refusal with an error code, a missing user code, an
-    invalid argument, or a check the integration made before sending anything
-    (a HomeAssistantError with no library cause). Transport failures (timeouts,
-    dropped sessions) and unknown library errors are not definitive: the panel
-    may have acted on the command.
+    invalid argument, or a check made before anything was sent: an integration
+    check (a HomeAssistantError with no library cause), Elke27PermissionError
+    (elke27 raises it only from its pre-send session and disarmed-state checks)
+    and Elke27AuthError (raised for arm only by elke27's pre-send PIN check).
+    Not definitive, because the panel may have acted: timeouts, dropped or
+    not-ready sessions (Elke27ConnectionError can also come from the receive
+    path), Elke27LinkRequiredError (not reachable from an arm in elke27, so kept
+    conservative), the generic "Failed to arm area." protocol error, and any
+    unknown error. "Already armed" (11028) is a panel code but must not cause a
+    rollback; callers check is_already_armed_refusal first.
     """
-    if isinstance(err, (Elke27PinRequiredError, Elke27InvalidArgument)):
-        return True
-    if isinstance(err, Elke27PanelError):
+    if isinstance(
+        err,
+        (
+            Elke27PinRequiredError,
+            Elke27InvalidArgument,
+            Elke27PanelError,
+            Elke27PermissionError,
+            Elke27AuthError,
+        ),
+    ):
         return True
     if getattr(err, "panel_error_code", None) is not None:
         return True

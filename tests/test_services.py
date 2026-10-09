@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import importlib.util
 from pathlib import Path
 import sys
+from types import MappingProxyType
 from typing import Any
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -56,14 +58,37 @@ def _entry(unique_id: str, *, config_entry_id: str = "config-entry-1") -> Any:
     return entry
 
 
+def _armed_after_first_call(before: Any) -> Any:
+    """Area 1 armed away with zones 1 and 2 bypassed."""
+    return dataclasses.replace(
+        before,
+        areas=MappingProxyType(
+            {
+                **before.areas,
+                1: dataclasses.replace(before.areas[1], arm_mode=ArmMode.ARMED_AWAY),
+            }
+        ),
+        zones=MappingProxyType(
+            {
+                **before.zones,
+                1: dataclasses.replace(before.zones[1], bypassed=True),
+                2: dataclasses.replace(before.zones[2], bypassed=True),
+            }
+        ),
+    )
+
+
 def _alarm_runtime(snapshot: Any) -> Any:
     hub = _hub()
     hub.async_set_zone_bypass = AsyncMock(return_value=True)
     hub.async_arm_area = AsyncMock(return_value=True)
     runtime = MagicMock()
     runtime.hub = hub
+    # The live client snapshot is what arm automatic reads inside the lock; the
+    # coordinator copy is deliberately stale here to prove it is not used.
+    hub.get_snapshot = MagicMock(return_value=snapshot)
     runtime.coordinator = MagicMock()
-    runtime.coordinator.data = snapshot
+    runtime.coordinator.data = None
     return runtime
 
 
@@ -106,6 +131,27 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
             unittest.mock.call(3, bypassed=True, pin="1234"),
             unittest.mock.call(12, bypassed=True, pin="1234"),
         ]
+
+    async def test_bypass_takes_the_zone_area_lock(self) -> None:
+        """zone_bypass holds the zone's area lock while it sends the bypass."""
+        hub = _hub()
+        hub.get_snapshot = MagicMock(return_value=_two_area_snapshot())
+        lock = hub.area_arm_lock(2)
+        held: list[bool] = []
+
+        async def _bypass(*_args: Any, **_kwargs: Any) -> bool:
+            held.append(lock.locked())
+            return True
+
+        hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
+        runtime = MagicMock()
+        runtime.hub = hub
+        entities = {
+            "binary_sensor.garage": (_entry("aa:bb:cc:dd:ee:ff:zone:4"), runtime)
+        }
+        await self._run({"code": "1234", "bypass": False}, entities)
+        assert held == [True]
+        assert not lock.locked()
 
     async def test_unbypass(self) -> None:
         """bypass: false removes the bypass."""
@@ -577,9 +623,12 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_concurrent_calls_on_same_area_run_one_after_another(
         self,
     ) -> None:
-        """Two automatic calls on one area do not interleave their sequences."""
+        """A queued second call waits, then sees the first call's live state."""
         hass = MagicMock()
-        runtime = _alarm_runtime(_two_area_snapshot())
+        before = _two_area_snapshot()
+        live = {"snapshot": before}
+        runtime = _alarm_runtime(before)
+        runtime.hub.get_snapshot = MagicMock(side_effect=lambda: live["snapshot"])
         order: list[str] = []
         first_arm_started = asyncio.Event()
         release_first_arm = asyncio.Event()
@@ -590,9 +639,10 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
 
         async def _arm(*_args: Any, **_kwargs: Any) -> bool:
             order.append("arm")
-            if not first_arm_started.is_set():
-                first_arm_started.set()
-                await release_first_arm.wait()
+            first_arm_started.set()
+            await release_first_arm.wait()
+            # The panel is now armed with zones 1 and 2 bypassed.
+            live["snapshot"] = _armed_after_first_call(before)
             return True
 
         runtime.hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
@@ -614,7 +664,90 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             assert order == ["bypass1:True", "bypass2:True", "arm"]
             release_first_arm.set()
             await asyncio.gather(first, second)
-        assert order == ["bypass1:True", "bypass2:True", "arm"] * 2
+        # The second call saw the area armed: no bypass, arm or rollback.
+        assert order == ["bypass1:True", "bypass2:True", "arm"]
+        hass.bus.async_fire.assert_not_called()
+
+    async def test_second_call_skips_zones_already_bypassed(self) -> None:
+        """Live zones already bypassed are not re-bypassed or rolled back."""
+        hass = MagicMock()
+        before = _two_area_snapshot()
+        snapshot = dataclasses.replace(
+            before,
+            zones=MappingProxyType(
+                {
+                    **before.zones,
+                    1: dataclasses.replace(before.zones[1], bypassed=True),
+                    2: dataclasses.replace(before.zones[2], bypassed=True),
+                }
+            ),
+        )
+        runtime = _alarm_runtime(snapshot)
+        runtime.hub.async_arm_area = AsyncMock(
+            side_effect=HomeAssistantError("area not ready (error 11015)")
+        )
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError),
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        # Nothing was bypassed by this call, so nothing is un-bypassed either.
+        runtime.hub.async_set_zone_bypass.assert_not_called()
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["bypassed_zone_ids"] == []
+        assert data["rolled_back_zone_ids"] == []
+
+    async def test_already_armed_area_is_a_no_op(self) -> None:
+        """An area the live snapshot shows armed is left alone and succeeds."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_armed_after_first_call(_two_area_snapshot()))
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        await self._run(hass, {"mode": "home", "code": "1234"}, entities)
+        runtime.hub.async_set_zone_bypass.assert_not_called()
+        runtime.hub.async_arm_area.assert_not_called()
+        hass.bus.async_fire.assert_not_called()
+
+    async def test_already_armed_refusal_is_not_rolled_back(self) -> None:
+        """Panel error 11028 (not allowed when armed) keeps the bypasses."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        refusal = HomeAssistantError("not allowed when armed (error 11028)")
+        refusal.__cause__ = Elke27PanelError(11028, "not allowed when armed")
+        runtime.hub.async_arm_area = AsyncMock(side_effect=refusal)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError),
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert runtime.hub.async_set_zone_bypass.await_count == 2  # no un-bypass
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["stage"] == "arm_uncertain"
+        assert data["rolled_back_zone_ids"] == []
+        assert data["still_bypassed_zone_ids"] == [1, 2]
+
+    async def test_no_live_snapshot_is_not_sent(self) -> None:
+        """Without a client snapshot nothing is bypassed and the failure is reported."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(None)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError),
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        runtime.hub.async_set_zone_bypass.assert_not_called()
+        runtime.hub.async_arm_area.assert_not_called()
+        assert hass.bus.async_fire.call_args.args[1]["outcome"] == "not_armed"
 
     async def test_pin_required_during_bypass_is_reported(self) -> None:
         """Elke27PinRequiredError from a bypass goes through failure reporting."""

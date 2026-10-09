@@ -155,37 +155,43 @@ class Elke27AreaAlarmControlPanel(
 
     async def async_alarm_arm_away(self, code: str | None = None) -> None:
         """Arm the area in away mode."""
-        await self._async_arm(ArmMode.ARMED_AWAY, code)
+        async with self._hub.area_arm_lock(self._area_id):
+            await self._async_arm(ArmMode.ARMED_AWAY, code)
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
         """Arm the area in home mode."""
-        await self._async_arm(ArmMode.ARMED_STAY, code)
+        async with self._hub.area_arm_lock(self._area_id):
+            await self._async_arm(ArmMode.ARMED_STAY, code)
 
     async def async_alarm_arm_custom_bypass(self, code: str | None = None) -> None:
         """Arm the area with a custom bypass."""
         code = _normalize_code(code)
-        try:
-            await self._hub.async_bypass_faulted_zones(
-                self._area_id, self.coordinator.data, code
-            )
-        except ZoneBypassFailedError as err:
-            if not err.pin_required:
-                raise
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
-        await self._async_arm(ArmMode.ARMED_AWAY, code)
+        # Same per-area lock as alarm_arm_automatic and zone_bypass.
+        async with self._hub.area_arm_lock(self._area_id):
+            snapshot = self._hub.get_snapshot() or self.coordinator.data
+            try:
+                await self._hub.async_bypass_faulted_zones(
+                    self._area_id, snapshot, code
+                )
+            except ZoneBypassFailedError as err:
+                if not err.pin_required:
+                    raise
+                msg = "PIN required to perform this action."
+                raise HomeAssistantError(msg) from err
+            await self._async_arm(ArmMode.ARMED_AWAY, code)
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Disarm the area."""
         code = _normalize_code(code)
-        try:
-            await self._hub.async_disarm_area(self._area_id, code)
-        except Elke27PinRequiredError as err:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+        async with self._hub.area_arm_lock(self._area_id):
+            try:
+                await self._hub.async_disarm_area(self._area_id, code)
+            except Elke27PinRequiredError as err:
+                msg = "PIN required to perform this action."
+                raise HomeAssistantError(msg) from err
 
     async def _async_arm(self, mode: ArmMode, code: str | None) -> None:
-        """Arm the area using the requested mode."""
+        """Arm the area; the caller holds the area lock."""
         code = _normalize_code(code)
         try:
             await self._hub.async_arm_area(self._area_id, mode, code)

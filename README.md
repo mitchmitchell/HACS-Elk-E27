@@ -277,7 +277,13 @@ the notification and the event name those zones as still bypassed
 Zones are named with their number, for example *Perimeter (zone 16)*.
 
 Calls for the **same area** run one at a time: a second call waits until the first has
-finished bypassing, arming and any rollback, then reads fresh zone state.
+finished bypassing, arming and any rollback, then reads the panel's live state (not the
+cached copy). If the area is **already armed** (in any mode), the call does nothing and
+succeeds: no bypass, no arm, no rollback. Zones that are already bypassed are skipped, and
+only zones bypassed by this call are ever rolled back. If the panel refuses the arm because
+the area is already armed (error 11028), the bypasses are kept and the result is reported as
+unknown. Arm away, arm home, arm custom bypass, disarm and `elke27.zone_bypass` (for zones
+with a known area) share the same per-area lock, so a rollback can't race a manual change.
 
 In each case Home Assistant raises an error, creates a persistent notification for that
 area, and fires an [`elke27_arm_automatic_failed`](#elke27_arm_automatic_failed-event)

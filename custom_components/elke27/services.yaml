@@ -8,7 +8,7 @@ alarm_arm_automatic:
     never retried; if a bypass or the arm is refused, the area is not armed and
     the bypasses it made are undone. If the arm result is unknown (for example
     a timeout), the bypasses are left in place and you are told to check the
-    panel.
+    panel. An area that is already armed is left unchanged.
   target:
     entity:
       domain: alarm_control_panel
