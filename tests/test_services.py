@@ -89,6 +89,11 @@ def _alarm_runtime(snapshot: Any) -> Any:
     # The live client snapshot is what arm automatic reads inside the lock; the
     # coordinator copy is deliberately stale here to prove it is not used.
     hub.get_snapshot = MagicMock(return_value=snapshot)
+
+    async def _refresh(_area_id: int) -> Any:
+        return hub.get_snapshot()
+
+    hub.async_refresh_area_state = AsyncMock(side_effect=_refresh)
     runtime.coordinator = MagicMock()
     runtime.coordinator.data = None
     return runtime
@@ -870,6 +875,83 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await task
         hub.unregister_arm_automatic(1, task)
+
+    async def test_stale_snapshot_bypass_11028_when_armed_is_a_no_op(self) -> None:
+        """Stale snapshot, bypass refused with 11028, area actually armed: no-op."""
+        hass = MagicMock()
+        stale = _two_area_snapshot()
+        fresh = _armed_after_first_call(stale)
+        runtime = _alarm_runtime(stale)
+        hub = runtime.hub
+        # The refresh before acting still returns the stale state; the re-read
+        # after the 11028 shows the area armed.
+        hub.async_refresh_area_state = AsyncMock(side_effect=[stale, fresh])
+        refusal = HomeAssistantError("not allowed when armed (error 11028)")
+        refusal.__cause__ = Elke27PanelError(11028, "not allowed when armed")
+        hub.async_set_zone_bypass = AsyncMock(side_effect=refusal)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create") as note,
+            self.assertLogs(integration._LOGGER, "INFO") as logs,  # noqa: SLF001
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        hub.async_set_zone_bypass.assert_awaited_once_with(
+            1, bypassed=True, pin="1234"
+        )  # no rollback, no retry
+        hub.async_arm_area.assert_not_called()
+        note.assert_not_called()
+        hass.bus.async_fire.assert_not_called()
+        assert any("already armed" in line for line in logs.output)
+        assert hub.async_refresh_area_state.await_count == 2
+
+    async def test_bypass_11028_when_not_armed_is_uncertain(self) -> None:
+        """11028 at the bypass stage with the area not armed: uncertain, no rollback."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        hub = runtime.hub
+
+        async def _bypass(zone_id: int, **_kwargs: Any) -> bool:
+            if zone_id == 2:
+                refusal = HomeAssistantError("not allowed when armed (error 11028)")
+                refusal.__cause__ = Elke27PanelError(11028, "not allowed when armed")
+                raise refusal
+            return True
+
+        hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert "arm result is unknown" in str(ctx.exception)
+        assert hub.async_set_zone_bypass.await_count == 2  # no un-bypass
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["stage"] == "arm_uncertain"
+        assert data["rolled_back_zone_ids"] == []
+
+    async def test_refresh_is_awaited_before_acting(self) -> None:
+        """The area and zone status are refreshed from the panel inside the lock."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        hub = runtime.hub
+        held: list[bool] = []
+
+        async def _refresh(_area_id: int) -> Any:
+            held.append(hub.area_arm_lock(1).locked())
+            return _two_area_snapshot()
+
+        hub.async_refresh_area_state = AsyncMock(side_effect=_refresh)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert held == [True]
+        hub.async_arm_area.assert_awaited_once()
 
     async def test_pin_required_during_bypass_is_reported(self) -> None:
         """Elke27PinRequiredError from a bypass goes through failure reporting."""

@@ -159,6 +159,31 @@ class Elke27Hub:
             return None
         return client.get_snapshot()
 
+    async def async_refresh_area_state(self, area_id: int) -> PanelSnapshot | None:
+        """
+        Ask the panel for the area's arm state and all zone statuses, then snapshot.
+
+        The client snapshot can lag a command (elke27 does not apply arm or
+        bypass replies; only the later status broadcast does), so the area and
+        zone status are requested and awaited first. Each request is sent once;
+        if one fails, the snapshot as it stands is returned.
+        """
+        client = self._client
+        if client is None:
+            return None
+        for command_key, params in (
+            ("area_get_status", {"area_id": area_id}),
+            ("zone_get_all_zones_status", {}),
+        ):
+            try:
+                result = await client.async_execute(command_key, **params)
+            except (Elke27Error, Elke27InvalidArgument) as err:
+                _LOGGER.debug("Status refresh %s failed: %s", command_key, err)
+                continue
+            if not result.ok:
+                _LOGGER.debug("Status refresh %s failed: %s", command_key, result.error)
+        return client.get_snapshot()
+
     async def refresh_csm(self) -> Any:
         """Refresh the panel CSM snapshot."""
         return await self._require_client().async_refresh_csm()

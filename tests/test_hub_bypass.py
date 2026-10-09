@@ -255,3 +255,38 @@ class DefinitiveRefusalTest(unittest.TestCase):
         assert not is_already_armed_refusal(
             _wrapped(Elke27PanelError(11015, "not ready"))
         )
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
+    """Test the status refresh before automatic arming."""
+
+    async def test_requests_area_and_zone_status_then_snapshot(self) -> None:
+        """Area and zone status are requested once each, then the snapshot read."""
+        hub = _hub()
+        client = MagicMock()
+        ok = MagicMock(ok=True)
+        client.async_execute = AsyncMock(return_value=ok)
+        client.get_snapshot = MagicMock(return_value="snapshot")
+        hub._client = client  # noqa: SLF001
+        assert await hub.async_refresh_area_state(3) == "snapshot"
+        assert client.async_execute.await_args_list == [
+            unittest.mock.call("area_get_status", area_id=3),
+            unittest.mock.call("zone_get_all_zones_status"),
+        ]
+
+    async def test_failed_refresh_falls_back_to_snapshot(self) -> None:
+        """A failed status request is not retried; the snapshot is used."""
+        from elke27_lib.errors import Elke27TimeoutError  # noqa: PLC0415
+
+        hub = _hub()
+        client = MagicMock()
+        client.async_execute = AsyncMock(side_effect=Elke27TimeoutError("timeout"))
+        client.get_snapshot = MagicMock(return_value="snapshot")
+        hub._client = client  # noqa: SLF001
+        assert await hub.async_refresh_area_state(1) == "snapshot"
+        assert client.async_execute.await_count == 2
+
+    async def test_no_client_returns_none(self) -> None:
+        """Without a client there is nothing to refresh."""
+        assert await _hub().async_refresh_area_state(1) is None

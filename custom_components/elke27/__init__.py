@@ -409,7 +409,24 @@ async def _async_arm_automatic_locked(
 
     # Read the live client snapshot inside the lock, not the debounced
     # coordinator copy, so an earlier call's bypasses and arming are seen.
-    snapshot = hub.get_snapshot()
+    async def _already_armed(
+        reason: str, bypassed: Sequence[ZoneState], cause: Exception
+    ) -> None:
+        # Re-read the area: armed means the goal is met (a no-op success);
+        # otherwise the result is uncertain. No rollback either way.
+        fresh = await hub.async_refresh_area_state(area_id)
+        if area_is_armed(fresh, area_id):
+            _LOGGER.info(
+                "Area %s is already armed (panel said: %s); automatic arming skipped",
+                area_id,
+                reason,
+            )
+            return
+        _uncertain(reason, bypassed, cause)
+
+    # The client snapshot can lag the panel, so ask the panel for the area and
+    # zone status first; fall back to the snapshot if that fails.
+    snapshot = await hub.async_refresh_area_state(area_id)
     if snapshot is None:
         await _fail("arm", ARM_NOT_SENT_REASON, cause=None)
     if area_is_armed(snapshot, area_id):
@@ -422,6 +439,11 @@ async def _async_arm_automatic_locked(
             area_id, snapshot, code, attempted=attempted
         )
     except ZoneBypassFailedError as err:
+        if is_already_armed_refusal(err):
+            # 11028: the area is armed after all (a stale snapshot). Never roll
+            # back here: an armed area may rely on every bypass.
+            await _already_armed(err.reason, err.bypassed_zones, err)
+            return
         await _fail(
             "bypass", err.reason, zone=err.zone, bypassed=err.bypassed_zones, cause=err
         )
@@ -439,7 +461,10 @@ async def _async_arm_automatic_locked(
         await _fail("arm", PIN_REQUIRED_REASON, bypassed=bypassed, cause=err)
     except HomeAssistantError as err:
         # "Already armed" means the area may rely on these bypasses: keep them.
-        if is_already_armed_refusal(err) or not is_definitive_refusal(err):
+        if is_already_armed_refusal(err):
+            await _already_armed(str(err), bypassed, err)
+            return
+        if not is_definitive_refusal(err):
             _uncertain(str(err), bypassed, err)
         await _fail("arm", str(err), bypassed=bypassed, cause=err)
     if not sent:

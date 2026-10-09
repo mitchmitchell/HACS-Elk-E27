@@ -277,12 +277,15 @@ the notification and the event name those zones as still bypassed
 Zones are named with their number, for example *Perimeter (zone 16)*.
 
 Calls for the **same area** run one at a time: a second call waits until the first has
-finished bypassing, arming and any rollback, then reads the panel's live state (not the
-cached copy). If the area is **already armed** (in any mode), the call does nothing and
-succeeds: no bypass, no arm, no rollback. Zones that are already bypassed are skipped, and
-only zones bypassed by this call are ever rolled back. If the panel refuses the arm because
-the area is already armed (error 11028), the bypasses are kept and the result is reported as
-unknown. Arm away, arm home, arm custom bypass and `elke27.zone_bypass` (for zones with a
+finished bypassing, arming and any rollback. Before acting, each call asks the panel for
+the area's arm state and the zones' bypass state (one request each, never retried; if that
+fails it uses the integration's latest copy). If the area is **already armed** (in any
+mode), the call does nothing and succeeds: no bypass, no arm, no rollback. Zones that are
+already bypassed are skipped, and only zones bypassed by this call are ever rolled back. If
+the panel refuses a bypass or the arm because the area is already armed (error 11028), the
+area status is read again: if it is armed, the call succeeds as a no-op (logged, no error,
+notification or event); otherwise the result is reported as unknown. Nothing is rolled back
+in either case. Arm away, arm home, arm custom bypass and `elke27.zone_bypass` (for zones with a
 known area) share the same per-area lock, so a rollback can't race a manual change.
 
 **A disarm always wins.** Disarming an area does not wait for the lock. It first cancels any
