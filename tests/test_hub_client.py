@@ -1,4 +1,4 @@
-# ruff: noqa: S101, PT027, SLF001
+# ruff: noqa: S101, PT027, SLF001, PLR2004
 """Tests for Elke27 hub use of the elke27 0.3.8 client API."""
 
 from __future__ import annotations
@@ -31,8 +31,16 @@ if _HAS_DEPS:
 
 
 def _hub(client: Any, panel_name: str | None = None) -> Any:
-    hub = Elke27Hub(MagicMock(), "192.0.2.10", 2101, "{}", "123456789012", panel_name)
+    hass = MagicMock()
+    background: list[Any] = []
+
+    def _background(coro: Any, _name: str) -> None:
+        background.append(coro)
+
+    hass.async_create_background_task.side_effect = _background
+    hub = Elke27Hub(hass, "192.0.2.10", 2101, "{}", "123456789012", panel_name)
     hub._client = client
+    hub.background_tasks = background
     return hub
 
 
@@ -171,11 +179,57 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
         await hub.async_set_light(2, state=True)
         await hub.async_set_light(2, state=True, level=50)
         await hub.async_set_light(2, state=False, level=80)
-        assert sent == [
+        sets = [item for item in sent if item[0] == "light_set_status"]
+        assert sets == [
             ("light_set_status", {"light_id": 2, "status": "ON", "level": 99}),
             ("light_set_status", {"light_id": 2, "status": "ON", "level": 50}),
             ("light_set_status", {"light_id": 2, "status": "OFF", "level": 0}),
         ]
+        for task in hub.background_tasks:
+            task.close()
+
+    async def test_light_set_requests_status_now_and_later(self) -> None:
+        """A light change is followed by light_get_status, now and after a delay."""
+        sent: list[tuple[str, dict[str, Any]]] = []
+        hub = _hub(_executing_client(sent))
+        with patch.object(hub_module, "LIGHT_REFRESH_DELAY", 0):
+            assert await hub.async_set_light(3, state=True, level=50)
+            assert sent == [
+                ("light_set_status", {"light_id": 3, "status": "ON", "level": 50}),
+                ("light_get_status", {"light_id": 3}),
+            ]
+            assert len(hub.background_tasks) == 1
+            await hub.background_tasks[0]
+        assert sent[-1] == ("light_get_status", {"light_id": 3})
+        assert len(sent) == 3
+
+    async def test_light_status_refresh_failure_is_ignored(self) -> None:
+        """A failing status refresh doesn't fail the light command."""
+        client = _client()
+        calls: list[str] = []
+
+        async def _execute(command_key: str, /, **_params: Any) -> Any:
+            calls.append(command_key)
+            if command_key == "light_get_status":
+                return Result.failure(Elke27AuthError("Denied."))
+            return Result.success({})
+
+        client.async_execute.side_effect = _execute
+        hub = _hub(client)
+        assert await hub.async_set_light(3, state=False)
+        assert calls == ["light_set_status", "light_get_status"]
+        hub._stopping = True
+        await hub.background_tasks[0]
+        assert calls == ["light_set_status", "light_get_status"]
+
+    async def test_failed_light_set_does_not_refresh(self) -> None:
+        """No status refresh when the set command fails."""
+        client = _client()
+        client.async_execute = AsyncMock(return_value=Result.failure(None))
+        hub = _hub(client)
+        assert not await hub.async_set_light(3, state=True)
+        client.async_execute.assert_awaited_once()
+        assert hub.background_tasks == []
 
     async def test_lock_payloads(self) -> None:
         """Lock is status ON, unlock is status OFF."""

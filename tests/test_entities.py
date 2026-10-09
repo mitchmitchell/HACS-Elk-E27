@@ -1,4 +1,4 @@
-# ruff: noqa: S101, PT027
+# ruff: noqa: S101, PT027, PLR2004
 """Tests for Elke27 entities against elke27 0.3.8 snapshot types."""
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ if _HAS_DEPS:
         LightState,
         PanelInfo,
         PanelSnapshot,
+        ThermostatState,
         ZoneDefinition,
         ZoneState,
     )
@@ -35,9 +36,11 @@ if _HAS_DEPS:
         _area_state_to_ha,
     )
     from custom_components.elke27.binary_sensor import Elke27ZoneBinarySensor
+    from custom_components.elke27.climate import Elke27Thermostat
     from custom_components.elke27.entity import get_panel_field
     from custom_components.elke27.light import Elke27Light
     from homeassistant.components.alarm_control_panel import (
+        AlarmControlPanelEntity,
         AlarmControlPanelEntityFeature,
         AlarmControlPanelState,
     )
@@ -131,24 +134,63 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         assert hub.async_set_zone_bypass.await_count == 1
         hub.async_arm_area.assert_not_called()
 
-    async def test_arm_night_supported(self) -> None:
-        """Arm night is advertised and sent as ARMED_NIGHT."""
+    async def test_arm_night_not_offered(self) -> None:
+        """The E27 has no night mode, so arm night is not advertised or sent."""
         hub = _hub()
         entity = _area_entity(_two_area_snapshot(), hub)
-        assert entity.supported_features & AlarmControlPanelEntityFeature.ARM_NIGHT
-        await entity.async_alarm_arm_night("1234")
-        hub.async_arm_area.assert_awaited_once_with(1, ArmMode.ARMED_NIGHT, "1234")
+        features = entity.supported_features
+        assert not features & AlarmControlPanelEntityFeature.ARM_NIGHT
+        assert features & AlarmControlPanelEntityFeature.ARM_AWAY
+        assert features & AlarmControlPanelEntityFeature.ARM_HOME
+        assert features & AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
+        # Not overridden: Home Assistant's base implementation is not supported.
+        assert (
+            type(entity).async_alarm_arm_night
+            is AlarmControlPanelEntity.async_alarm_arm_night
+        )
+        hub.async_arm_area.assert_not_called()
 
     def test_attributes_are_area_scoped(self) -> None:
         """Attributes list only this area's faulted zones and drop dead fields."""
         entity = _area_entity(_two_area_snapshot(), _hub())
         assert entity.extra_state_attributes == {
             "ready": False,
+            "ready_status": getattr(
+                entity.coordinator.data.areas[1], "ready_status", None
+            ),
             "faulted_zone_ids": [1, 2],
             "faulted_zones": ["Front Door", "Rear Door"],
         }
         garage = _area_entity(_two_area_snapshot(), _hub(), area_id=2)
         assert garage.extra_state_attributes["faulted_zone_ids"] == [4]
+
+    def test_ready_status_attribute(self) -> None:
+        """ready_status is shown when the library provides it (elke27 0.3.10+)."""
+        snapshot = _two_area_snapshot()
+        area = snapshot.areas[1]
+        if not hasattr(area, "ready_status"):
+            self.skipTest("elke27 without AreaState.ready_status")
+        area = dataclasses.replace(area, ready=False, ready_status="RDY_NOT")
+        snapshot = dataclasses.replace(
+            snapshot, areas=MappingProxyType({**snapshot.areas, 1: area})
+        )
+        attrs = _area_entity(snapshot, _hub()).extra_state_attributes
+        assert attrs["ready"] is False
+        assert attrs["ready_status"] == "RDY_NOT"
+
+    def test_missing_area_attributes(self) -> None:
+        """A missing area reports every attribute as None."""
+        snapshot = _two_area_snapshot()
+        entity = _area_entity(snapshot, _hub())
+        entity.coordinator.data = dataclasses.replace(
+            snapshot, areas=MappingProxyType({})
+        )
+        assert entity.extra_state_attributes == {
+            "ready": None,
+            "ready_status": None,
+            "faulted_zone_ids": None,
+            "faulted_zones": None,
+        }
 
     def test_state_mapping(self) -> None:
         """Arm modes map to Home Assistant alarm states."""
@@ -195,6 +237,36 @@ class LightEntityTest(unittest.TestCase):
         assert self._light(LightState(light_id=1, level=30)).is_on is True
         assert self._light(LightState(light_id=1, level=0)).is_on is False
         assert self._light(LightState(light_id=1)).is_on is None
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class ClimateEntityTest(unittest.TestCase):
+    """Test the climate entity."""
+
+    def _climate(self, tstat: Any) -> Any:
+        snapshot = _snapshot(thermostats={tstat.tstat_id: tstat})
+        return Elke27Thermostat(
+            _coordinator(snapshot), _hub(), _entry(), tstat.tstat_id, tstat
+        )
+
+    def test_current_humidity(self) -> None:
+        """current_humidity comes from ThermostatState.humidity."""
+        assert (
+            self._climate(ThermostatState(tstat_id=1, humidity=45)).current_humidity
+            == 45
+        )
+        assert (
+            self._climate(ThermostatState(tstat_id=1, humidity=41.5)).current_humidity
+            == 41.5
+        )
+
+    def test_current_humidity_missing(self) -> None:
+        """No reading, or 0 (no sensor), is unknown."""
+        assert self._climate(ThermostatState(tstat_id=1)).current_humidity is None
+        assert (
+            self._climate(ThermostatState(tstat_id=1, humidity=0)).current_humidity
+            is None
+        )
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")

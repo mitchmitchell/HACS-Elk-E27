@@ -2,8 +2,9 @@ alarm_arm_automatic:
   name: Arm automatic
   description: >-
     Arms Elk E27 areas from automations, such as geofence- or occupancy-based
-    arming when everyone leaves. The panel bypasses any open (faulted) zones
-    and cancels auto-stay and the exit delay.
+    arming when everyone leaves. It cancels auto-stay and the exit delay. It
+    does not bypass zones: close or bypass any open zones first, or the panel
+    rejects the arm.
   target:
     entity:
       domain: alarm_control_panel
@@ -24,3 +25,26 @@ alarm_arm_automatic:
       required: true
       selector:
         text:
+
+zone_bypass:
+  name: Bypass zone
+  description: >-
+    Bypasses Elk E27 zones so they are ignored while the area is armed, or
+    removes the bypass. Disarming the area clears all bypasses.
+  target:
+    entity:
+      domain: binary_sensor
+      integration: elke27
+  fields:
+    code:
+      name: Code
+      description: Numeric alarm user code used to bypass the zone.
+      required: true
+      selector:
+        text:
+    bypass:
+      name: Bypass
+      description: Turn on to bypass the zone, off to remove the bypass.
+      default: true
+      selector:
+        boolean:

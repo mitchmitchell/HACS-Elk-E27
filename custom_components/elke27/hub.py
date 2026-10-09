@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Seconds to wait before re-reading a light's status after a set_status.
+LIGHT_REFRESH_DELAY = 3.0
+
 
 class Elke27Hub:
     """Manage a single Elke27 client instance."""
@@ -202,12 +205,35 @@ class Elke27Hub:
             level = 0
         elif level is None:
             level = 99
-        return await self._async_execute(
+        ok = await self._async_execute(
             "light_set_status",
             light_id=light_id,
             status="ON" if state else "OFF",
             level=level,
         )
+        if ok:
+            # The set_status ack may not carry the new state (Z-Wave devices
+            # report it later), so ask the panel for the light's status now and
+            # once more after a short delay.
+            await self._async_refresh_light(light_id)
+            self._hass.async_create_background_task(
+                self._async_refresh_light_later(light_id),
+                f"elke27 light {light_id} status refresh",
+            )
+        return ok
+
+    async def _async_refresh_light(self, light_id: int) -> None:
+        """Request a light's status; failures are logged, not raised."""
+        try:
+            await self._async_execute("light_get_status", light_id=light_id)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Light %s status refresh failed: %s", light_id, err)
+
+    async def _async_refresh_light_later(self, light_id: int) -> None:
+        """Request a light's status again after the device has had time to report."""
+        await asyncio.sleep(LIGHT_REFRESH_DELAY)
+        if self._client is not None and not self._stopping:
+            await self._async_refresh_light(light_id)
 
     async def async_set_lock(self, lock_id: int, *, locked: bool) -> bool:
         """Lock (status ON) or unlock (status OFF) a lock."""
@@ -266,7 +292,7 @@ class Elke27Hub:
         except Elke27PinRequiredError:
             raise
         except (Elke27Error, Elke27InvalidArgument) as err:
-            _LOGGER.debug("Zone bypass failed for zone %s: %s", zone_id, err)
+            _log_command_failure("Zone", zone_id, "bypass", err)
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
@@ -319,7 +345,7 @@ class Elke27Hub:
         except Elke27PinRequiredError:
             raise
         except (Elke27Error, Elke27InvalidArgument) as err:
-            _LOGGER.debug("Area arming failed for area %s: %s", area_id, err)
+            _log_command_failure("Area", area_id, "arming", err)
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
@@ -364,7 +390,7 @@ class Elke27Hub:
         except Elke27PinRequiredError:
             raise
         except (Elke27Error, Elke27InvalidArgument) as err:
-            _LOGGER.debug("Area disarm failed for area %s: %s", area_id, err)
+            _log_command_failure("Area", area_id, "disarm", err)
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
@@ -444,13 +470,32 @@ def _validated_pin(pin: str) -> str:
 
 def _library_arm_mode(mode: Any) -> ArmMode:
     """Map an integration arm request to the elke27 arm mode."""
-    if mode in (ArmMode.ARMED_STAY, ArmMode.ARMED_NIGHT, ArmMode.ARMED_AWAY):
+    # The E27 has Away and Stay arming only; it has no Night mode.
+    if mode in (ArmMode.ARMED_STAY, ArmMode.ARMED_AWAY):
         return mode
     # Custom bypass: the entity bypasses open zones first, then arms away.
     if isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS":
         return ArmMode.ARMED_AWAY
     msg = "Arm mode is not supported."
     raise HomeAssistantError(msg)
+
+
+def _log_command_failure(
+    kind: str, target_id: int, action: str, err: Exception
+) -> None:
+    """Log a rejected arm/disarm/bypass, with the panel error code when known."""
+    panel_code = getattr(err, "panel_error_code", None)
+    if panel_code is not None:
+        _LOGGER.warning(
+            "%s %s %s failed: %s (panel error %s)",
+            kind,
+            target_id,
+            action,
+            err,
+            panel_code,
+        )
+    else:
+        _LOGGER.warning("%s %s %s failed: %s", kind, target_id, action, err)
 
 
 def _error_message(err: Exception) -> str:

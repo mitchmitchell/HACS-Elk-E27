@@ -86,7 +86,6 @@ class Elke27AreaAlarmControlPanel(
     _attr_supported_features = (
         AlarmControlPanelEntityFeature.ARM_AWAY
         | AlarmControlPanelEntityFeature.ARM_HOME
-        | AlarmControlPanelEntityFeature.ARM_NIGHT
         | AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
     )
 
@@ -128,6 +127,7 @@ class Elke27AreaAlarmControlPanel(
         if area is None:
             return {
                 "ready": None,
+                "ready_status": None,
                 "faulted_zone_ids": None,
                 "faulted_zones": None,
             }
@@ -135,6 +135,9 @@ class Elke27AreaAlarmControlPanel(
         definitions = self.coordinator.data.zone_definitions
         return {
             "ready": area.ready,
+            # AreaState.ready_status is new in elke27 0.3.10 (RDY_AWAY, RDY_STAY,
+            # RDY_NOT); older versions do not have it.
+            "ready_status": getattr(area, "ready_status", None),
             "faulted_zone_ids": [zone.zone_id for zone in faulted_zones],
             "faulted_zones": [
                 _zone_display_name(zone, definitions) for zone in faulted_zones
@@ -156,10 +159,6 @@ class Elke27AreaAlarmControlPanel(
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
         """Arm the area in home mode."""
         await self._async_arm(ArmMode.ARMED_STAY, code)
-
-    async def async_alarm_arm_night(self, code: str | None = None) -> None:
-        """Arm the area in night mode."""
-        await self._async_arm(ArmMode.ARMED_NIGHT, code)
 
     async def async_alarm_arm_custom_bypass(self, code: str | None = None) -> None:
         """Arm the area with a custom bypass."""

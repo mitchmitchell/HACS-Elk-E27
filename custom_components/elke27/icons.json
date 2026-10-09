@@ -8,5 +8,13 @@
         "default": "mdi:numeric"
       }
     }
+  },
+  "services": {
+    "alarm_arm_automatic": {
+      "service": "mdi:shield-home"
+    },
+    "zone_bypass": {
+      "service": "mdi:shield-off-outline"
+    }
   }
 }

@@ -181,6 +181,17 @@ class Elke27Thermostat(
         return normalize_temperature(tstat.temperature)
 
     @property
+    def current_humidity(self) -> float | None:
+        """Return the current relative humidity."""
+        tstat = _get_tstat(self.coordinator.data, self._tstat_id)
+        if tstat is None or tstat.humidity is None:
+            return None
+        # A thermostat without a humidity sensor reports 0.
+        if tstat.humidity <= 0:
+            return None
+        return float(tstat.humidity)
+
+    @property
     def target_temperature_low(self) -> float | None:
         """Return the current low setpoint."""
         tstat = _get_tstat(self.coordinator.data, self._tstat_id)

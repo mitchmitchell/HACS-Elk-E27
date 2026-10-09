@@ -20,11 +20,30 @@ if _HAS_DEPS:
 
     from elke27_lib import ArmMode
     from elke27_lib.client import Elke27Client
-    from elke27_lib.errors import Elke27AuthError, Elke27PinRequiredError
+    from elke27_lib.errors import (
+        Elke27AuthError,
+        Elke27PinRequiredError,
+        Elke27ProtocolError,
+    )
 
     from custom_components.elke27 import _service_mode_to_arm_mode
     from custom_components.elke27.hub import Elke27Hub
     from homeassistant.exceptions import HomeAssistantError
+
+
+if _HAS_DEPS:
+
+    class _PanelRejectionError(Elke27ProtocolError):
+        """Stand-in for elke27 0.3.10's Elke27PanelError."""
+
+        MESSAGE = (
+            "Panel rejected the request: area not ready (open or faulted zones) "
+            "(error 11015)."
+        )
+
+        def __init__(self) -> None:
+            super().__init__(self.MESSAGE)
+            self.panel_error_code = 11015
 
 
 def _hub_with_client(client: Any) -> Any:
@@ -100,18 +119,39 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
                 exit_delay_cancel=True,
             )
 
-    async def test_arm_night_uses_library_api(self) -> None:
-        """Arm night is passed through to the library as ARMED_NIGHT."""
+    async def test_arm_night_is_rejected(self) -> None:
+        """The E27 has no night mode; arm night never reaches the panel."""
         client = _client()
         hub = _hub_with_client(client)
-        assert await hub.async_arm_area(1, ArmMode.ARMED_NIGHT, "1234")
-        client.async_arm_area.assert_awaited_once_with(
-            1,
-            mode=ArmMode.ARMED_NIGHT,
-            pin="1234",
-            auto_stay_cancel=False,
-            exit_delay_cancel=False,
-        )
+        with self.assertRaises(HomeAssistantError):
+            await hub.async_arm_area(1, ArmMode.ARMED_NIGHT, "1234")
+        client.async_arm_area.assert_not_called()
+
+    async def test_panel_rejection_reason_is_shown_and_logged(self) -> None:
+        """A panel rejection surfaces its reason and logs the panel error code."""
+        client = _client()
+        client.async_arm_area.side_effect = _PanelRejectionError()
+        hub = _hub_with_client(client)
+        with (
+            self.assertLogs("custom_components.elke27.hub", level="WARNING") as logs,
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
+        assert str(ctx.exception) == _PanelRejectionError.MESSAGE
+        assert "panel error 11015" in logs.output[0]
+        assert "1234" not in logs.output[0]
+
+    async def test_disarm_rejection_without_panel_code_is_logged(self) -> None:
+        """Errors without a panel code are still logged as warnings."""
+        client = _client()
+        client.async_disarm_area.side_effect = Elke27AuthError("Denied.")
+        hub = _hub_with_client(client)
+        with (
+            self.assertLogs("custom_components.elke27.hub", level="WARNING") as logs,
+            self.assertRaises(HomeAssistantError),
+        ):
+            await hub.async_disarm_area(1, "1234")
+        assert "Area 1 disarm failed: Denied." in logs.output[0]
 
     async def test_unknown_mode_is_rejected(self) -> None:
         """An unknown arm mode is rejected before reaching the panel."""
