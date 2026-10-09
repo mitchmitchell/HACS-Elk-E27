@@ -14,6 +14,7 @@ from elke27_lib import (
     EventType,
     LinkKeys,
     PanelSnapshot,
+    ZoneState,
 )
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
@@ -268,6 +269,22 @@ class Elke27Hub:
             "tstat_set_status", tstat_id=tstat_id, **filtered_kwargs
         )
 
+    async def async_bypass_faulted_zones(
+        self, area_id: int, snapshot: PanelSnapshot | None, pin: str | None
+    ) -> None:
+        """Bypass open, non-bypassed zones assigned to the given area."""
+        for zone in area_faulted_zones(snapshot, area_id):
+            try:
+                bypassed = await self.async_set_zone_bypass(
+                    zone.zone_id, bypassed=True, pin=pin
+                )
+            except Elke27PinRequiredError:
+                raise
+            except HomeAssistantError as err:
+                raise ZoneBypassFailedError(zone, str(err)) from err
+            if not bypassed:
+                raise ZoneBypassFailedError(zone, "bypass was not acknowledged.")
+
     async def async_set_zone_bypass(
         self, zone_id: int, *, bypassed: bool, pin: str | None = None
     ) -> bool:
@@ -457,6 +474,31 @@ class Elke27Hub:
                 delay,
             )
             await asyncio.sleep(delay)
+
+
+class ZoneBypassFailedError(HomeAssistantError):
+    """Bypass could not be applied to a zone."""
+
+    def __init__(self, zone: ZoneState, reason: str) -> None:
+        """Initialize with the zone that failed and the panel reason."""
+        self.zone = zone
+        self.reason = reason
+        super().__init__(f"{zone_bypass_label(zone)}: {reason}")
+
+
+def area_faulted_zones(snapshot: PanelSnapshot | None, area_id: int) -> list[ZoneState]:
+    """Return open, non-bypassed zones assigned to the given area."""
+    if snapshot is None:
+        return []
+    return [zone for zone in snapshot.faulted_zones if zone.area_id == area_id]
+
+
+def zone_bypass_label(zone: ZoneState) -> str:
+    """Return a user-facing label for a zone."""
+    name = (zone.name or "").strip()
+    if name:
+        return name
+    return f"Zone {zone.zone_id}"
 
 
 def _validated_pin(pin: str) -> str:
