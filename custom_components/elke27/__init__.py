@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 from elke27_lib import ArmMode, ZoneState
 from elke27_lib.errors import (
@@ -64,6 +64,8 @@ ATTR_ZONE_ID = "zone_id"
 ATTR_REASON = "reason"
 ATTR_STAGE = "stage"
 ATTR_BYPASSED_ZONE_IDS = "bypassed_zone_ids"
+ATTR_ROLLED_BACK_ZONE_IDS = "rolled_back_zone_ids"
+ATTR_STILL_BYPASSED_ZONE_IDS = "still_bypassed_zone_ids"
 
 SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA = cv.make_entity_service_schema(
     {
@@ -235,8 +237,8 @@ async def _async_handle_alarm_arm_automatic(
         raise ServiceValidationError(msg)
 
     # Each area is handled on its own: a failure in one area is reported and
-    # does not stop the others, and areas armed earlier stay armed. Nothing is
-    # retried or rolled back.
+    # does not stop the others, and areas armed earlier stay armed. Refusals
+    # are never retried; within a failed area, its own bypasses are undone.
     failures: list[HomeAssistantError] = []
     for entity_id in entity_ids:
         try:
@@ -278,13 +280,19 @@ async def _async_arm_automatic_entity(
     area_id = _area_id_from_unique_id(entity_entry.unique_id)
     hub = runtime_data.hub
 
-    def _report(
+    async def _fail(
         stage: str,
         reason: str,
         *,
         zone: ZoneState | None = None,
         bypassed: Sequence[ZoneState] = (),
-    ) -> None:
+        cause: Exception,
+    ) -> NoReturn:
+        # Undo this call's bypasses: one un-bypass per zone, never retried.
+        rolled_back, still_bypassed = await hub.async_rollback_bypasses(
+            tuple(bypassed), code
+        )
+        summary = _rollback_summary(rolled_back, still_bypassed)
         _async_report_arm_automatic_failure(
             hass,
             entity_id=entity_id,
@@ -293,17 +301,24 @@ async def _async_arm_automatic_entity(
             reason=reason,
             zone=zone,
             bypassed_zones=bypassed,
+            rolled_back_zones=rolled_back,
+            still_bypassed_zones=still_bypassed,
             config_entry_id=entity_entry.config_entry_id,
         )
+        detail = f"{zone_bypass_label(zone)}: {reason}" if zone is not None else reason
+        msg = f"Area {area_id} was not armed: {_sentence(detail)}"
+        if summary:
+            msg = f"{msg} {summary}"
+        raise HomeAssistantError(msg) from cause
 
     try:
         bypassed = await hub.async_bypass_faulted_zones(
             area_id, runtime_data.coordinator.data, code
         )
     except ZoneBypassFailedError as err:
-        _report("bypass", err.reason, zone=err.zone, bypassed=err.bypassed_zones)
-        msg = f"Area {area_id} was not armed: {err}"
-        raise HomeAssistantError(msg) from err
+        await _fail(
+            "bypass", err.reason, zone=err.zone, bypassed=err.bypassed_zones, cause=err
+        )
 
     try:
         await hub.async_arm_area(
@@ -314,13 +329,37 @@ async def _async_arm_automatic_entity(
             exit_delay_cancel=True,
         )
     except Elke27PinRequiredError as err:
-        _report("arm", PIN_REQUIRED_REASON, bypassed=bypassed)
-        msg = f"Area {area_id} was not armed: {PIN_REQUIRED_REASON}"
-        raise HomeAssistantError(msg) from err
+        await _fail("arm", PIN_REQUIRED_REASON, bypassed=bypassed, cause=err)
     except HomeAssistantError as err:
-        _report("arm", str(err), bypassed=bypassed)
-        msg = f"Area {area_id} was not armed: {err}"
-        raise HomeAssistantError(msg) from err
+        await _fail("arm", str(err), bypassed=bypassed, cause=err)
+
+
+def _sentence(text: str) -> str:
+    """Return text ending in exactly one period."""
+    return text.rstrip().rstrip(".") + "."
+
+
+def _zone_labels(zones: Sequence[ZoneState]) -> str:
+    return ", ".join(zone_bypass_label(zone) for zone in zones)
+
+
+def _rollback_summary(
+    rolled_back: Sequence[ZoneState], still_bypassed: Sequence[ZoneState]
+) -> str:
+    """Describe what the rollback of this call's bypasses did."""
+    parts: list[str] = []
+    if rolled_back:
+        parts.append(
+            "The bypasses made before the failure were undone:"
+            f" {_zone_labels(rolled_back)}."
+        )
+    if still_bypassed:
+        parts.append(
+            "These zones could not be un-bypassed and are still bypassed:"
+            f" {_zone_labels(still_bypassed)}. Clear them with elke27.zone_bypass"
+            " and bypass: false."
+        )
+    return " ".join(parts)
 
 
 def _arm_automatic_notification_id(config_entry_id: str, area_id: int) -> str:
@@ -338,20 +377,19 @@ def _async_report_arm_automatic_failure(
     reason: str,
     zone: ZoneState | None,
     bypassed_zones: Sequence[ZoneState],
+    rolled_back_zones: Sequence[ZoneState] = (),
+    still_bypassed_zones: Sequence[ZoneState] = (),
     config_entry_id: str,
 ) -> None:
     """Notify the user and fire an event when automatic arming fails for an area."""
     if zone is not None:
-        detail = f"{zone_bypass_label(zone)} could not be bypassed: {reason}."
+        detail = f"{zone_bypass_label(zone)} could not be bypassed: {reason}"
     else:
-        detail = f"The panel did not arm the area: {reason}."
-    message = f"Area {area_id} ({entity_id}) was not armed. {detail}"
-    if bypassed_zones:
-        labels = ", ".join(zone_bypass_label(item) for item in bypassed_zones)
-        message += (
-            f" These zones were already bypassed and stay bypassed until the area"
-            f" is disarmed: {labels}."
-        )
+        detail = f"The panel did not arm the area: {reason}"
+    message = f"Area {area_id} ({entity_id}) was not armed. {_sentence(detail)}"
+    summary = _rollback_summary(rolled_back_zones, still_bypassed_zones)
+    if summary:
+        message = f"{message} {summary}"
     persistent_notification.async_create(
         hass,
         title="Elk E27 automatic arming failed",
@@ -367,6 +405,10 @@ def _async_report_arm_automatic_failure(
             ATTR_ZONE_ID: zone.zone_id if zone is not None else None,
             ATTR_REASON: reason,
             ATTR_BYPASSED_ZONE_IDS: [item.zone_id for item in bypassed_zones],
+            ATTR_ROLLED_BACK_ZONE_IDS: [item.zone_id for item in rolled_back_zones],
+            ATTR_STILL_BYPASSED_ZONE_IDS: [
+                item.zone_id for item in still_bypassed_zones
+            ],
         },
     )
 
