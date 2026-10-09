@@ -12,6 +12,7 @@ from elke27_lib.errors import (
     Elke27ConnectionError,
     Elke27DisconnectedError,
     Elke27LinkRequiredError,
+    Elke27PinRequiredError,
     Elke27TimeoutError,
 )
 import voluptuous as vol
@@ -35,11 +36,18 @@ from homeassistant.helpers.target import (
 from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, CONF_PANEL, DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import unique_base
-from .hub import Elke27Hub, ZoneBypassFailedError, zone_bypass_label
+from .hub import (
+    PIN_REQUIRED_REASON,
+    Elke27Hub,
+    ZoneBypassFailedError,
+    zone_bypass_label,
+)
 from .identity import async_get_integration_serial
 from .models import Elke27RuntimeData
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from homeassistant.core import HomeAssistant, ServiceCall
     from homeassistant.helpers.typing import ConfigType
 
@@ -54,6 +62,8 @@ ATTR_CODE = "code"
 ATTR_AREA_ID = "area_id"
 ATTR_ZONE_ID = "zone_id"
 ATTR_REASON = "reason"
+ATTR_STAGE = "stage"
+ATTR_BYPASSED_ZONE_IDS = "bypassed_zone_ids"
 
 SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA = cv.make_entity_service_schema(
     {
@@ -224,13 +234,29 @@ async def _async_handle_alarm_arm_automatic(
         msg = "No Elke27 alarm control panel target was provided"
         raise ServiceValidationError(msg)
 
+    # Each area is handled on its own: a failure in one area is reported and
+    # does not stop the others, and areas armed earlier stay armed. Nothing is
+    # retried or rolled back.
+    failures: list[HomeAssistantError] = []
     for entity_id in entity_ids:
-        await _async_arm_automatic_entity(
-            hass,
-            entity_id,
-            mode_name,
-            code,
+        try:
+            await _async_arm_automatic_entity(
+                hass,
+                entity_id,
+                mode_name,
+                code,
+            )
+        except HomeAssistantError as err:
+            failures.append(err)
+    if len(failures) == 1:
+        raise failures[0]
+    if failures:
+        details = "; ".join(str(err) for err in failures)
+        msg = (
+            f"Automatic arming failed for {len(failures)} of {len(entity_ids)} "
+            f"areas: {details}"
         )
+        raise HomeAssistantError(msg) from failures[0]
 
 
 def _entity_ids_from_service_call(hass: HomeAssistant, call: ServiceCall) -> list[str]:
@@ -250,27 +276,51 @@ async def _async_arm_automatic_entity(
         hass, entity_id, Platform.ALARM_CONTROL_PANEL, "alarm control panel"
     )
     area_id = _area_id_from_unique_id(entity_entry.unique_id)
-    try:
-        await runtime_data.hub.async_bypass_faulted_zones(
-            area_id, runtime_data.coordinator.data, code
-        )
-    except ZoneBypassFailedError as err:
+    hub = runtime_data.hub
+
+    def _report(
+        stage: str,
+        reason: str,
+        *,
+        zone: ZoneState | None = None,
+        bypassed: Sequence[ZoneState] = (),
+    ) -> None:
         _async_report_arm_automatic_failure(
             hass,
             entity_id=entity_id,
             area_id=area_id,
-            zone=err.zone,
-            reason=err.reason,
+            stage=stage,
+            reason=reason,
+            zone=zone,
+            bypassed_zones=bypassed,
             config_entry_id=entity_entry.config_entry_id,
         )
-        raise
-    await runtime_data.hub.async_arm_area(
-        area_id,
-        _service_mode_to_arm_mode(mode_name),
-        code,
-        auto_stay_cancel=True,
-        exit_delay_cancel=True,
-    )
+
+    try:
+        bypassed = await hub.async_bypass_faulted_zones(
+            area_id, runtime_data.coordinator.data, code
+        )
+    except ZoneBypassFailedError as err:
+        _report("bypass", err.reason, zone=err.zone, bypassed=err.bypassed_zones)
+        msg = f"Area {area_id} was not armed: {err}"
+        raise HomeAssistantError(msg) from err
+
+    try:
+        await hub.async_arm_area(
+            area_id,
+            _service_mode_to_arm_mode(mode_name),
+            code,
+            auto_stay_cancel=True,
+            exit_delay_cancel=True,
+        )
+    except Elke27PinRequiredError as err:
+        _report("arm", PIN_REQUIRED_REASON, bypassed=bypassed)
+        msg = f"Area {area_id} was not armed: {PIN_REQUIRED_REASON}"
+        raise HomeAssistantError(msg) from err
+    except HomeAssistantError as err:
+        _report("arm", str(err), bypassed=bypassed)
+        msg = f"Area {area_id} was not armed: {err}"
+        raise HomeAssistantError(msg) from err
 
 
 def _arm_automatic_notification_id(config_entry_id: str, area_id: int) -> str:
@@ -284,18 +334,28 @@ def _async_report_arm_automatic_failure(
     *,
     entity_id: str,
     area_id: int,
-    zone: ZoneState,
+    stage: str,
     reason: str,
+    zone: ZoneState | None,
+    bypassed_zones: Sequence[ZoneState],
     config_entry_id: str,
 ) -> None:
-    """Notify the user and emit an event when automatic arming cannot bypass a zone."""
-    zone_label = zone_bypass_label(zone)
+    """Notify the user and fire an event when automatic arming fails for an area."""
+    if zone is not None:
+        detail = f"{zone_bypass_label(zone)} could not be bypassed: {reason}."
+    else:
+        detail = f"The panel did not arm the area: {reason}."
+    message = f"Area {area_id} ({entity_id}) was not armed. {detail}"
+    if bypassed_zones:
+        labels = ", ".join(zone_bypass_label(item) for item in bypassed_zones)
+        message += (
+            f" These zones were already bypassed and stay bypassed until the area"
+            f" is disarmed: {labels}."
+        )
     persistent_notification.async_create(
         hass,
         title="Elk E27 automatic arming failed",
-        message=(
-            f"{zone_label} could not be bypassed: {reason}. The area was not armed."
-        ),
+        message=message,
         notification_id=_arm_automatic_notification_id(config_entry_id, area_id),
     )
     hass.bus.async_fire(
@@ -303,8 +363,10 @@ def _async_report_arm_automatic_failure(
         {
             "entity_id": entity_id,
             ATTR_AREA_ID: area_id,
-            ATTR_ZONE_ID: zone.zone_id,
+            ATTR_STAGE: stage,
+            ATTR_ZONE_ID: zone.zone_id if zone is not None else None,
             ATTR_REASON: reason,
+            ATTR_BYPASSED_ZONE_IDS: [item.zone_id for item in bypassed_zones],
         },
     )
 

@@ -252,10 +252,30 @@ This action only performs the arm.
 
 This is meant for unattended geofence-style arming. Before arming, the integration bypasses
 every open (faulted), not-yet-bypassed zone in each targeted area using your code. Zones in
-other areas are never changed. If a bypass fails, the area is **not** armed: Home Assistant
-raises an error, creates a persistent notification, and fires an
-[`elke27_arm_automatic_failed`](#elke27_arm_automatic_failed-event) event so you can alert
-yourself.
+other areas are never changed.
+
+**When something fails.** Panel refusals are never retried, and nothing is rolled back,
+because a rollback is more commands that could fail while nobody is home. Instead, the
+failure is reported straight away, with the area, the zone and the panel's reason:
+
+- **A bypass fails** (for example zone A is bypassed, then the panel refuses zone B): the
+  area is **not** armed. Zone A **stays bypassed** until the area is disarmed or you remove
+  the bypass with [`elke27.zone_bypass`](#elke27zone_bypass). The error, the notification and
+  the event name the failed zone, the reason, and the zones already bypassed
+  (`bypassed_zone_ids`).
+- **The arm itself is refused** (for example *area not ready*): the bypasses made for that
+  area stay in place and are listed in the same way.
+- **No user code reached the panel** (*a user code is required*): this is reported the same
+  way.
+
+In each case Home Assistant raises an error, creates a persistent notification for that
+area, and fires an [`elke27_arm_automatic_failed`](#elke27_arm_automatic_failed-event)
+event, so you can alert yourself. If you want to retry, do it in your automation.
+
+**Several targets.** Each area is handled on its own, in entity ID order. A failure in one
+area doesn't stop the others, and areas armed earlier in the same call **stay armed**. Each
+failed area gets its own notification and event. The action reports an error if any area
+failed.
 
 The integration sends the arm request with the panel's auto-stay-cancel and exit-delay-cancel
 flags set, so the panel:
@@ -311,15 +331,17 @@ presence for a while, and use `mode: home` to arm stay instead.
 
 #### `elke27_arm_automatic_failed` event
 
-Fired when `elke27.alarm_arm_automatic` cannot bypass an open zone in the targeted area, so
-the arm is aborted. The event data includes:
+Fired once for each area that `elke27.alarm_arm_automatic` could not arm. The event data
+includes:
 
 | Key | Description |
 |---|---|
 | `entity_id` | Alarm control panel entity that was being armed |
 | `area_id` | Elk area number |
-| `zone_id` | Zone that could not be bypassed |
+| `stage` | `bypass` (a zone bypass failed, so the area was not armed) or `arm` (the bypasses succeeded but the panel did not arm the area) |
+| `zone_id` | Zone that could not be bypassed (`null` when `stage` is `arm`) |
 | `reason` | Panel or integration reason (the alarm code is never included) |
+| `bypassed_zone_ids` | Zones in this area that were bypassed before the failure. They stay bypassed until the area is disarmed |
 
 Example automation trigger:
 
@@ -331,7 +353,10 @@ actions:
   - action: notify.mobile_app_your_phone
     data:
       title: "Elk E27 did not arm"
-      message: "Zone {{ trigger.event.data.zone_id }}: {{ trigger.event.data.reason }}"
+      message: >-
+        Area {{ trigger.event.data.area_id }} not armed
+        ({{ trigger.event.data.stage }}): {{ trigger.event.data.reason }}.
+        Bypassed: {{ trigger.event.data.bypassed_zone_ids }}
 ```
 
 ### `elke27.zone_bypass`
