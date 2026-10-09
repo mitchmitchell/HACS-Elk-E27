@@ -22,7 +22,11 @@ if _HAS_DEPS:
 
     from elke27_lib import Elke27Event, EventType, LinkKeys, PanelInfo, PanelSnapshot
     from elke27_lib.client import Elke27Client, Result
-    from elke27_lib.errors import Elke27AuthError, Elke27PinRequiredError
+    from elke27_lib.errors import (
+        Elke27AuthError,
+        Elke27PinRequiredError,
+        Elke27ProtocolError,
+    )
     from elke27_lib.generators.registry import COMMANDS
 
     from custom_components.elke27 import hub as hub_module
@@ -124,7 +128,7 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
     """Test zone bypass through the client API."""
 
     async def test_bypass_uses_library_api_with_string_pin(self) -> None:
-        """The PIN is passed as a string so leading zeros are kept."""
+        """The hub passes the digit string; elke27 sends it as a JSON integer."""
         client = _client()
         hub = _hub(client)
         assert await hub.async_set_zone_bypass(5, bypassed=True, pin="0123")
@@ -149,6 +153,22 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
         client.async_set_zone_bypass.side_effect = Elke27AuthError("Not allowed.")
         with self.assertRaises(HomeAssistantError):
             await _hub(client).async_set_zone_bypass(5, bypassed=True, pin="1234")
+
+    async def test_bypass_not_authorized_reason_reaches_user(self) -> None:
+        """A panel 11008 rejection shows the library's reason, not a generic error."""
+        message = "Panel rejected the request: not authorized (error 11008)."
+        err = Elke27ProtocolError(message)
+        err.panel_error_code = 11008  # type: ignore[attr-defined]
+        client = _client()
+        client.async_set_zone_bypass.side_effect = err
+        with (
+            self.assertLogs("custom_components.elke27.hub", level="WARNING") as logs,
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")
+        assert str(ctx.exception) == message
+        assert "11008" in logs.output[0]
+        assert "1234" not in logs.output[0]
 
     async def test_bypass_pin_required_error_propagates(self) -> None:
         """A PIN-required error from the library is re-raised unchanged."""
