@@ -10,6 +10,6 @@
   "issue_tracker": "https://github.com/mitchmitchell/HACS-Elk-E27/issues",
   "loggers": ["elke27_lib"],
   "quality_scale": "bronze",
-  "requirements": ["elke27==0.3.8"],
+  "requirements": ["elke27==0.3.9"],
   "version": "0.1.6"
 }
