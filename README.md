@@ -282,8 +282,17 @@ cached copy). If the area is **already armed** (in any mode), the call does noth
 succeeds: no bypass, no arm, no rollback. Zones that are already bypassed are skipped, and
 only zones bypassed by this call are ever rolled back. If the panel refuses the arm because
 the area is already armed (error 11028), the bypasses are kept and the result is reported as
-unknown. Arm away, arm home, arm custom bypass, disarm and `elke27.zone_bypass` (for zones
-with a known area) share the same per-area lock, so a rollback can't race a manual change.
+unknown. Arm away, arm home, arm custom bypass and `elke27.zone_bypass` (for zones with a
+known area) share the same per-area lock, so a rollback can't race a manual change.
+
+**A disarm always wins.** Disarming an area does not wait for the lock. It first cancels any
+`elke27.alarm_arm_automatic` call for that area, running or still queued, and then sends the
+disarm straight away. The cancelled call sends nothing more: no further bypasses, no arm and
+no rollback. It reports `stage: cancelled` (`outcome: not_armed`) with the zones it had
+bypassed, or was bypassing, when it was stopped. Disarming an **armed** area clears its
+bypasses on the panel; if the area never armed, those zones may still be bypassed, so check
+them and clear any that are with `elke27.zone_bypass` and `bypass: false`. If the arm had
+already been sent, the disarm that follows makes it moot. Nothing is retried.
 
 In each case Home Assistant raises an error, creates a persistent notification for that
 area, and fires an [`elke27_arm_automatic_failed`](#elke27_arm_automatic_failed-event)
@@ -355,9 +364,9 @@ includes:
 |---|---|
 | `entity_id` | Alarm control panel entity that was being armed |
 | `area_id` | Elk area number |
-| `stage` | `bypass` (a zone bypass failed, so the area was not armed), `arm` (the bypasses succeeded but the panel refused the arm, or it was never sent) or `arm_uncertain` (the arm result is unknown, for example a timeout) |
-| `outcome` | `not_armed` (the area is known not to be armed; bypasses were rolled back) or `unknown` (check the panel; bypasses were left in place) |
-| `zone_id` | Zone that could not be bypassed (`null` when `stage` is `arm` or `arm_uncertain`) |
+| `stage` | `bypass` (a zone bypass failed, so the area was not armed), `arm` (the bypasses succeeded but the panel refused the arm, or it was never sent) or `arm_uncertain` (the arm result is unknown, for example a timeout) or `cancelled` (a disarm of the area cancelled the call; nothing more was sent) |
+| `outcome` | `not_armed` (the area is known not to be armed; bypasses were rolled back, except when `stage` is `cancelled`) or `unknown` (check the panel; bypasses were left in place) |
+| `zone_id` | Zone that could not be bypassed (`null` when `stage` is `arm`, `arm_uncertain` or `cancelled`) |
 | `reason` | Panel or integration reason (the alarm code is never included) |
 | `bypassed_zone_ids` | Zones in this area that this call bypassed before the failure |
 | `rolled_back_zone_ids` | Of those, the zones whose bypass was undone after the failure |

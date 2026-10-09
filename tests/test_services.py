@@ -32,6 +32,7 @@ if _HAS_DEPS:
         Elke27PinRequiredError,
         Elke27TimeoutError,
     )
+    from test_entities import _area_entity
     from test_hub_bypass import _hub, _snapshot, _two_area_snapshot
 
     from custom_components import elke27 as integration
@@ -82,6 +83,7 @@ def _alarm_runtime(snapshot: Any) -> Any:
     hub = _hub()
     hub.async_set_zone_bypass = AsyncMock(return_value=True)
     hub.async_arm_area = AsyncMock(return_value=True)
+    hub.async_disarm_area = AsyncMock(return_value=True)
     runtime = MagicMock()
     runtime.hub = hub
     # The live client snapshot is what arm automatic reads inside the lock; the
@@ -748,6 +750,126 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime.hub.async_set_zone_bypass.assert_not_called()
         runtime.hub.async_arm_area.assert_not_called()
         assert hass.bus.async_fire.call_args.args[1]["outcome"] == "not_armed"
+
+    async def test_disarm_mid_bypass_cancels_automatic_arming(self) -> None:
+        """A disarm during the bypasses cancels the call and is sent at once."""
+        hass = MagicMock()
+        snapshot = _two_area_snapshot()
+        runtime = _alarm_runtime(snapshot)
+        hub = runtime.hub
+        order: list[str] = []
+        first_bypass_sent = asyncio.Event()
+        never = asyncio.Event()
+
+        async def _bypass(zone_id: int, **kwargs: Any) -> bool:
+            order.append(f"bypass{zone_id}:{kwargs['bypassed']}")
+            first_bypass_sent.set()
+            await never.wait()  # the panel has not answered yet
+            return True
+
+        async def _disarm(area_id: int, _pin: str | None, **_kw: Any) -> bool:
+            order.append(f"disarm{area_id}")
+            return True
+
+        hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
+        hub.async_disarm_area = AsyncMock(side_effect=_disarm)
+        entity = _area_entity(snapshot, hub)
+        entities = {
+            "alarm_control_panel.house": (
+                _entry("aa:bb:cc:dd:ee:ff:area:1", config_entry_id="entry-abc"),
+                runtime,
+            )
+        }
+        with patch.object(
+            integration.persistent_notification, "async_create"
+        ) as create_notification:
+            automatic = asyncio.create_task(
+                self._run(hass, {"mode": "away", "code": "1234"}, entities)
+            )
+            await first_bypass_sent.wait()
+            # The automatic call holds the area lock; disarm must not wait on it.
+            assert hub.area_arm_lock(1).locked()
+            await asyncio.wait_for(entity.async_alarm_disarm("1234"), timeout=1)
+            assert order == ["bypass1:True", "disarm1"]
+            with self.assertRaises(HomeAssistantError) as ctx:
+                await automatic
+        # No further bypass, no arm, no rollback after the cancel.
+        assert order == ["bypass1:True", "disarm1"]
+        hub.async_arm_area.assert_not_called()
+        assert "cancelled by a disarm" in str(ctx.exception)
+        assert "Front Door (zone 1)" in str(ctx.exception)
+        assert not hub.area_arm_lock(1).locked()
+        message = create_notification.call_args.kwargs["message"]
+        assert "cancelled by a disarm" in message
+        assert "elke27.zone_bypass" in message
+        assert "1234" not in message
+        hass.bus.async_fire.assert_called_once_with(
+            integration.EVENT_ARM_AUTOMATIC_FAILED,
+            {
+                "entity_id": "alarm_control_panel.house",
+                "area_id": 1,
+                "stage": "cancelled",
+                "outcome": "not_armed",
+                "zone_id": None,
+                "reason": "cancelled by a disarm of this area",
+                "bypassed_zone_ids": [1],
+                "rolled_back_zone_ids": [],
+                "still_bypassed_zone_ids": [],
+            },
+        )
+
+    async def test_disarm_cancels_a_queued_automatic_call(self) -> None:
+        """A call still waiting for the area lock is cancelled before it sends."""
+        hass = MagicMock()
+        snapshot = _two_area_snapshot()
+        runtime = _alarm_runtime(snapshot)
+        hub = runtime.hub
+        entity = _area_entity(snapshot, hub)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        lock = hub.area_arm_lock(1)
+        await lock.acquire()  # e.g. a manual arm in progress
+        with patch.object(integration.persistent_notification, "async_create"):
+            automatic = asyncio.create_task(
+                self._run(hass, {"mode": "away", "code": "1234"}, entities)
+            )
+            for _ in range(5):
+                await asyncio.sleep(0)
+            await entity.async_alarm_disarm("1234")
+            lock.release()
+            with self.assertRaises(HomeAssistantError):
+                await automatic
+        hub.async_set_zone_bypass.assert_not_called()
+        hub.async_arm_area.assert_not_called()
+        hub.async_disarm_area.assert_awaited_once_with(1, "1234")
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["stage"] == "cancelled"
+        assert data["bypassed_zone_ids"] == []
+
+    async def test_disarm_without_automatic_call_is_unchanged(self) -> None:
+        """With nothing in flight, disarm just disarms."""
+        snapshot = _two_area_snapshot()
+        runtime = _alarm_runtime(snapshot)
+        hub = runtime.hub
+        hub.async_disarm_area = AsyncMock(return_value=True)
+        entity = _area_entity(snapshot, hub)
+        assert hub.cancel_arm_automatic(1) == 0
+        await entity.async_alarm_disarm("1234")
+        hub.async_disarm_area.assert_awaited_once_with(1, "1234")
+        hub.async_set_zone_bypass.assert_not_called()
+
+    async def test_disarm_of_other_area_does_not_cancel(self) -> None:
+        """Only the disarmed area's automatic call is cancelled."""
+        hub = _alarm_runtime(_two_area_snapshot()).hub
+        task = asyncio.create_task(asyncio.sleep(10))
+        hub.register_arm_automatic(1, task)
+        assert hub.cancel_arm_automatic(2) == 0
+        assert not task.cancelled()
+        assert hub.cancel_arm_automatic(1) == 1
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        hub.unregister_arm_automatic(1, task)
 
     async def test_pin_required_during_bypass_is_reported(self) -> None:
         """Elke27PinRequiredError from a bypass goes through failure reporting."""

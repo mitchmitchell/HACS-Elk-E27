@@ -183,12 +183,15 @@ class Elke27AreaAlarmControlPanel(
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Disarm the area."""
         code = _normalize_code(code)
-        async with self._hub.area_arm_lock(self._area_id):
-            try:
-                await self._hub.async_disarm_area(self._area_id, code)
-            except Elke27PinRequiredError as err:
-                msg = "PIN required to perform this action."
-                raise HomeAssistantError(msg) from err
+        # Disarm wins: it does not wait on the area lock. Any automatic arming
+        # in flight (or queued) for this area is cancelled first and sends no
+        # more commands; then the disarm is sent straight away.
+        self._hub.cancel_arm_automatic(self._area_id)
+        try:
+            await self._hub.async_disarm_area(self._area_id, code)
+        except Elke27PinRequiredError as err:
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
 
     async def _async_arm(self, mode: ArmMode, code: str | None) -> None:
         """Arm the area; the caller holds the area lock."""

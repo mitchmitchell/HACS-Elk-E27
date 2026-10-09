@@ -65,6 +65,8 @@ class Elke27Hub:
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._connect_lock = asyncio.Lock()
         self._area_arm_locks: dict[int, asyncio.Lock] = {}
+        self._arm_automatic_tasks: dict[int, set[asyncio.Task[Any]]] = {}
+        self._disarm_cancelled: set[asyncio.Task[Any]] = set()
         self._reconnect_task: asyncio.Task[None] | None = None
         self._reconnect_attempts = 0
         self._stopping = False
@@ -274,7 +276,12 @@ class Elke27Hub:
         )
 
     async def async_bypass_faulted_zones(
-        self, area_id: int, snapshot: PanelSnapshot | None, pin: str | None
+        self,
+        area_id: int,
+        snapshot: PanelSnapshot | None,
+        pin: str | None,
+        *,
+        attempted: list[ZoneState] | None = None,
     ) -> list[ZoneState]:
         """
         Bypass open, non-bypassed zones assigned to the given area.
@@ -283,9 +290,13 @@ class Elke27Hub:
         retrying it (a refusal is reported, never retried); ZoneBypassFailedError
         names the failed zone, the reason, and the zones already bypassed. The
         caller decides whether to roll those back with async_rollback_bypasses.
+        Each zone is appended to ``attempted`` (when given) before its bypass is
+        sent, so a caller that is cancelled mid-way knows what may be bypassed.
         """
         bypassed: list[ZoneState] = []
         for zone in area_faulted_zones(snapshot, area_id):
+            if attempted is not None:
+                attempted.append(zone)
             try:
                 acknowledged = await self.async_set_zone_bypass(
                     zone.zone_id, bypassed=True, pin=pin
@@ -310,6 +321,38 @@ class Elke27Hub:
         The hub belongs to one config entry, so this is per (entry, area).
         """
         return self._area_arm_locks.setdefault(area_id, asyncio.Lock())
+
+    def register_arm_automatic(self, area_id: int, task: asyncio.Task[Any]) -> None:
+        """Track an automatic arming task (running or queued) for an area."""
+        self._arm_automatic_tasks.setdefault(area_id, set()).add(task)
+
+    def unregister_arm_automatic(self, area_id: int, task: asyncio.Task[Any]) -> None:
+        """Stop tracking an automatic arming task."""
+        tasks = self._arm_automatic_tasks.get(area_id)
+        if tasks is not None:
+            tasks.discard(task)
+            if not tasks:
+                del self._arm_automatic_tasks[area_id]
+        self._disarm_cancelled.discard(task)
+
+    def cancel_arm_automatic(self, area_id: int) -> int:
+        """
+        Cancel every automatic arming task for an area, so a disarm wins.
+
+        Returns how many tasks were cancelled. Nothing is awaited here: the
+        disarm is sent straight away and does not wait for the tasks to stop.
+        """
+        count = 0
+        for task in list(self._arm_automatic_tasks.get(area_id, ())):
+            if not task.done():
+                self._disarm_cancelled.add(task)
+                task.cancel()
+                count += 1
+        return count
+
+    def cancelled_by_disarm(self, task: asyncio.Task[Any] | None) -> bool:
+        """Return True when the task was cancelled by cancel_arm_automatic."""
+        return task is not None and task in self._disarm_cancelled
 
     async def async_rollback_bypasses(
         self, zones: list[ZoneState] | tuple[ZoneState, ...], pin: str | None

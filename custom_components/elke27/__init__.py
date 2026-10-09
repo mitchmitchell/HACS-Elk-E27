@@ -71,6 +71,7 @@ ATTR_ROLLED_BACK_ZONE_IDS = "rolled_back_zone_ids"
 ATTR_STILL_BYPASSED_ZONE_IDS = "still_bypassed_zone_ids"
 ATTR_OUTCOME = "outcome"
 STAGE_ARM_UNCERTAIN = "arm_uncertain"
+STAGE_CANCELLED = "cancelled"
 OUTCOME_NOT_ARMED = "not_armed"
 OUTCOME_UNKNOWN = "unknown"
 ARM_NOT_SENT_REASON = "the arm command was not sent (the panel is not connected)"
@@ -287,12 +288,55 @@ async def _async_arm_automatic_entity(
     )
     area_id = _area_id_from_unique_id(entity_entry.unique_id)
     hub = runtime_data.hub
-    # Serialize the whole bypass, arm and rollback sequence for this area so a
-    # concurrent call cannot roll back bypasses another call relies on.
-    async with hub.area_arm_lock(area_id):
-        await _async_arm_automatic_locked(
-            hass, entity_entry, runtime_data, entity_id, area_id, mode_name, code
+    attempted: list[ZoneState] = []
+    arm_sent: list[bool] = []
+
+    async def _run() -> None:
+        # Serialize the whole bypass, arm and rollback sequence for this area so
+        # a concurrent call cannot roll back bypasses another call relies on.
+        async with hub.area_arm_lock(area_id):
+            await _async_arm_automatic_locked(
+                hass,
+                entity_entry,
+                runtime_data,
+                entity_id,
+                area_id,
+                mode_name,
+                code,
+                attempted=attempted,
+                arm_sent=arm_sent,
+            )
+
+    # Run each area in its own task, tracked on the hub (from before the lock
+    # is taken), so a disarm of this area can cancel it, queued or running,
+    # without touching other areas in the same call.
+    task = asyncio.create_task(_run(), name=f"elke27 arm automatic area {area_id}")
+    hub.register_arm_automatic(area_id, task)
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if not hub.cancelled_by_disarm(task):
+            task.cancel()
+            raise
+        # Disarm wins: send nothing more (no rollback, no arm) and report.
+        _async_report_arm_automatic_failure(
+            hass,
+            entity_id=entity_id,
+            area_id=area_id,
+            stage=STAGE_CANCELLED,
+            reason="cancelled by a disarm of this area",
+            zone=None,
+            bypassed_zones=attempted,
+            config_entry_id=entity_entry.config_entry_id,
+            arm_sent=bool(arm_sent),
         )
+        msg = (
+            f"Area {area_id} automatic arming was cancelled by a disarm."
+            f" {_cancelled_advice(attempted, arm_sent=bool(arm_sent))}"
+        )
+        raise HomeAssistantError(msg) from None
+    finally:
+        hub.unregister_arm_automatic(area_id, task)
 
 
 async def _async_arm_automatic_locked(
@@ -303,6 +347,9 @@ async def _async_arm_automatic_locked(
     area_id: int,
     mode_name: str,
     code: str,
+    *,
+    attempted: list[ZoneState],
+    arm_sent: list[bool],
 ) -> None:
     """Bypass, arm and (on a definitive refusal) roll back one area."""
     hub = runtime_data.hub
@@ -371,12 +418,15 @@ async def _async_arm_automatic_locked(
         _LOGGER.debug("Area %s is already armed; automatic arming skipped", area_id)
         return
     try:
-        bypassed = await hub.async_bypass_faulted_zones(area_id, snapshot, code)
+        bypassed = await hub.async_bypass_faulted_zones(
+            area_id, snapshot, code, attempted=attempted
+        )
     except ZoneBypassFailedError as err:
         await _fail(
             "bypass", err.reason, zone=err.zone, bypassed=err.bypassed_zones, cause=err
         )
 
+    arm_sent.append(True)
     try:
         sent = await hub.async_arm_area(
             area_id,
@@ -395,6 +445,24 @@ async def _async_arm_automatic_locked(
     if not sent:
         # False means the command was never sent (no client), so it is definitive.
         await _fail("arm", ARM_NOT_SENT_REASON, bypassed=bypassed, cause=None)
+
+
+def _cancelled_advice(bypassed: Sequence[ZoneState], *, arm_sent: bool) -> str:
+    """Tell the user what a disarm-cancelled automatic arm left behind."""
+    if not bypassed:
+        return "No zones were bypassed."
+    labels = _zone_labels(bypassed)
+    if arm_sent:
+        return (
+            f"The arm had already been sent; the disarm clears the bypasses if the"
+            f" area armed. If these zones are still bypassed, clear them with"
+            f" elke27.zone_bypass and bypass: false: {labels}."
+        )
+    return (
+        f"These zones were (or may have been) bypassed and were left as they are."
+        f" If they are still bypassed, clear them with elke27.zone_bypass and"
+        f" bypass: false: {labels}."
+    )
 
 
 def _uncertain_advice(bypassed: Sequence[ZoneState]) -> str:
@@ -455,10 +523,16 @@ def _async_report_arm_automatic_failure(
     rolled_back_zones: Sequence[ZoneState] = (),
     still_bypassed_zones: Sequence[ZoneState] = (),
     config_entry_id: str,
+    arm_sent: bool = False,
 ) -> None:
     """Notify the user and fire an event when automatic arming fails for an area."""
     uncertain = stage == STAGE_ARM_UNCERTAIN
-    if uncertain:
+    if stage == STAGE_CANCELLED:
+        message = (
+            f"Area {area_id} ({entity_id}): automatic arming was cancelled by a"
+            f" disarm. {_cancelled_advice(bypassed_zones, arm_sent=arm_sent)}"
+        )
+    elif uncertain:
         message = (
             f"Area {area_id} ({entity_id}): the arm result is unknown."
             f" {_sentence(reason)} {_uncertain_advice(bypassed_zones)}"
