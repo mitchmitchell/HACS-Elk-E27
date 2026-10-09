@@ -15,6 +15,8 @@ from homeassistant.helpers.device_registry import (
 from .const import CONF_INTEGRATION_SERIAL, DOMAIN, MANUFACTURER_NUMBER
 
 if TYPE_CHECKING:
+    from elke27_lib import PanelSnapshot
+
     from homeassistant.config_entries import ConfigEntry
 
     from .coordinator import Elke27DataUpdateCoordinator
@@ -30,26 +32,25 @@ def sanitize_name(name: str | None) -> str | None:
     return name
 
 
-def get_panel_field(snapshot: Any | None, panel_name: str | None, field: str) -> Any:
+_PANEL_FIELDS = {
+    "name": "panel_name",
+    "mac": "mac",
+    "serial": "serial",
+    "model": "model",
+    "firmware": "firmware",
+}
+
+
+def get_panel_field(
+    snapshot: PanelSnapshot | None, panel_name: str | None, field: str
+) -> Any:
     """Return a field from the current panel snapshot."""
     if field == "name" and panel_name:
         return sanitize_name(panel_name)
     if snapshot is None:
         return None
-    panel_info = getattr(snapshot, "panel_info", None) or getattr(
-        snapshot, "panel", None
-    )
-    if panel_info is None:
-        return None
-    if isinstance(panel_info, dict):
-        if field == "name":
-            return sanitize_name(panel_info.get("name") or panel_info.get("panel_name"))
-        if field == "mac":
-            return panel_info.get("mac") or panel_info.get("panel_mac")
-        if field == "serial":
-            return panel_info.get("serial") or panel_info.get("panel_serial")
-        return panel_info.get(field)
-    return getattr(panel_info, field, None)
+    value = getattr(snapshot.panel, _PANEL_FIELDS[field])
+    return sanitize_name(value) if field == "name" else value
 
 
 def device_info_for_entry(

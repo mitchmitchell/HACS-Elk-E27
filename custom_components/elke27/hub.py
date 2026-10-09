@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from enum import Enum
-from functools import partial
-import inspect
 import logging
 from typing import TYPE_CHECKING, Any
 
-from elke27_lib import ArmMode, ClientConfig, LinkKeys
+from elke27_lib import (
+    ArmMode,
+    ClientConfig,
+    Elke27Event,
+    EventType,
+    LinkKeys,
+    PanelSnapshot,
+)
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
     Elke27Error,
@@ -69,13 +73,14 @@ class Elke27Hub:
     @property
     def is_ready(self) -> bool:
         """Return if the client is ready."""
-        if self._client is None:
-            return False
-        return bool(getattr(self._client, "is_ready", False))
+        return self._client is not None and self._client.is_ready
 
     @property
     def panel_name(self) -> str | None:
-        """Return the discovered panel name if available."""
+        """Return the panel name reported by the panel, else the configured name."""
+        snapshot = self.get_snapshot()
+        if snapshot is not None and snapshot.panel.panel_name:
+            return snapshot.panel.panel_name
         return self._panel_name
 
     async def async_connect(self) -> None:
@@ -89,11 +94,7 @@ class Elke27Hub:
             await self._async_disconnect()
             link_keys = LinkKeys.from_json(self._link_keys_json)
             client = Elke27Client(ClientConfig())
-            client_identity = build_client_identity(self._integration_serial)
-            # Elke27Client v2 does not expose a public identity setter yet.
-            coerce_identity = getattr(client, "_coerce_identity", None)
-            if callable(coerce_identity):
-                client._v2_client_identity = coerce_identity(client_identity)  # noqa: SLF001
+            client.set_client_identity(build_client_identity(self._integration_serial))
             self._client = client
 
             def _raise_not_ready() -> None:
@@ -102,11 +103,6 @@ class Elke27Hub:
 
             try:
                 await client.async_connect(self._host, self._port, link_keys)
-                if self._panel_name is None:
-                    panel_name = await self._async_discover_panel_name(client)
-                    if panel_name:
-                        self._panel_name = panel_name
-                        _LOGGER.debug("Discovered panel name: %s", panel_name)
                 ready = await client.wait_ready(timeout_s=READY_TIMEOUT)
                 if not ready:
                     _raise_not_ready()
@@ -146,44 +142,24 @@ class Elke27Hub:
         if was_connected:
             self._log_unavailable()
 
-    async def _async_discover_panel_name(self, client: Elke27Client) -> str | None:
-        """Return the panel name from discovery if available."""
-        panels = await client.async_discover(timeout_s=5, address=self._host)
-        if not panels:
-            return None
-        panel = panels[0]
-        return getattr(panel, "panel_name", None)
-
-    def get_snapshot(self) -> Any | None:
+    def get_snapshot(self) -> PanelSnapshot | None:
         """Return the latest client snapshot."""
         client = self._client
         if client is None:
             return None
-        return getattr(client, "snapshot", None)
+        return client.get_snapshot()
 
     async def refresh_csm(self) -> Any:
         """Refresh the panel CSM snapshot."""
-        client = self._client
-        if client is None:
-            msg = "Client is not connected."
-            raise HomeAssistantError(msg)
-        return await client.async_refresh_csm()
+        return await self._require_client().async_refresh_csm()
 
     async def refresh_domain_config(self, domain: str) -> None:
         """Refresh a domain configuration snapshot."""
-        client = self._client
-        if client is None:
-            msg = "Client is not connected."
-            raise HomeAssistantError(msg)
-        await client.async_refresh_domain_config(domain)
+        await self._require_client().async_refresh_domain_config(domain)
 
-    def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], None]:
+    def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], bool]:
         """Subscribe to client events."""
-        client = self._client
-        if client is None:
-            msg = "Client is not connected."
-            raise HomeAssistantError(msg)
-        return client.subscribe(listener)
+        return self._require_client().subscribe(listener)
 
     def subscribe_typed(self, listener: Callable[[Any], None]) -> Callable[[], None]:
         """Subscribe to typed client events."""
@@ -211,124 +187,35 @@ class Elke27Hub:
         return client.unsubscribe_typed(listener)
 
     async def async_set_output(self, output_id: int, *, state: bool) -> bool:
-        """Request an output state change if supported."""
+        """Turn an output on or off."""
         client = self._client
         if client is None:
             return False
-
-        method = getattr(client, "async_set_output", None)
-        if method is None:
-            method = getattr(client, "set_output", None)
-        if method is None:
-            _LOGGER.warning(
-                "Output control is not supported by the client for output %s",
-                output_id,
-            )
-            return False
-        params = inspect.signature(method).parameters
-        if "on" in params:
-            if inspect.iscoroutinefunction(method):
-                result = await method(output_id, on=state)
-            else:
-                result = await self._hass.async_add_executor_job(
-                    partial(method, output_id, on=state)
-                )
-        elif inspect.iscoroutinefunction(method):
-            result = await method(output_id, state)
-        else:
-            result = await self._hass.async_add_executor_job(method, output_id, state)
-        return bool(result) if isinstance(result, bool) else True
+        await client.async_set_output(output_id, on=state)
+        return True
 
     async def async_set_light(
         self, light_id: int, *, state: bool, level: int | None = None
     ) -> bool:
-        """Request a light state change if supported."""
-        client = self._client
-        if client is None:
-            return False
-
-        method = getattr(client, "async_set_light", None)
-        if method is None:
-            method = getattr(client, "set_light", None)
-        if method is not None:
-            params = inspect.signature(method).parameters
-            if "on" in params:
-                if inspect.iscoroutinefunction(method):
-                    result = await method(light_id, on=state)
-                else:
-                    result = await self._hass.async_add_executor_job(
-                        partial(method, light_id, on=state)
-                    )
-            elif inspect.iscoroutinefunction(method):
-                result = await method(light_id, state)
-            else:
-                result = await self._hass.async_add_executor_job(
-                    method, light_id, state
-                )
-            return bool(result) if isinstance(result, bool) else True
-
-        status = "ON" if state else "OFF"
-        payload: dict[str, Any] = {
-            "light_id": light_id,
-            "status": status,
-        }
-        if state:
-            payload["level"] = level if level is not None else 99
+        """Turn a light on or off, optionally at a dim level (0-100)."""
         if not state:
-            payload["level"] = 0
-        result = await client.async_execute("light_set_status", **payload)
-        if not getattr(result, "ok", False):
-            error = getattr(result, "error", None)
-            if error is not None:
-                raise error
-            return False
-        return True
+            level = 0
+        elif level is None:
+            level = 99
+        return await self._async_execute(
+            "light_set_status",
+            light_id=light_id,
+            status="ON" if state else "OFF",
+            level=level,
+        )
 
     async def async_set_lock(self, lock_id: int, *, locked: bool) -> bool:
-        """Request a lock state change if supported."""
-        client = self._client
-        if client is None:
-            return False
-
-        method = getattr(client, "async_set_lock", None)
-        if method is None:
-            method = getattr(client, "set_lock", None)
-        if method is not None:
-            params = inspect.signature(method).parameters
-            if "locked" in params:
-                if inspect.iscoroutinefunction(method):
-                    result = await method(lock_id, locked=locked)
-                else:
-                    result = await self._hass.async_add_executor_job(
-                        partial(method, lock_id, locked=locked)
-                    )
-            elif "on" in params:
-                if inspect.iscoroutinefunction(method):
-                    result = await method(lock_id, on=locked)
-                else:
-                    result = await self._hass.async_add_executor_job(
-                        partial(method, lock_id, on=locked)
-                    )
-            elif inspect.iscoroutinefunction(method):
-                result = await method(lock_id, locked)
-            else:
-                result = await self._hass.async_add_executor_job(
-                    method, lock_id, locked
-                )
-            return bool(result) if isinstance(result, bool) else True
-
-        status = "ON" if locked else "OFF"
-        result = await client.async_execute(
+        """Lock (status ON) or unlock (status OFF) a lock."""
+        return await self._async_execute(
             "lock_set_status",
             lock_id=lock_id,
-            status=status,
+            status="ON" if locked else "OFF",
         )
-        if not getattr(result, "ok", False):
-            error = getattr(result, "error", None)
-            if error is not None:
-                raise error
-            return False
-        return True
 
     async def async_set_tstat_status(
         self,
@@ -339,11 +226,7 @@ class Elke27Hub:
         cool_setpoint: float | None = None,
         heat_setpoint: float | None = None,
     ) -> bool:
-        """Request thermostat status changes if supported."""
-        client = self._client
-        if client is None:
-            return False
-
+        """Request thermostat status changes."""
         kwargs: dict[str, Any] = {
             "mode": mode,
             "fan_mode": fan_mode,
@@ -355,74 +238,57 @@ class Elke27Hub:
         }
         if not filtered_kwargs:
             return True
-
-        method = getattr(client, "async_set_tstat_status", None)
-        if method is None:
-            method = getattr(client, "set_tstat_status", None)
-        if method is not None:
-            if inspect.iscoroutinefunction(method):
-                result = await method(tstat_id, **filtered_kwargs)
-            else:
-                result = await self._hass.async_add_executor_job(
-                    partial(method, tstat_id, **filtered_kwargs)
-                )
-            return bool(result) if isinstance(result, bool) else True
-
-        result = await client.async_execute(
-            "tstat_set_status",
-            tstat_id=tstat_id,
-            **filtered_kwargs,
+        return await self._async_execute(
+            "tstat_set_status", tstat_id=tstat_id, **filtered_kwargs
         )
-        if not getattr(result, "ok", False):
-            error = getattr(result, "error", None)
-            if error is not None:
-                raise error
-            return False
-        return True
 
     async def async_set_zone_bypass(
         self, zone_id: int, *, bypassed: bool, pin: str | None = None
     ) -> bool:
-        """Request a zone bypass change."""
+        """Bypass or unbypass a zone through the elke27 client."""
         client = self._client
         if client is None:
             return False
         if pin is None:
             msg = "PIN required to bypass zones."
             raise Elke27PinRequiredError(msg)
-        try:
-            pin_value = int(pin)
-        except (TypeError, ValueError) as err:
-            msg = "Code must be numeric."
-            raise HomeAssistantError(msg) from err
+        pin_value = _validated_pin(pin)
         # Never log the user code.
         _LOGGER.debug(
             "Sending zone bypass request: zone_id=%s bypassed=%s",
             zone_id,
             bypassed,
         )
-        timeout_s = 15.0
-        start = self._hass.loop.time()
-        result = await client.async_execute(
-            "zone_set_status",
-            zone_id=zone_id,
-            pin=pin_value,
-            bypassed=bypassed,
-            timeout_s=timeout_s,
-        )
-        elapsed = self._hass.loop.time() - start
-        _LOGGER.debug(
-            "Zone bypass reply for zone %s in %.2fs (timeout %.1fs)",
-            zone_id,
-            elapsed,
-            timeout_s,
-        )
-        if not getattr(result, "ok", False):
-            error = getattr(result, "error", None)
-            if error is not None:
-                raise error
+        try:
+            await client.async_set_zone_bypass(
+                zone_id, bypassed=bypassed, pin=pin_value
+            )
+        except Elke27PinRequiredError:
+            raise
+        except (Elke27Error, Elke27InvalidArgument) as err:
+            _LOGGER.debug("Zone bypass failed for zone %s: %s", zone_id, err)
+            raise HomeAssistantError(_error_message(err)) from err
+        return True
+
+    async def _async_execute(self, command_key: str, **params: Any) -> bool:
+        """Run a raw elke27 command for domains without a public client method."""
+        client = self._client
+        if client is None:
+            return False
+        result = await client.async_execute(command_key, **params)
+        if not result.ok:
+            if result.error is not None:
+                raise result.error
             return False
         return True
+
+    def _require_client(self) -> Elke27Client:
+        """Return the connected client or raise."""
+        client = self._client
+        if client is None:
+            msg = "Client is not connected."
+            raise HomeAssistantError(msg)
+        return client
 
     async def async_arm_area(
         self,
@@ -502,17 +368,16 @@ class Elke27Hub:
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
-    def _handle_connection_event(self, event: Any) -> None:
+    def _handle_connection_event(self, event: Elke27Event) -> None:
         """Handle connection lifecycle events from the client."""
         if self._client is None:
             return
-        connection_state = _connection_state(event)
-        event_type = _event_type(event)
-        if connection_state is False or event_type == "DISCONNECTED":
+        connected = _connection_state(event)
+        if connected is False:
             _LOGGER.debug("Panel disconnect event received; scheduling reconnect")
             self._log_unavailable()
             self._hass.loop.call_soon_threadsafe(self._schedule_reconnect)
-        elif connection_state is True or event_type == "READY":
+        elif connected is True:
             self._hass.loop.call_soon_threadsafe(self._cancel_reconnect)
 
     @callback
@@ -579,14 +444,10 @@ def _validated_pin(pin: str) -> str:
 
 def _library_arm_mode(mode: Any) -> ArmMode:
     """Map an integration arm request to the elke27 arm mode."""
+    if mode in (ArmMode.ARMED_STAY, ArmMode.ARMED_NIGHT, ArmMode.ARMED_AWAY):
+        return mode
     # Custom bypass: the entity bypasses open zones first, then arms away.
-    if mode is ArmMode.ARMED_STAY:
-        return ArmMode.ARMED_STAY
-    if (
-        mode is ArmMode.ARMED_AWAY
-        or (isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS")
-        or getattr(ArmMode, "ARMED_CUSTOM_BYPASS", None) is mode
-    ):
+    if isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS":
         return ArmMode.ARMED_AWAY
     msg = "Arm mode is not supported."
     raise HomeAssistantError(msg)
@@ -597,59 +458,14 @@ def _error_message(err: Exception) -> str:
     return getattr(err, "user_message", None) or str(err) or type(err).__name__
 
 
-def _event_type(event: Any) -> str | None:
-    if isinstance(event, dict):
-        value = event.get("type") or event.get("event_type") or event.get("domain")
-        if isinstance(value, Enum):
-            return str(value.value).upper()
-        return str(value).upper() if value else None
-    for attr in ("type", "event_type", "domain", "kind", "category"):
-        value = getattr(event, attr, None)
-        if value:
-            if isinstance(value, Enum):
-                return str(value.value).upper()
-            return str(value).upper()
+def _connection_state(event: Elke27Event) -> bool | None:
+    """Return True/False for connect/disconnect events, None otherwise."""
+    if event.event_type is EventType.DISCONNECTED:
+        return False
+    if event.event_type is EventType.READY:
+        return True
+    if event.event_type is EventType.CONNECTION:
+        connected = event.data.get("connected")
+        if isinstance(connected, bool):
+            return connected
     return None
-
-
-def _connection_state(event: Any) -> bool | None:
-    if isinstance(event, dict):
-        event_type = event.get("event_type") or event.get("type")
-        value = (
-            event_type.value
-            if isinstance(event_type, Enum)
-            else str(event_type).lower()
-            if event_type is not None
-            else None
-        )
-        if value == "connection":
-            data = event.get("data")
-            if isinstance(data, dict):
-                connected = data.get("connected")
-                if isinstance(connected, bool):
-                    return connected
-        if value == "disconnected":
-            return False
-        if value == "ready":
-            return True
-        return None
-    if hasattr(event, "event_type"):
-        event_type = event.event_type
-        value = (
-            event_type.value
-            if isinstance(event_type, Enum)
-            else str(event_type).lower()
-        )
-        if value == "connection":
-            data = getattr(event, "data", None)
-            if isinstance(data, dict):
-                connected = data.get("connected")
-                if isinstance(connected, bool):
-                    return connected
-        if value == "disconnected":
-            return False
-        if value == "ready":
-            return True
-        return None
-    connected = getattr(event, "connected", None)
-    return connected if isinstance(connected, bool) else None

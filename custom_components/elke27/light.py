@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -16,6 +15,8 @@ from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
 
 if TYPE_CHECKING:
+    from elke27_lib import LightState, PanelSnapshot
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -49,14 +50,10 @@ async def async_setup_entry(
             _LOGGER.debug("Light entities skipped because snapshot is unavailable")
             return
         entities: list[Elke27Light] = []
-        lights = list(_iter_lights(snapshot))
-        if not lights:
+        if not snapshot.lights:
             _LOGGER.debug("No lights available for entity creation")
             return
-        for light in lights:
-            light_id = getattr(light, "light_id", None)
-            if not isinstance(light_id, int):
-                continue
+        for light_id, light in snapshot.lights.items():
             if light_id in known_ids:
                 continue
             known_ids.add(light_id)
@@ -82,16 +79,14 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         hub: Elke27Hub,
         entry: ConfigEntry,
         light_id: int,
-        light: Any,
+        light: LightState,
     ) -> None:
         """Initialize the light entity."""
         super().__init__(coordinator)
         self._hub = hub
         self._entry = entry
         self._light_id = light_id
-        self._attr_name = (
-            sanitize_name(getattr(light, "name", None)) or f"Light {light_id}"
-        )
+        self._attr_name = sanitize_name(light.name) or f"Light {light_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "light",
@@ -107,12 +102,10 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         if light is None:
             self._log_missing()
             return None
-        is_on = getattr(light, "on", None)
-        if isinstance(is_on, bool):
-            return is_on
-        level = getattr(light, "level", None)
-        if isinstance(level, int):
-            return level > 0
+        if light.state is not None:
+            return light.state
+        if light.level is not None:
+            return light.level > 0
         return None
 
     @property
@@ -121,8 +114,8 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         light = _get_light(self.coordinator.data, self._light_id)
         if light is None:
             return None
-        level = getattr(light, "level", None)
-        if not isinstance(level, int):
+        level = light.level
+        if level is None:
             return None
         bounded = max(0, min(_ELK_MAX_DIM_LEVEL, level))
         return round(bounded * 255 / _ELK_MAX_DIM_LEVEL)
@@ -175,19 +168,7 @@ def _level_from_kwargs(kwargs: dict[str, Any]) -> int:
     return _ELK_MAX_DIM_LEVEL
 
 
-def _iter_lights(snapshot: Any) -> Iterable[Any]:
-    lights = getattr(snapshot, "lights", None)
-    if lights is None:
-        return []
-    if isinstance(lights, Mapping):
-        return list(lights.values())
-    if isinstance(lights, list | tuple):
-        return lights
-    return []
-
-
-def _get_light(snapshot: Any, light_id: int) -> Any | None:
-    for light in _iter_lights(snapshot):
-        if getattr(light, "light_id", None) == light_id:
-            return light
-    return None
+def _get_light(snapshot: PanelSnapshot | None, light_id: int) -> LightState | None:
+    if snapshot is None:
+        return None
+    return snapshot.lights.get(light_id)

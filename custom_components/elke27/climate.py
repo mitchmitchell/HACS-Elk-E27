@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -27,6 +26,8 @@ from .entity import build_unique_id, device_info_for_entry, sanitize_name, uniqu
 from .temperature import normalize_temperature
 
 if TYPE_CHECKING:
+    from elke27_lib import PanelSnapshot, ThermostatState
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -80,14 +81,10 @@ async def async_setup_entry(
             _LOGGER.debug("Thermostat entities skipped because snapshot is unavailable")
             return
         entities: list[Elke27Thermostat] = []
-        tstats = list(_iter_tstats(snapshot))
-        if not tstats:
+        if not snapshot.thermostats:
             _LOGGER.debug("No thermostats available for entity creation")
             return
-        for tstat in tstats:
-            tstat_id = getattr(tstat, "tstat_id", None)
-            if not isinstance(tstat_id, int):
-                continue
+        for tstat_id, tstat in snapshot.thermostats.items():
             if tstat_id in known_ids:
                 continue
             known_ids.add(tstat_id)
@@ -127,15 +124,13 @@ class Elke27Thermostat(
         hub: Elke27Hub,
         entry: ConfigEntry,
         tstat_id: int,
-        tstat: Any,
+        tstat: ThermostatState,
     ) -> None:
         """Initialize the thermostat entity."""
         super().__init__(coordinator)
         self._hub = hub
         self._tstat_id = tstat_id
-        self._attr_name = (
-            sanitize_name(getattr(tstat, "name", None)) or f"Thermostat {tstat_id}"
-        )
+        self._attr_name = sanitize_name(tstat.name) or f"Thermostat {tstat_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "tstat",
@@ -159,7 +154,7 @@ class Elke27Thermostat(
         if tstat is None:
             self._log_missing()
             return HVACMode.OFF
-        mode = getattr(tstat, "mode", None)
+        mode = tstat.mode
         if isinstance(mode, str):
             normalized = mode.strip().upper()
             return _TSTAT_TO_HVAC_MODE.get(normalized, HVACMode.OFF)
@@ -183,8 +178,7 @@ class Elke27Thermostat(
         tstat = _get_tstat(self.coordinator.data, self._tstat_id)
         if tstat is None:
             return None
-        temperature = getattr(tstat, "temperature", None)
-        return normalize_temperature(temperature)
+        return normalize_temperature(tstat.temperature)
 
     @property
     def target_temperature_low(self) -> float | None:
@@ -192,8 +186,7 @@ class Elke27Thermostat(
         tstat = _get_tstat(self.coordinator.data, self._tstat_id)
         if tstat is None:
             return None
-        heat_setpoint = getattr(tstat, "heat_setpoint", None)
-        return normalize_temperature(heat_setpoint)
+        return normalize_temperature(tstat.heat_setpoint)
 
     @property
     def target_temperature_high(self) -> float | None:
@@ -201,8 +194,7 @@ class Elke27Thermostat(
         tstat = _get_tstat(self.coordinator.data, self._tstat_id)
         if tstat is None:
             return None
-        cool_setpoint = getattr(tstat, "cool_setpoint", None)
-        return normalize_temperature(cool_setpoint)
+        return normalize_temperature(tstat.cool_setpoint)
 
     @property
     def fan_mode(self) -> str | None:
@@ -210,7 +202,7 @@ class Elke27Thermostat(
         tstat = _get_tstat(self.coordinator.data, self._tstat_id)
         if tstat is None:
             return None
-        fan_mode = getattr(tstat, "fan_mode", None)
+        fan_mode = tstat.fan_mode
         if isinstance(fan_mode, str):
             return _TSTAT_TO_FAN_MODE.get(fan_mode.strip().upper())
         return None
@@ -276,27 +268,7 @@ class Elke27Thermostat(
         _LOGGER.debug("Thermostat %s missing from snapshot", self._tstat_id)
 
 
-def _iter_tstats(snapshot: Any) -> Iterable[Any]:
-    thermostats = getattr(snapshot, "thermostats", None)
-    if thermostats is None:
-        return []
-    if isinstance(thermostats, Mapping):
-        return list(thermostats.values())
-    if isinstance(thermostats, list | tuple):
-        return thermostats
-    return []
-
-
-def _tstat_id_of(tstat: Any) -> int | None:
-    tstat_id = getattr(tstat, "tstat_id", None)
-    if isinstance(tstat_id, int):
-        return tstat_id
-    return None
-
-
-def _get_tstat(snapshot: Any, tstat_id: int) -> Any | None:
-    for tstat in _iter_tstats(snapshot):
-        entity_id = _tstat_id_of(tstat)
-        if entity_id == tstat_id:
-            return tstat
-    return None
+def _get_tstat(snapshot: PanelSnapshot | None, tstat_id: int) -> ThermostatState | None:
+    if snapshot is None:
+        return None
+    return snapshot.thermostats.get(tstat_id)

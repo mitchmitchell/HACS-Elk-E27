@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +15,8 @@ from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
 
 if TYPE_CHECKING:
+    from elke27_lib import LockState, PanelSnapshot
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -48,14 +49,10 @@ async def async_setup_entry(
             _LOGGER.debug("Lock entities skipped because snapshot is unavailable")
             return
         entities: list[Elke27Lock] = []
-        locks = list(_iter_locks(snapshot))
-        if not locks:
+        if not snapshot.locks:
             _LOGGER.debug("No locks available for entity creation")
             return
-        for lock in locks:
-            lock_id = getattr(lock, "lock_id", None)
-            if not isinstance(lock_id, int):
-                continue
+        for lock_id, lock in snapshot.locks.items():
             if lock_id in known_ids:
                 continue
             known_ids.add(lock_id)
@@ -79,15 +76,13 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
         hub: Elke27Hub,
         entry: ConfigEntry,
         lock_id: int,
-        lock: Any,
+        lock: LockState,
     ) -> None:
         """Initialize the lock entity."""
         super().__init__(coordinator)
         self._hub = hub
         self._lock_id = lock_id
-        self._attr_name = (
-            sanitize_name(getattr(lock, "name", None)) or f"Lock {lock_id}"
-        )
+        self._attr_name = sanitize_name(lock.name) or f"Lock {lock_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "lock",
@@ -103,10 +98,9 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
         if lock is None:
             self._log_missing()
             return None
-        locked = getattr(lock, "locked", None)
-        if isinstance(locked, bool):
-            return locked
-        status = getattr(lock, "status", None)
+        if lock.locked is not None:
+            return lock.locked
+        status = lock.status
         if isinstance(status, str):
             normalized = status.strip().upper()
             if normalized in {"ON", "LOCKED"}:
@@ -147,19 +141,7 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
         _LOGGER.debug("Lock %s missing from snapshot", self._lock_id)
 
 
-def _iter_locks(snapshot: Any) -> Iterable[Any]:
-    locks = getattr(snapshot, "locks", None)
-    if locks is None:
-        return []
-    if isinstance(locks, Mapping):
-        return list(locks.values())
-    if isinstance(locks, list | tuple):
-        return locks
-    return []
-
-
-def _get_lock(snapshot: Any, lock_id: int) -> Any | None:
-    for lock in _iter_locks(snapshot):
-        if getattr(lock, "lock_id", None) == lock_id:
-            return lock
-    return None
+def _get_lock(snapshot: PanelSnapshot | None, lock_id: int) -> LockState | None:
+    if snapshot is None:
+        return None
+    return snapshot.locks.get(lock_id)

@@ -7,6 +7,15 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from elke27_lib import PanelSnapshot
+from elke27_lib.events import (
+    ConnectionStateChanged,
+    CsmSnapshotUpdated,
+    DomainCsmChanged,
+    TableCsmChanged,
+    ZoneStatusUpdated,
+)
+
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -19,27 +28,10 @@ if TYPE_CHECKING:
 
     from .hub import Elke27Hub
 
-try:  # pragma: no cover - optional import for local test runs without the lib.
-    from elke27_lib.events import (
-        ConnectionStateChanged,
-        CsmSnapshotUpdated,
-        DomainCsmChanged,
-        TableCsmChanged,
-        ZoneStatusUpdated,
-    )
-except ModuleNotFoundError:  # pragma: no cover - handled via class name fallback.
-    ConnectionStateChanged = None
-    CsmSnapshotUpdated = None
-    DomainCsmChanged = None
-    TableCsmChanged = None
-    ZoneStatusUpdated = None
-
 _LOGGER = logging.getLogger(__name__)
 
-type PanelSnapshot = Any
 
-
-class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
+class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
     """Coordinate Elke27 snapshot updates and CSM refreshes."""
 
     def __init__(
@@ -89,32 +81,22 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     @callback
     def _process_event(self, event: Any) -> None:
         """Process an event from the hub."""
-        if _is_event(event, ZoneStatusUpdated, "ZoneStatusUpdated"):
+        if isinstance(event, ZoneStatusUpdated):
             _LOGGER.debug(
                 "Zone status event received: zone_id=%s changed_fields=%s",
-                getattr(event, "zone_id", None),
-                getattr(event, "changed_fields", None),
+                event.zone_id,
+                event.changed_fields,
             )
-        if _is_event(event, ConnectionStateChanged, "ConnectionStateChanged"):
-            if getattr(event, "connected", False):
+        if isinstance(event, ConnectionStateChanged):
+            if event.connected:
                 self.hass.async_create_task(self.async_refresh_now())
             return
-        if _is_event(event, CsmSnapshotUpdated, "CsmSnapshotUpdated"):
+        if isinstance(event, CsmSnapshotUpdated):
             self._set_snapshot(self._hub.get_snapshot())
             return
-        if _is_event(event, DomainCsmChanged, "DomainCsmChanged"):
-            domain = getattr(event, "domain", None) or getattr(
-                event, "csm_domain", None
-            )
-            if domain:
-                self._queue_domain_refresh({str(domain)})
-            return
-        if _is_event(event, TableCsmChanged, "TableCsmChanged"):
-            domain = getattr(event, "domain", None) or getattr(
-                event, "csm_domain", None
-            )
-            if domain:
-                self._queue_domain_refresh({str(domain)})
+        if isinstance(event, (DomainCsmChanged, TableCsmChanged)):
+            if event.csm_domain:
+                self._queue_domain_refresh({event.csm_domain})
             return
         self._set_snapshot(self._hub.get_snapshot())
 
@@ -147,12 +129,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:
         """Update coordinator data and track snapshot version."""
         self.async_set_updated_data(snapshot)
-
-
-def _is_event(event: Any, klass: type[Any] | None, name: str) -> bool:
-    if klass is not None:
-        return isinstance(event, klass)
-    return event.__class__.__name__ == name
 
 
 def _normalize_domains(domains: Iterable[str] | str | None) -> set[str]:

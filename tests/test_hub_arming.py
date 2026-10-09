@@ -100,12 +100,25 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
                 exit_delay_cancel=True,
             )
 
-    async def test_night_is_not_supported(self) -> None:
-        """Arm night is rejected before reaching the panel."""
+    async def test_arm_night_uses_library_api(self) -> None:
+        """Arm night is passed through to the library as ARMED_NIGHT."""
+        client = _client()
+        hub = _hub_with_client(client)
+        assert await hub.async_arm_area(1, ArmMode.ARMED_NIGHT, "1234")
+        client.async_arm_area.assert_awaited_once_with(
+            1,
+            mode=ArmMode.ARMED_NIGHT,
+            pin="1234",
+            auto_stay_cancel=False,
+            exit_delay_cancel=False,
+        )
+
+    async def test_unknown_mode_is_rejected(self) -> None:
+        """An unknown arm mode is rejected before reaching the panel."""
         client = _client()
         hub = _hub_with_client(client)
         with self.assertRaises(HomeAssistantError):
-            await hub.async_arm_area(1, ArmMode.ARMED_NIGHT, "1234")
+            await hub.async_arm_area(1, ArmMode.DISARMED, "1234")
         client.async_arm_area.assert_not_called()
 
     async def test_non_numeric_code_rejected(self) -> None:

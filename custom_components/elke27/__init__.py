@@ -100,8 +100,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(entry, data=entry_data)
     elif pin_removed is not None:
         hass.config_entries.async_update_entry(entry, data=entry_data)
-    if panel_name:
-        _LOGGER.debug("Discovered panel name: %s", panel_name)
     hub = Elke27Hub(
         hass,
         host,
@@ -126,21 +124,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_start()
     await coordinator.async_refresh_now()
     domains_to_prime = ("light", "lock", "tstat")
-    refresh_domain_config = getattr(hub, "refresh_domain_config", None)
-    if callable(refresh_domain_config):
-        prime_results = await asyncio.gather(
-            *(refresh_domain_config(domain) for domain in domains_to_prime),
-            return_exceptions=True,
-        )
-        for domain, result in zip(domains_to_prime, prime_results, strict=True):
-            if isinstance(result, Exception):
-                _LOGGER.debug("Initial refresh for %s failed: %s", domain, result)
+    prime_results = await asyncio.gather(
+        *(hub.refresh_domain_config(domain) for domain in domains_to_prime),
+        return_exceptions=True,
+    )
+    for domain, result in zip(domains_to_prime, prime_results, strict=True):
+        if isinstance(result, Exception):
+            _LOGGER.debug("Initial refresh for %s failed: %s", domain, result)
 
-    snapshot = hub.get_snapshot() if hasattr(hub, "get_snapshot") else None
-    if hasattr(coordinator, "async_set_updated_data"):
-        coordinator.async_set_updated_data(snapshot)
-    else:
-        coordinator.data = snapshot
+    coordinator.async_set_updated_data(hub.get_snapshot())
     await _async_migrate_unique_ids(hass, entry, unique_base(hub, coordinator, entry))
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
