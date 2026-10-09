@@ -202,3 +202,33 @@ class AsyncRollbackBypassesTest(unittest.IsolatedAsyncioTestCase):
         assert [zone.zone_id for zone in rolled_back] == [1]
         assert [zone.zone_id for zone in still] == [3, 2]
         assert hub.async_set_zone_bypass.await_count == 3
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class DefinitiveRefusalTest(unittest.TestCase):
+    """Classify arm failures as definitive refusals or uncertain results."""
+
+    def test_classification(self) -> None:
+        """Panel codes, PIN and argument errors are definitive; transport is not."""
+        from elke27_lib.errors import (  # noqa: PLC0415
+            Elke27DisconnectedError,
+            Elke27InvalidArgument,
+            Elke27PanelError,
+            Elke27PinRequiredError,
+            Elke27TimeoutError,
+        )
+
+        from custom_components.elke27.hub import is_definitive_refusal  # noqa: PLC0415
+
+        def _wrapped(cause: BaseException) -> HomeAssistantError:
+            err = HomeAssistantError(str(cause))
+            err.__cause__ = cause
+            return err
+
+        assert is_definitive_refusal(_wrapped(Elke27PanelError(11008, "denied")))
+        assert is_definitive_refusal(Elke27PinRequiredError("pin"))
+        assert is_definitive_refusal(_wrapped(Elke27InvalidArgument("bad")))
+        assert is_definitive_refusal(HomeAssistantError("Code must be numeric."))
+        assert not is_definitive_refusal(_wrapped(Elke27TimeoutError("timeout")))
+        assert not is_definitive_refusal(_wrapped(Elke27DisconnectedError("drop")))
+        assert not is_definitive_refusal(_wrapped(RuntimeError("unknown")))

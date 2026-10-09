@@ -21,6 +21,7 @@ from elke27_lib.errors import (
     Elke27Error,
     Elke27InvalidArgument,
     Elke27LinkRequiredError,
+    Elke27PanelError,
     Elke27PinRequiredError,
 )
 
@@ -61,6 +62,7 @@ class Elke27Hub:
         self._client: Elke27Client | None = None
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._connect_lock = asyncio.Lock()
+        self._area_arm_locks: dict[int, asyncio.Lock] = {}
         self._reconnect_task: asyncio.Task[None] | None = None
         self._reconnect_attempts = 0
         self._stopping = False
@@ -298,6 +300,14 @@ class Elke27Hub:
                 )
             bypassed.append(zone)
         return bypassed
+
+    def area_arm_lock(self, area_id: int) -> asyncio.Lock:
+        """
+        Return the lock that serializes automatic arming of one area.
+
+        The hub belongs to one config entry, so this is per (entry, area).
+        """
+        return self._area_arm_locks.setdefault(area_id, asyncio.Lock())
 
     async def async_rollback_bypasses(
         self, zones: list[ZoneState] | tuple[ZoneState, ...], pin: str | None
@@ -541,6 +551,30 @@ class ZoneBypassFailedError(HomeAssistantError):
             labels = ", ".join(zone_bypass_label(item) for item in self.bypassed_zones)
             message = f"{message} (already bypassed: {labels})"
         super().__init__(message)
+
+
+def is_definitive_refusal(err: BaseException) -> bool:
+    """
+    Return True when a failed command is known not to have taken effect.
+
+    Definitive: a panel refusal with an error code, a missing user code, an
+    invalid argument, or a check the integration made before sending anything
+    (a HomeAssistantError with no library cause). Transport failures (timeouts,
+    dropped sessions) and unknown library errors are not definitive: the panel
+    may have acted on the command.
+    """
+    if isinstance(err, (Elke27PinRequiredError, Elke27InvalidArgument)):
+        return True
+    if isinstance(err, Elke27PanelError):
+        return True
+    if getattr(err, "panel_error_code", None) is not None:
+        return True
+    if isinstance(err, HomeAssistantError):
+        cause = err.__cause__
+        if cause is None:
+            return True
+        return is_definitive_refusal(cause)
+    return False
 
 
 def area_faulted_zones(snapshot: PanelSnapshot | None, area_id: int) -> list[ZoneState]:

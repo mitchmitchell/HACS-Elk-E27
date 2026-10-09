@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 from pathlib import Path
 import sys
@@ -24,7 +25,11 @@ if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parent))
 
     from elke27_lib import AreaState, ArmMode, ZoneState
-    from elke27_lib.errors import Elke27PinRequiredError
+    from elke27_lib.errors import (
+        Elke27PanelError,
+        Elke27PinRequiredError,
+        Elke27TimeoutError,
+    )
     from test_hub_bypass import _hub, _snapshot, _two_area_snapshot
 
     from custom_components import elke27 as integration
@@ -300,6 +305,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
                 "entity_id": "alarm_control_panel.house",
                 "area_id": 1,
                 "stage": "bypass",
+                "outcome": "not_armed",
                 "zone_id": 2,
                 "reason": panel_reason,
                 "bypassed_zone_ids": [1],
@@ -375,6 +381,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
                 "entity_id": "alarm_control_panel.b_garage",
                 "area_id": 2,
                 "stage": "arm",
+                "outcome": "not_armed",
                 "zone_id": None,
                 "reason": arm_reason,
                 "bypassed_zone_ids": [4],
@@ -483,6 +490,132 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         assert data["rolled_back_zone_ids"] == [2, 1]
         assert data["still_bypassed_zone_ids"] == []
 
+    async def test_arm_not_sent_is_a_failure_with_rollback(self) -> None:
+        """async_arm_area returning False is reported as a failure and rolled back."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        runtime.hub.async_arm_area = AsyncMock(return_value=False)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create") as note,
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert "Area 1 was not armed: the arm command was not sent" in str(
+            ctx.exception
+        )
+        assert runtime.hub.async_set_zone_bypass.await_args_list[2:] == [
+            unittest.mock.call(2, bypassed=False, pin="1234"),
+            unittest.mock.call(1, bypassed=False, pin="1234"),
+        ]
+        runtime.hub.async_arm_area.assert_awaited_once()
+        note.assert_called_once()
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["stage"] == "arm"
+        assert data["outcome"] == "not_armed"
+        assert data["rolled_back_zone_ids"] == [2, 1]
+
+    async def test_arm_timeout_is_uncertain_and_not_rolled_back(self) -> None:
+        """A transport timeout on arm leaves the bypasses and reports unknown."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        timeout = HomeAssistantError("Timed out waiting for the panel")
+        timeout.__cause__ = Elke27TimeoutError("timeout")
+        runtime.hub.async_arm_area = AsyncMock(side_effect=timeout)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create") as note,
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        # Only the two bypasses: no un-bypass, no retry of the arm.
+        assert runtime.hub.async_set_zone_bypass.await_args_list == [
+            unittest.mock.call(1, bypassed=True, pin="1234"),
+            unittest.mock.call(2, bypassed=True, pin="1234"),
+        ]
+        runtime.hub.async_arm_area.assert_awaited_once()
+        for text in (str(ctx.exception), note.call_args.kwargs["message"]):
+            assert "arm result is unknown" in text
+            assert "Check the area's state on the panel." in text
+            assert "Front Door (zone 1), Back Door (zone 2)" in text
+            assert "elke27.zone_bypass" in text
+            assert ".." not in text
+            assert "1234" not in text
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["stage"] == "arm_uncertain"
+        assert data["outcome"] == "unknown"
+        assert data["bypassed_zone_ids"] == [1, 2]
+        assert data["rolled_back_zone_ids"] == []
+        assert data["still_bypassed_zone_ids"] == [1, 2]
+
+    async def test_arm_panel_refusal_is_rolled_back(self) -> None:
+        """A panel refusal (Elke27PanelError cause) on arm rolls the bypasses back."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        refusal = HomeAssistantError("area not ready (error 11015)")
+        refusal.__cause__ = Elke27PanelError(11015, "area not ready")
+        runtime.hub.async_arm_area = AsyncMock(side_effect=refusal)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert str(ctx.exception).startswith("Area 1 was not armed:")
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["stage"] == "arm"
+        assert data["outcome"] == "not_armed"
+        assert data["rolled_back_zone_ids"] == [2, 1]
+        assert data["still_bypassed_zone_ids"] == []
+
+    async def test_concurrent_calls_on_same_area_run_one_after_another(
+        self,
+    ) -> None:
+        """Two automatic calls on one area do not interleave their sequences."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        order: list[str] = []
+        first_arm_started = asyncio.Event()
+        release_first_arm = asyncio.Event()
+
+        async def _bypass(zone_id: int, **kwargs: Any) -> bool:
+            order.append(f"bypass{zone_id}:{kwargs['bypassed']}")
+            return True
+
+        async def _arm(*_args: Any, **_kwargs: Any) -> bool:
+            order.append("arm")
+            if not first_arm_started.is_set():
+                first_arm_started.set()
+                await release_first_arm.wait()
+            return True
+
+        runtime.hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
+        runtime.hub.async_arm_area = AsyncMock(side_effect=_arm)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with patch.object(integration.persistent_notification, "async_create"):
+            first = asyncio.create_task(
+                self._run(hass, {"mode": "away", "code": "1234"}, entities)
+            )
+            await first_arm_started.wait()
+            second = asyncio.create_task(
+                self._run(hass, {"mode": "away", "code": "1234"}, entities)
+            )
+            for _ in range(5):
+                await asyncio.sleep(0)
+            # The second call waits on the area lock: nothing new has run.
+            assert order == ["bypass1:True", "bypass2:True", "arm"]
+            release_first_arm.set()
+            await asyncio.gather(first, second)
+        assert order == ["bypass1:True", "bypass2:True", "arm"] * 2
+
     async def test_pin_required_during_bypass_is_reported(self) -> None:
         """Elke27PinRequiredError from a bypass goes through failure reporting."""
         hass = MagicMock()
@@ -537,6 +670,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
                 "entity_id": "alarm_control_panel.house",
                 "area_id": 1,
                 "stage": "arm",
+                "outcome": "not_armed",
                 "zone_id": None,
                 "reason": "a user code is required",
                 "bypassed_zone_ids": [],
