@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 import contextlib
+import dataclasses
 import logging
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from elke27_lib import (
@@ -18,9 +21,12 @@ from elke27_lib import (
 )
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
+    Elke27AuthError,
     Elke27Error,
     Elke27InvalidArgument,
     Elke27LinkRequiredError,
+    Elke27PanelError,
+    Elke27PermissionError,
     Elke27PinRequiredError,
 )
 
@@ -31,7 +37,7 @@ from .const import READY_TIMEOUT
 from .identity import build_client_identity
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +67,11 @@ class Elke27Hub:
         self._client: Elke27Client | None = None
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._connect_lock = asyncio.Lock()
+        self._area_arm_locks: dict[int, asyncio.Lock] = {}
+        self._arm_automatic_tasks: dict[int, set[asyncio.Task[Any]]] = {}
+        self._disarm_cancelled: set[asyncio.Task[Any]] = set()
+        self._disarm_pending: dict[int, int] = {}
+        self._disarm_clear: dict[int, asyncio.Event] = {}
         self._reconnect_task: asyncio.Task[None] | None = None
         self._reconnect_attempts = 0
         self._stopping = False
@@ -152,6 +163,43 @@ class Elke27Hub:
         if client is None:
             return None
         return client.get_snapshot()
+
+    async def async_refresh_area_state(self, area_id: int) -> PanelSnapshot | None:
+        """
+        Ask the panel for the area's arm state and all zone statuses.
+
+        The answer is built from the reply payloads themselves. Reading the
+        client snapshot afterwards is not enough: elke27 resolves the request
+        before its handlers apply the reply, and it does not apply arm or bypass
+        command replies at all. Each request is sent once; if one fails, that
+        part falls back to the client snapshot.
+        """
+        client = self._client
+        if client is None:
+            return None
+        area_payload = await self._async_status_request(
+            client, "area_get_status", area_id=area_id
+        )
+        zones_payload = await self._async_status_request(
+            client, "zone_get_all_zones_status"
+        )
+        return snapshot_with_status(
+            client.get_snapshot(), area_id, area_payload, zones_payload
+        )
+
+    async def _async_status_request(
+        self, client: Elke27Client, command_key: str, **params: Any
+    ) -> Mapping[str, Any] | None:
+        """Send one status request; return its reply payload, or None on failure."""
+        try:
+            result = await client.async_execute(command_key, **params)
+        except (Elke27Error, Elke27InvalidArgument) as err:
+            _LOGGER.debug("Status refresh %s failed: %s", command_key, err)
+            return None
+        if not result.ok or not isinstance(result.data, Mapping):
+            _LOGGER.debug("Status refresh %s failed: %s", command_key, result.error)
+            return None
+        return result.data
 
     async def refresh_csm(self) -> Any:
         """Refresh the panel CSM snapshot."""
@@ -270,7 +318,13 @@ class Elke27Hub:
         )
 
     async def async_bypass_faulted_zones(
-        self, area_id: int, snapshot: PanelSnapshot | None, pin: str | None
+        self,
+        area_id: int,
+        snapshot: PanelSnapshot | None,
+        pin: str | None,
+        *,
+        attempted: list[ZoneState] | None = None,
+        gate: Callable[[], Awaitable[None]] | None = None,
     ) -> list[ZoneState]:
         """
         Bypass open, non-bypassed zones assigned to the given area.
@@ -279,9 +333,15 @@ class Elke27Hub:
         retrying it (a refusal is reported, never retried); ZoneBypassFailedError
         names the failed zone, the reason, and the zones already bypassed. The
         caller decides whether to roll those back with async_rollback_bypasses.
+        Each zone is appended to ``attempted`` (when given) before its bypass is
+        sent, so a caller that is cancelled mid-way knows what may be bypassed.
         """
         bypassed: list[ZoneState] = []
         for zone in area_faulted_zones(snapshot, area_id):
+            if gate is not None:
+                await gate()
+            if attempted is not None:
+                attempted.append(zone)
             try:
                 acknowledged = await self.async_set_zone_bypass(
                     zone.zone_id, bypassed=True, pin=pin
@@ -299,8 +359,79 @@ class Elke27Hub:
             bypassed.append(zone)
         return bypassed
 
+    def area_arm_lock(self, area_id: int) -> asyncio.Lock:
+        """
+        Return the lock that serializes automatic arming of one area.
+
+        The hub belongs to one config entry, so this is per (entry, area).
+        """
+        return self._area_arm_locks.setdefault(area_id, asyncio.Lock())
+
+    def register_arm_automatic(self, area_id: int, task: asyncio.Task[Any]) -> None:
+        """Track an automatic arming task (running or queued) for an area."""
+        self._arm_automatic_tasks.setdefault(area_id, set()).add(task)
+
+    def unregister_arm_automatic(self, area_id: int, task: asyncio.Task[Any]) -> None:
+        """Stop tracking an automatic arming task."""
+        tasks = self._arm_automatic_tasks.get(area_id)
+        if tasks is not None:
+            tasks.discard(task)
+            if not tasks:
+                del self._arm_automatic_tasks[area_id]
+        self._disarm_cancelled.discard(task)
+
+    def begin_disarm(self, area_id: int) -> None:
+        """
+        Mark a disarm of the area as pending.
+
+        While pending, automatic arming of the area pauses before its next
+        command (see async_wait_disarm_clear), so nothing it sends can land
+        after the disarm.
+        """
+        self._disarm_pending[area_id] = self._disarm_pending.get(area_id, 0) + 1
+        self._disarm_clear.setdefault(area_id, asyncio.Event()).clear()
+
+    def end_disarm(self, area_id: int) -> None:
+        """Clear one pending disarm; automatic arming resumes when none remain."""
+        remaining = self._disarm_pending.get(area_id, 0) - 1
+        if remaining > 0:
+            self._disarm_pending[area_id] = remaining
+            return
+        self._disarm_pending.pop(area_id, None)
+        event = self._disarm_clear.pop(area_id, None)
+        if event is not None:
+            event.set()
+
+    async def async_wait_disarm_clear(self, area_id: int) -> None:
+        """Wait while a disarm of the area is pending (automatic arming gate)."""
+        while self._disarm_pending.get(area_id):
+            await self._disarm_clear[area_id].wait()
+
+    def cancel_arm_automatic(self, area_id: int) -> int:
+        """
+        Cancel every automatic arming task for an area, so a disarm wins.
+
+        Returns how many tasks were cancelled. Nothing is awaited here: the
+        disarm is sent straight away and does not wait for the tasks to stop.
+        """
+        count = 0
+        for task in list(self._arm_automatic_tasks.get(area_id, ())):
+            if not task.done():
+                self._disarm_cancelled.add(task)
+                task.cancel()
+                count += 1
+        return count
+
+    def cancelled_by_disarm(self, task: asyncio.Task[Any] | None) -> bool:
+        """Return True when the task was cancelled by cancel_arm_automatic."""
+        return task is not None and task in self._disarm_cancelled
+
     async def async_rollback_bypasses(
-        self, zones: list[ZoneState] | tuple[ZoneState, ...], pin: str | None
+        self,
+        zones: list[ZoneState] | tuple[ZoneState, ...],
+        pin: str | None,
+        *,
+        gate: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[list[ZoneState], list[ZoneState]]:
         """
         Un-bypass zones this integration just bypassed, in reverse order.
@@ -311,6 +442,8 @@ class Elke27Hub:
         rolled_back: list[ZoneState] = []
         still_bypassed: list[ZoneState] = []
         for zone in reversed(tuple(zones)):
+            if gate is not None:
+                await gate()
             try:
                 acknowledged = await self.async_set_zone_bypass(
                     zone.zone_id, bypassed=False, pin=pin
@@ -541,6 +674,132 @@ class ZoneBypassFailedError(HomeAssistantError):
             labels = ", ".join(zone_bypass_label(item) for item in self.bypassed_zones)
             message = f"{message} (already bypassed: {labels})"
         super().__init__(message)
+
+
+# The panel answers "not allowed when armed" (ELKERR_NOT_ALLOWED_WHEN_ARMED).
+PANEL_ERROR_ALREADY_ARMED = 11028
+
+_ARMED_MODES = frozenset({ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY, ArmMode.ARMED_NIGHT})
+
+
+_ZONE_STATUS_BYPASSED = frozenset("DEF")
+_ZONE_STATUS_VIOLATED = frozenset("9AB")
+_ZONE_STATUS_KNOWN = frozenset("0123456789ABCDEF")
+
+
+def _arm_mode_from_text(value: Any) -> ArmMode | None:
+    """Map a panel arm_state string to an ArmMode (as elke27 does)."""
+    if not isinstance(value, str):
+        return None
+    lowered = value.lower()
+    if "disarm" in lowered:
+        return ArmMode.DISARMED
+    if "stay" in lowered:
+        return ArmMode.ARMED_STAY
+    if "away" in lowered:
+        return ArmMode.ARMED_AWAY
+    if "night" in lowered:
+        return ArmMode.ARMED_NIGHT
+    return None
+
+
+def _zone_with_status_char(zone: ZoneState, ch: str) -> ZoneState:
+    """Apply one zone_get_all_zones_status character (elke27's encoding)."""
+    if ch not in _ZONE_STATUS_KNOWN:
+        return zone
+    if ch in _ZONE_STATUS_BYPASSED:
+        return dataclasses.replace(zone, bypassed=True)
+    return dataclasses.replace(zone, bypassed=False, open=ch in _ZONE_STATUS_VIOLATED)
+
+
+def snapshot_with_status(
+    snapshot: PanelSnapshot | None,
+    area_id: int,
+    area_payload: Mapping[str, Any] | None,
+    zones_payload: Mapping[str, Any] | None,
+) -> PanelSnapshot | None:
+    """Overlay area and zone status reply payloads on a snapshot."""
+    if snapshot is None:
+        return None
+    areas = dict(snapshot.areas)
+    zones = dict(snapshot.zones)
+    if area_payload is not None and area_id in areas:
+        mode = _arm_mode_from_text(
+            area_payload.get("arm_state") or area_payload.get("armed_state")
+        )
+        if mode is not None:
+            areas[area_id] = dataclasses.replace(areas[area_id], arm_mode=mode)
+    status = zones_payload.get("status") if zones_payload is not None else None
+    if isinstance(status, str):
+        for index, ch in enumerate("".join(status.split()).upper()):
+            zone = zones.get(index + 1)
+            if zone is not None:
+                zones[index + 1] = _zone_with_status_char(zone, ch)
+    return dataclasses.replace(
+        snapshot,
+        areas=MappingProxyType(areas),
+        zones=MappingProxyType(zones),
+    )
+
+
+def area_is_armed(snapshot: PanelSnapshot | None, area_id: int) -> bool:
+    """Return True when the snapshot shows the area in any armed state."""
+    if snapshot is None:
+        return False
+    area = snapshot.areas.get(area_id)
+    return area is not None and area.arm_mode in _ARMED_MODES
+
+
+def panel_error_code(err: BaseException | None) -> int | None:
+    """Return the panel error code on an error or its cause chain."""
+    while err is not None:
+        code = getattr(err, "panel_error_code", None)
+        if code is not None:
+            return int(code)
+        err = err.__cause__
+    return None
+
+
+def is_already_armed_refusal(err: BaseException) -> bool:
+    """Return True when the panel refused because the area is already armed."""
+    return panel_error_code(err) == PANEL_ERROR_ALREADY_ARMED
+
+
+def is_definitive_refusal(err: BaseException) -> bool:
+    """
+    Return True when a failed command is known not to have taken effect.
+
+    Definitive: a panel refusal with an error code, a missing user code, an
+    invalid argument, or a check made before anything was sent: an integration
+    check (a HomeAssistantError with no library cause), Elke27PermissionError
+    (elke27 raises it only from its pre-send session and disarmed-state checks)
+    and Elke27AuthError (raised for arm only by elke27's pre-send PIN check).
+    Not definitive, because the panel may have acted: timeouts, dropped or
+    not-ready sessions (Elke27ConnectionError can also come from the receive
+    path), Elke27LinkRequiredError (not reachable from an arm in elke27, so kept
+    conservative), the generic "Failed to arm area." protocol error, and any
+    unknown error. "Already armed" (11028) is a panel code but must not cause a
+    rollback; callers check is_already_armed_refusal first.
+    """
+    if isinstance(
+        err,
+        (
+            Elke27PinRequiredError,
+            Elke27InvalidArgument,
+            Elke27PanelError,
+            Elke27PermissionError,
+            Elke27AuthError,
+        ),
+    ):
+        return True
+    if getattr(err, "panel_error_code", None) is not None:
+        return True
+    if isinstance(err, HomeAssistantError):
+        cause = err.__cause__
+        if cause is None:
+            return True
+        return is_definitive_refusal(cause)
+    return False
 
 
 def area_faulted_zones(snapshot: PanelSnapshot | None, area_id: int) -> list[ZoneState]:

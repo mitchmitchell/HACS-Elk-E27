@@ -27,6 +27,7 @@ if _HAS_DEPS:
         Elke27Hub,
         ZoneBypassFailedError,
         area_faulted_zones,
+        area_is_armed,
         zone_bypass_label,
     )
     from homeassistant.exceptions import HomeAssistantError
@@ -202,3 +203,126 @@ class AsyncRollbackBypassesTest(unittest.IsolatedAsyncioTestCase):
         assert [zone.zone_id for zone in rolled_back] == [1]
         assert [zone.zone_id for zone in still] == [3, 2]
         assert hub.async_set_zone_bypass.await_count == 3
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class DefinitiveRefusalTest(unittest.TestCase):
+    """Classify arm failures as definitive refusals or uncertain results."""
+
+    def test_classification(self) -> None:
+        """Panel codes, PIN and argument errors are definitive; transport is not."""
+        from elke27_lib.errors import (  # noqa: PLC0415
+            Elke27AuthError,
+            Elke27ConnectionError,
+            Elke27DisconnectedError,
+            Elke27InvalidArgument,
+            Elke27LinkRequiredError,
+            Elke27PanelError,
+            Elke27PermissionError,
+            Elke27PinRequiredError,
+            Elke27ProtocolError,
+            Elke27TimeoutError,
+        )
+
+        from custom_components.elke27.hub import (  # noqa: PLC0415
+            is_already_armed_refusal,
+            is_definitive_refusal,
+        )
+
+        def _wrapped(cause: BaseException) -> HomeAssistantError:
+            err = HomeAssistantError(str(cause))
+            err.__cause__ = cause
+            return err
+
+        assert is_definitive_refusal(_wrapped(Elke27PanelError(11008, "denied")))
+        assert is_definitive_refusal(Elke27PinRequiredError("pin"))
+        assert is_definitive_refusal(_wrapped(Elke27InvalidArgument("bad")))
+        assert is_definitive_refusal(HomeAssistantError("Code must be numeric."))
+        assert not is_definitive_refusal(_wrapped(Elke27TimeoutError("timeout")))
+        assert not is_definitive_refusal(_wrapped(Elke27DisconnectedError("drop")))
+        assert not is_definitive_refusal(_wrapped(RuntimeError("unknown")))
+        # Raised by elke27 only before the arm is sent.
+        assert is_definitive_refusal(_wrapped(Elke27PermissionError("denied")))
+        assert is_definitive_refusal(_wrapped(Elke27AuthError("auth")))
+        # Can come from the receive path, or is unreachable: kept uncertain.
+        assert not is_definitive_refusal(_wrapped(Elke27ConnectionError("not ready")))
+        assert not is_definitive_refusal(_wrapped(Elke27LinkRequiredError("link")))
+        assert not is_definitive_refusal(
+            _wrapped(Elke27ProtocolError("Failed to arm area."))
+        )
+        # 11028 is a panel code, but callers must not roll back on it.
+        already = _wrapped(Elke27PanelError(11028, "not allowed when armed"))
+        assert is_already_armed_refusal(already)
+        assert not is_already_armed_refusal(
+            _wrapped(Elke27PanelError(11015, "not ready"))
+        )
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
+    """Test the status refresh before automatic arming."""
+
+    def _client(self, *, area: Any, zones: Any) -> Any:
+        client = MagicMock()
+
+        async def _execute(command_key: str, **_params: Any) -> Any:
+            payload = area if command_key == "area_get_status" else zones
+            if isinstance(payload, Exception):
+                raise payload
+            return MagicMock(ok=True, data=payload, error=None)
+
+        client.async_execute = AsyncMock(side_effect=_execute)
+        # The client snapshot is stale: elke27 has not dispatched the replies.
+        client.get_snapshot = MagicMock(return_value=_two_area_snapshot())
+        return client
+
+    async def test_state_comes_from_the_reply_payloads(self) -> None:
+        """Armed area and bypassed zones are read from the replies, not the snapshot."""
+        hub = _hub()
+        # Zones 1-2 bypassed (D), 3 normal, 4 violated (9).
+        client = self._client(
+            area={"area_id": 1, "arm_state": "ARMED_AWAY"},
+            zones={"status": "DD19"},
+        )
+        hub._client = client  # noqa: SLF001
+        fresh = await hub.async_refresh_area_state(1)
+        assert client.async_execute.await_args_list == [
+            unittest.mock.call("area_get_status", area_id=1),
+            unittest.mock.call("zone_get_all_zones_status"),
+        ]
+        assert area_is_armed(fresh, 1)
+        assert fresh.zones[1].bypassed is True
+        assert fresh.zones[2].bypassed is True
+        assert fresh.zones[3].bypassed is False
+        assert fresh.zones[3].open is False
+        assert fresh.zones[4].open is True
+        assert area_faulted_zones(fresh, 1) == []
+        # The stale client snapshot still says otherwise.
+        assert not area_is_armed(client.get_snapshot(), 1)
+
+    async def test_disarmed_reply_keeps_area_disarmed(self) -> None:
+        """A DISARMED reply is not armed; open zones stay faulted."""
+        hub = _hub()
+        hub._client = self._client(  # noqa: SLF001
+            area={"area_id": 1, "arm_state": "DISARMED"}, zones={"status": "99"}
+        )
+        fresh = await hub.async_refresh_area_state(1)
+        assert not area_is_armed(fresh, 1)
+        assert [zone.zone_id for zone in area_faulted_zones(fresh, 1)] == [1, 2]
+
+    async def test_failed_refresh_falls_back_to_snapshot(self) -> None:
+        """A failed status request is not retried; that part uses the snapshot."""
+        from elke27_lib.errors import Elke27TimeoutError  # noqa: PLC0415
+
+        hub = _hub()
+        client = self._client(
+            area=Elke27TimeoutError("timeout"), zones=Elke27TimeoutError("timeout")
+        )
+        hub._client = client  # noqa: SLF001
+        fresh = await hub.async_refresh_area_state(1)
+        assert fresh == _two_area_snapshot()
+        assert client.async_execute.await_count == 2
+
+    async def test_no_client_returns_none(self) -> None:
+        """Without a client there is nothing to refresh."""
+        assert await _hub().async_refresh_area_state(1) is None

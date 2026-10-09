@@ -255,22 +255,52 @@ every open (faulted), not-yet-bypassed zone in each targeted area using your cod
 other areas are never changed.
 
 **When something fails.** Panel refusals are never retried. The failure is reported straight
-away, with the area, the zone and the panel's reason, and the bypasses this call made in that
-area are undone:
+away, with the area, the zone and the panel's reason. What happens to the bypasses this call
+made depends on whether the failure is definite:
 
 - **A bypass fails** (for example zone A is bypassed, then the panel refuses zone B): the
   area is **not** armed, and zone A is un-bypassed again.
-- **The arm itself is refused** (for example *area not ready*): the bypasses made for that
-  area are undone in the same way.
-- **No user code reached the panel** (*a user code is required*): this is reported the same
-  way.
+- **The panel refuses the arm** (a panel error code such as *area not ready*, a missing or
+  invalid user code), or the arm command **was never sent** because the panel was not
+  connected: the area is not armed, and the bypasses made for it are undone.
+- **The arm result is unknown** (a timeout, a dropped connection, or another error where the
+  panel may have acted): the bypasses are **left in place**, because the area may be armed
+  and relying on them. The error, the notification and the event say the result is unknown
+  and list the bypassed zones. Check the area on the panel; if it is not armed, clear the
+  bypasses with [`elke27.zone_bypass`](#elke27zone_bypass) and `bypass: false`.
 
 The rollback sends one un-bypass per zone, in reverse order, and never retries it. This
 matters because the panel only clears bypasses when an **armed** area is disarmed;
 disarming an area that never armed leaves them in place. If an un-bypass fails, the error,
 the notification and the event name those zones as still bypassed
-(`still_bypassed_zone_ids`). Clear them with [`elke27.zone_bypass`](#elke27zone_bypass) and
-`bypass: false`. Zones are named with their number, for example *Perimeter (zone 16)*.
+(`still_bypassed_zone_ids`). Clear them with `elke27.zone_bypass` and `bypass: false`.
+Zones are named with their number, for example *Perimeter (zone 16)*.
+
+Calls for the **same area** run one at a time: a second call waits until the first has
+finished bypassing, arming and any rollback. Before acting, each call asks the panel for
+the area's arm state and the zones' bypass state and uses the panel's answers directly (one
+request each, never retried; if one fails, that part uses the integration's latest copy). If the area is **already armed** (in any
+mode), the call does nothing and succeeds: no bypass, no arm, no rollback. Zones that are
+already bypassed are skipped, and only zones bypassed by this call are ever rolled back. If
+the panel refuses a bypass or the arm because the area is already armed (error 11028), the
+area status is read again: if it is armed, the call succeeds as a no-op (logged, no error,
+notification or event); otherwise the result is reported as unknown. Nothing is rolled back
+in either case. Arm away, arm home, arm custom bypass and `elke27.zone_bypass` (for zones with a
+known area) share the same per-area lock, so a rollback can't race a manual change.
+
+**A disarm always wins.** Disarming an area does not wait for the lock. The code is checked
+first; a missing or non-numeric code is rejected and changes nothing. While the disarm is
+being sent, any `elke27.alarm_arm_automatic` call for that area (running or still queued)
+**pauses before its next command**, so it cannot send a bypass or an arm that lands after the
+disarm. If the panel **accepts** the disarm, the paused call is cancelled and sends nothing
+more: no further bypasses, no arm and no rollback. It reports `stage: cancelled`
+(`outcome: not_armed`) with the zones it had bypassed, or was bypassing. If the panel
+**refuses** the disarm (for example a wrong code), nothing is cancelled and automatic arming
+carries on. A command the call had already sent before the disarm (a bypass, or the arm
+itself) still reaches the panel first, so the disarm comes after it and the area ends
+disarmed. Disarming an **armed** area clears its bypasses on the panel; if the area never
+armed, the zones listed may still be bypassed, so clear any that are with
+`elke27.zone_bypass` and `bypass: false`. Nothing is retried.
 
 In each case Home Assistant raises an error, creates a persistent notification for that
 area, and fires an [`elke27_arm_automatic_failed`](#elke27_arm_automatic_failed-event)
@@ -342,12 +372,13 @@ includes:
 |---|---|
 | `entity_id` | Alarm control panel entity that was being armed |
 | `area_id` | Elk area number |
-| `stage` | `bypass` (a zone bypass failed, so the area was not armed) or `arm` (the bypasses succeeded but the panel did not arm the area) |
-| `zone_id` | Zone that could not be bypassed (`null` when `stage` is `arm`) |
+| `stage` | `bypass` (a zone bypass failed, so the area was not armed), `arm` (the bypasses succeeded but the panel refused the arm, or it was never sent) or `arm_uncertain` (the arm result is unknown, for example a timeout) or `cancelled` (a disarm of the area cancelled the call; nothing more was sent) |
+| `outcome` | `not_armed` (the area is known not to be armed; bypasses were rolled back, except when `stage` is `cancelled`) or `unknown` (check the panel; bypasses were left in place) |
+| `zone_id` | Zone that could not be bypassed (`null` when `stage` is `arm`, `arm_uncertain` or `cancelled`) |
 | `reason` | Panel or integration reason (the alarm code is never included) |
 | `bypassed_zone_ids` | Zones in this area that this call bypassed before the failure |
 | `rolled_back_zone_ids` | Of those, the zones whose bypass was undone after the failure |
-| `still_bypassed_zone_ids` | Zones that could not be un-bypassed and are still bypassed. Clear them with `elke27.zone_bypass` and `bypass: false` |
+| `still_bypassed_zone_ids` | Zones still bypassed: un-bypasses that failed, or, when `outcome` is `unknown`, every zone bypassed by the call. If the area is not armed, clear them with `elke27.zone_bypass` and `bypass: false` |
 
 Example automation trigger:
 

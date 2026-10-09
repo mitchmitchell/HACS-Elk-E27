@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import importlib.util
 from pathlib import Path
@@ -69,6 +70,12 @@ def _hub() -> Any:
     hub.is_ready = True
     hub.async_set_zone_bypass = AsyncMock(return_value=True)
     hub.async_arm_area = AsyncMock(return_value=True)
+    # No live client snapshot: the entity falls back to the coordinator copy.
+    hub.get_snapshot = MagicMock(return_value=None)
+    locks: dict[int, asyncio.Lock] = {}
+    hub.area_arm_lock = MagicMock(
+        side_effect=lambda area_id: locks.setdefault(area_id, asyncio.Lock())
+    )
 
     async def _bypass_faulted(area_id: int, snapshot: Any, pin: str | None) -> None:
         for zone in area_faulted_zones(snapshot, area_id):
