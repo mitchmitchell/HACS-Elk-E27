@@ -271,19 +271,33 @@ class Elke27Hub:
 
     async def async_bypass_faulted_zones(
         self, area_id: int, snapshot: PanelSnapshot | None, pin: str | None
-    ) -> None:
-        """Bypass open, non-bypassed zones assigned to the given area."""
+    ) -> list[ZoneState]:
+        """
+        Bypass open, non-bypassed zones assigned to the given area.
+
+        Return the zones that were bypassed. Stop at the first failure without
+        retrying or undoing earlier bypasses (a refusal is reported, never retried);
+        ZoneBypassFailedError names the failed zone, the reason, and the zones
+        already bypassed.
+        """
+        bypassed: list[ZoneState] = []
         for zone in area_faulted_zones(snapshot, area_id):
             try:
-                bypassed = await self.async_set_zone_bypass(
+                acknowledged = await self.async_set_zone_bypass(
                     zone.zone_id, bypassed=True, pin=pin
                 )
-            except Elke27PinRequiredError:
-                raise
+            except Elke27PinRequiredError as err:
+                raise ZoneBypassFailedError(
+                    zone, PIN_REQUIRED_REASON, bypassed, pin_required=True
+                ) from err
             except HomeAssistantError as err:
-                raise ZoneBypassFailedError(zone, str(err)) from err
-            if not bypassed:
-                raise ZoneBypassFailedError(zone, "bypass was not acknowledged.")
+                raise ZoneBypassFailedError(zone, str(err), bypassed) from err
+            if not acknowledged:
+                raise ZoneBypassFailedError(
+                    zone, "bypass was not acknowledged.", bypassed
+                )
+            bypassed.append(zone)
+        return bypassed
 
     async def async_set_zone_bypass(
         self, zone_id: int, *, bypassed: bool, pin: str | None = None
@@ -476,14 +490,30 @@ class Elke27Hub:
             await asyncio.sleep(delay)
 
 
+PIN_REQUIRED_REASON = "a user code is required"
+
+
 class ZoneBypassFailedError(HomeAssistantError):
     """Bypass could not be applied to a zone."""
 
-    def __init__(self, zone: ZoneState, reason: str) -> None:
-        """Initialize with the zone that failed and the panel reason."""
+    def __init__(
+        self,
+        zone: ZoneState,
+        reason: str,
+        bypassed_zones: list[ZoneState] | tuple[ZoneState, ...] = (),
+        *,
+        pin_required: bool = False,
+    ) -> None:
+        """Initialize with the failed zone, the reason and zones already bypassed."""
         self.zone = zone
         self.reason = reason
-        super().__init__(f"{zone_bypass_label(zone)}: {reason}")
+        self.bypassed_zones: tuple[ZoneState, ...] = tuple(bypassed_zones)
+        self.pin_required = pin_required
+        message = f"{zone_bypass_label(zone)}: {reason}"
+        if self.bypassed_zones:
+            labels = ", ".join(zone_bypass_label(item) for item in self.bypassed_zones)
+            message = f"{message} (already bypassed: {labels})"
+        super().__init__(message)
 
 
 def area_faulted_zones(snapshot: PanelSnapshot | None, area_id: int) -> list[ZoneState]:

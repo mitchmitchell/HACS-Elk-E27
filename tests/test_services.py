@@ -24,6 +24,7 @@ if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parent))
 
     from elke27_lib import AreaState, ArmMode, ZoneState
+    from elke27_lib.errors import Elke27PinRequiredError
     from test_hub_bypass import _hub, _snapshot, _two_area_snapshot
 
     from custom_components import elke27 as integration
@@ -243,11 +244,10 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             exit_delay_cancel=True,
         )
 
-    async def test_bypass_failure_aborts_arm_and_alerts(self) -> None:
-        """A failed bypass does not arm and notifies the user."""
+    async def test_partial_bypass_failure_names_bypassed_zones(self) -> None:
+        """Zone A bypasses, zone B fails: no arm, no rollback, A is reported."""
         hass = MagicMock()
         runtime = _alarm_runtime(_two_area_snapshot())
-
         panel_reason = "not authorized (error 11008)"
 
         async def _bypass(zone_id: int, **_kwargs: Any) -> bool:
@@ -264,26 +264,196 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         }
         with (
             patch.object(
-                integration.persistent_notification,
-                "async_create",
+                integration.persistent_notification, "async_create"
             ) as create_notification,
-            self.assertRaises(ZoneBypassFailedError) as ctx,
+            self.assertRaises(HomeAssistantError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert str(ctx.exception) == "Back Door: not authorized (error 11008)"
+        assert str(ctx.exception) == (
+            "Area 1 was not armed: Back Door: not authorized (error 11008)"
+            " (already bypassed: Front Door)"
+        )
+        assert isinstance(ctx.exception.__cause__, ZoneBypassFailedError)
+        # No retry of the refusal and no rollback of zone 1.
+        assert runtime.hub.async_set_zone_bypass.await_args_list == [
+            unittest.mock.call(1, bypassed=True, pin="1234"),
+            unittest.mock.call(2, bypassed=True, pin="1234"),
+        ]
         runtime.hub.async_arm_area.assert_not_called()
         create_notification.assert_called_once()
+        kwargs = create_notification.call_args.kwargs
+        assert kwargs["notification_id"] == "elke27_arm_automatic_entry-abc_1"
+        message = create_notification.call_args.kwargs["message"]
+        assert "Area 1 (alarm_control_panel.house) was not armed" in message
         assert (
-            create_notification.call_args.kwargs["notification_id"]
-            == "elke27_arm_automatic_entry-abc_1"
+            "Back Door could not be bypassed: not authorized (error 11008)" in message
         )
+        assert "Front Door" in message
+        assert "1234" not in message
         hass.bus.async_fire.assert_called_once_with(
             integration.EVENT_ARM_AUTOMATIC_FAILED,
             {
                 "entity_id": "alarm_control_panel.house",
                 "area_id": 1,
+                "stage": "bypass",
                 "zone_id": 2,
                 "reason": panel_reason,
+                "bypassed_zone_ids": [1],
+            },
+        )
+
+    async def test_first_bypass_failure_reports_no_bypassed_zones(self) -> None:
+        """A failure on the first zone reports an empty bypassed list."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        runtime.hub.async_set_zone_bypass = AsyncMock(return_value=False)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError),
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        runtime.hub.async_set_zone_bypass.assert_awaited_once()
+        runtime.hub.async_arm_area.assert_not_called()
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["zone_id"] == 1
+        assert data["bypassed_zone_ids"] == []
+
+    async def test_area_one_arms_area_two_fails(self) -> None:
+        """Areas are independent: area 1 stays armed, area 2's failure is reported."""
+        hass = MagicMock()
+        snapshot = _two_area_snapshot()
+        house = _alarm_runtime(snapshot)
+        garage = _alarm_runtime(snapshot)
+        arm_reason = "Panel rejected the request: area not ready (error 11015)."
+        garage.hub.async_arm_area = AsyncMock(
+            side_effect=HomeAssistantError(arm_reason)
+        )
+        entities = {
+            "alarm_control_panel.a_house": (
+                _entry("aa:bb:cc:dd:ee:ff:area:1", config_entry_id="entry-abc"),
+                house,
+            ),
+            "alarm_control_panel.b_garage": (
+                _entry("aa:bb:cc:dd:ee:ff:area:2", config_entry_id="entry-abc"),
+                garage,
+            ),
+        }
+        with (
+            patch.object(
+                integration.persistent_notification, "async_create"
+            ) as create_notification,
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert str(ctx.exception) == f"Area 2 was not armed: {arm_reason}"
+        house.hub.async_arm_area.assert_awaited_once()
+        garage.hub.async_arm_area.assert_awaited_once()  # tried once, not retried
+        create_notification.assert_called_once()
+        assert (
+            create_notification.call_args.kwargs["notification_id"]
+            == "elke27_arm_automatic_entry-abc_2"
+        )
+        assert (
+            "Area 2 (alarm_control_panel.b_garage)"
+            in (create_notification.call_args.kwargs["message"])
+        )
+        hass.bus.async_fire.assert_called_once_with(
+            integration.EVENT_ARM_AUTOMATIC_FAILED,
+            {
+                "entity_id": "alarm_control_panel.b_garage",
+                "area_id": 2,
+                "stage": "arm",
+                "zone_id": None,
+                "reason": arm_reason,
+                "bypassed_zone_ids": [4],
+            },
+        )
+
+    async def test_failure_in_first_area_does_not_stop_later_areas(self) -> None:
+        """A failed first area is reported; later areas are still armed."""
+        hass = MagicMock()
+        snapshot = _two_area_snapshot()
+        house = _alarm_runtime(snapshot)
+        garage = _alarm_runtime(snapshot)
+        house.hub.async_arm_area = AsyncMock(side_effect=HomeAssistantError("busy"))
+        garage.hub.async_arm_area = AsyncMock(side_effect=HomeAssistantError("nope"))
+        entities = {
+            "alarm_control_panel.a_house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), house),
+            "alarm_control_panel.b_garage": (
+                _entry("aa:bb:cc:dd:ee:ff:area:2"),
+                garage,
+            ),
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert str(ctx.exception).startswith("Automatic arming failed for 2 of 2 areas")
+        assert "Area 1 was not armed: busy" in str(ctx.exception)
+        assert "Area 2 was not armed: nope" in str(ctx.exception)
+        assert hass.bus.async_fire.call_count == 2
+
+    async def test_pin_required_during_bypass_is_reported(self) -> None:
+        """Elke27PinRequiredError from a bypass goes through failure reporting."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        runtime.hub.async_set_zone_bypass = AsyncMock(
+            side_effect=Elke27PinRequiredError("PIN required to bypass zones.")
+        )
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(
+                integration.persistent_notification, "async_create"
+            ) as create_notification,
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert "a user code is required" in str(ctx.exception)
+        runtime.hub.async_arm_area.assert_not_called()
+        create_notification.assert_called_once()
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["stage"] == "bypass"
+        assert data["zone_id"] == 1
+        assert data["reason"] == "a user code is required"
+
+    async def test_pin_required_during_arm_is_reported(self) -> None:
+        """Elke27PinRequiredError from arming goes through failure reporting."""
+        hass = MagicMock()
+        snapshot = _snapshot(
+            areas={1: AreaState(area_id=1, name="House", ready=True)},
+            zones={1: ZoneState(zone_id=1, name="Front Door", area_id=1, open=False)},
+        )
+        runtime = _alarm_runtime(snapshot)
+        runtime.hub.async_arm_area = AsyncMock(
+            side_effect=Elke27PinRequiredError("PIN required to arm areas.")
+        )
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(
+                integration.persistent_notification, "async_create"
+            ) as create_notification,
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert str(ctx.exception) == "Area 1 was not armed: a user code is required"
+        create_notification.assert_called_once()
+        hass.bus.async_fire.assert_called_once_with(
+            integration.EVENT_ARM_AUTOMATIC_FAILED,
+            {
+                "entity_id": "alarm_control_panel.house",
+                "area_id": 1,
+                "stage": "arm",
+                "zone_id": None,
+                "reason": "a user code is required",
+                "bypassed_zone_ids": [],
             },
         )
 

@@ -19,7 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
-from .hub import area_faulted_zones
+from .hub import ZoneBypassFailedError, area_faulted_zones
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -168,7 +168,9 @@ class Elke27AreaAlarmControlPanel(
             await self._hub.async_bypass_faulted_zones(
                 self._area_id, self.coordinator.data, code
             )
-        except Elke27PinRequiredError as err:
+        except ZoneBypassFailedError as err:
+            if not err.pin_required:
+                raise
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
         await self._async_arm(ArmMode.ARMED_AWAY, code)

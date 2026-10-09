@@ -1,4 +1,4 @@
-# ruff: noqa: S101, PT027
+# ruff: noqa: S101, PT027, PLR2004
 """Tests for Elke27 hub area bypass helpers."""
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parents[1]))
 
     from elke27_lib import AreaState, PanelInfo, PanelSnapshot, ZoneState
+    from elke27_lib.errors import Elke27PinRequiredError
 
     from custom_components.elke27.hub import (
         Elke27Hub,
@@ -91,7 +92,8 @@ class AsyncBypassFaultedZonesTest(unittest.IsolatedAsyncioTestCase):
         """Each open zone in the area is bypassed with the code."""
         hub = _hub()
         hub.async_set_zone_bypass = AsyncMock(return_value=True)
-        await hub.async_bypass_faulted_zones(1, _two_area_snapshot(), "1234")
+        bypassed = await hub.async_bypass_faulted_zones(1, _two_area_snapshot(), "1234")
+        assert [zone.zone_id for zone in bypassed] == [1, 2]
         assert hub.async_set_zone_bypass.await_args_list == [
             unittest.mock.call(1, bypassed=True, pin="1234"),
             unittest.mock.call(2, bypassed=True, pin="1234"),
@@ -115,6 +117,42 @@ class AsyncBypassFaultedZonesTest(unittest.IsolatedAsyncioTestCase):
         assert ctx.exception.zone.zone_id == 1
         assert ctx.exception.reason == "not authorized (error 11008)"
         assert str(ctx.exception) == "Front Door: not authorized (error 11008)"
+        assert ctx.exception.bypassed_zones == ()
+
+    async def test_partial_failure_names_zones_already_bypassed(self) -> None:
+        """Zone A bypasses, zone B fails: A is reported, not rolled back or retried."""
+        hub = _hub()
+        refusal = "zone cannot be bypassed (error 11023)"
+
+        async def _bypass(zone_id: int, **_kwargs: Any) -> bool:
+            if zone_id == 2:
+                raise HomeAssistantError(refusal)
+            return True
+
+        hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
+        with self.assertRaises(ZoneBypassFailedError) as ctx:
+            await hub.async_bypass_faulted_zones(1, _two_area_snapshot(), "1234")
+        assert ctx.exception.zone.zone_id == 2
+        assert [zone.zone_id for zone in ctx.exception.bypassed_zones] == [1]
+        assert str(ctx.exception) == (
+            "Back Door: zone cannot be bypassed (error 11023)"
+            " (already bypassed: Front Door)"
+        )
+        # One call per zone: no retry of the refusal and no un-bypass of zone 1.
+        assert hub.async_set_zone_bypass.await_args_list == [
+            unittest.mock.call(1, bypassed=True, pin="1234"),
+            unittest.mock.call(2, bypassed=True, pin="1234"),
+        ]
+
+    async def test_pin_required_is_a_bypass_failure(self) -> None:
+        """A missing code is reported like any other bypass failure."""
+        hub = _hub()
+        hub.async_set_zone_bypass = AsyncMock(side_effect=Elke27PinRequiredError("x"))
+        with self.assertRaises(ZoneBypassFailedError) as ctx:
+            await hub.async_bypass_faulted_zones(1, _two_area_snapshot(), None)
+        assert ctx.exception.pin_required is True
+        assert ctx.exception.reason == "a user code is required"
+        assert hub.async_set_zone_bypass.await_count == 1
 
     async def test_unacknowledged_bypass_raises(self) -> None:
         """A bypass that is not acknowledged stops before later zones."""
