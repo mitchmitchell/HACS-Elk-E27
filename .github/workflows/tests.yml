@@ -25,10 +25,11 @@ jobs:
           cache: "pip"
 
       - name: Install requirements
-        # Home Assistant from requirements.txt, plus the elke27 version pinned in
-        # the manifest so the tests run against what users install.
+        # Home Assistant and the HA test harness from requirements_test.txt, plus
+        # the elke27 version pinned in the manifest so the tests run against what
+        # users install.
         run: |
-          python3 -m pip install -r requirements.txt pytest==9.1.1
+          python3 -m pip install -r requirements_test.txt
           python3 -m pip install "$(python3 -c 'import json; print(json.load(open("custom_components/elke27/manifest.json"))["requirements"][0])')"
 
       - name: Run tests

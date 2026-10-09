@@ -12,7 +12,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
+from .entity import (
+    build_unique_id,
+    device_info_for_entry,
+    raise_if_not_sent,
+    sanitize_name,
+    unique_base,
+)
 
 if TYPE_CHECKING:
     from elke27_lib import LightState, PanelSnapshot
@@ -125,11 +131,15 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         try:
             if ATTR_BRIGHTNESS in kwargs:
                 level = _level_from_kwargs(kwargs)
-                await self._hub.async_set_light(self._light_id, state=True, level=level)
+                sent = await self._hub.async_set_light(
+                    self._light_id, state=True, level=level
+                )
+                raise_if_not_sent(sent=sent, hub=self._hub)
             else:
-                await self._hub.async_set_light(
+                sent = await self._hub.async_set_light(
                     self._light_id, state=True, level=_ELK_MAX_DIM_LEVEL
                 )
+                raise_if_not_sent(sent=sent, hub=self._hub)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -137,7 +147,8 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
     async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the light off if supported by the client."""
         try:
-            await self._hub.async_set_light(self._light_id, state=False, level=0)
+            sent = await self._hub.async_set_light(self._light_id, state=False, level=0)
+            raise_if_not_sent(sent=sent, hub=self._hub)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -146,7 +157,8 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
     def available(self) -> bool:
         """Return if the entity is available."""
         return (
-            self._hub.is_ready
+            super().available
+            and self._hub.is_ready
             and _get_light(self.coordinator.data, self._light_id) is not None
         )
 

@@ -1,22 +1,20 @@
+# Honest status for the HACS integration. "done" only where code and tests back
+# it; everything else is "todo". Comments are used only for exemptions.
 rules:
   # Bronze
   action-setup: done
   appropriate-polling:
-    status: done
-  brands: done
+    status: exempt
+    comment: Push-based; the panel sends events and nothing is polled.
+  brands: todo
   common-modules: done
   config-flow: done
-  config-flow-test-coverage: done
+  config-flow-test-coverage: todo
   dependency-transparency: done
-  docs-actions:
-    status: exempt
-    comment: Integration does not register custom service actions.
-  docs-high-level-description:
-    status: done
-  docs-installation-instructions:
-    status: done
-  docs-removal-instructions:
-    status: done
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
   entity-event-setup: done
   entity-unique-id: done
   has-entity-name: done
@@ -26,41 +24,34 @@ rules:
   unique-config-entry: done
 
   # Silver
-  action-exceptions: done
+  action-exceptions: todo
   config-entry-unloading: done
-  docs-configuration-parameters: done
-  docs-installation-parameters: done
+  docs-configuration-parameters: todo
+  docs-installation-parameters: todo
   entity-unavailable: done
   integration-owner: done
   log-when-unavailable: done
   parallel-updates: done
-  reauthentication-flow: done
-  test-coverage: done
+  reauthentication-flow: todo
+  test-coverage: todo
 
   # Gold
-  devices: done
-  diagnostics: done
+  devices: todo
+  diagnostics: todo
   discovery: todo
   discovery-update-info: todo
-  docs-data-update:
-    status: todo
-  docs-examples:
-    status: todo
-  docs-known-limitations:
-    status: todo
-  docs-supported-devices:
-    status: todo
-  docs-supported-functions:
-    status: todo
-  docs-troubleshooting:
-    status: todo
-  docs-use-cases:
-    status: todo
-  dynamic-devices: done
-  entity-category: done
-  entity-device-class: done
+  docs-data-update: todo
+  docs-examples: todo
+  docs-known-limitations: done
+  docs-supported-devices: todo
+  docs-supported-functions: todo
+  docs-troubleshooting: done
+  docs-use-cases: todo
+  dynamic-devices: todo
+  entity-category: todo
+  entity-device-class: todo
   entity-disabled-by-default: todo
-  entity-translations: done
+  entity-translations: todo
   exception-translations: todo
   icon-translations: todo
   reconfiguration-flow: todo
@@ -68,12 +59,8 @@ rules:
   stale-devices: todo
 
   # Platinum
-  async-dependency:
-    status: exempt
-    comment: Dependencies are not introduced in Milestone 0.
+  async-dependency: done
   inject-websession:
     status: exempt
-    comment: Web session injection will be added with the client library.
-  strict-typing:
-    status: exempt
-    comment: Strict typing will be added in a later milestone.
+    comment: The panel protocol is raw TCP; no HTTP session is used.
+  strict-typing: todo

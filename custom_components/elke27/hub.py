@@ -37,9 +37,13 @@ from .const import READY_TIMEOUT
 from .identity import build_client_identity
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Coroutine
+
+    from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
 
 # Seconds to wait before re-reading a light's status after a set_status.
 LIGHT_REFRESH_DELAY = 3.0
@@ -56,9 +60,13 @@ class Elke27Hub:
         link_keys_json: str,
         integration_serial: str,
         panel_name: str | None,
+        *,
+        entry: ConfigEntry | None = None,
     ) -> None:
         """Initialize the hub wrapper."""
         self._hass = hass
+        # Background tasks are tied to the config entry so unload cancels them.
+        self._entry = entry
         self._host = host
         self._port = port
         self._link_keys_json = link_keys_json
@@ -76,6 +84,7 @@ class Elke27Hub:
         self._reconnect_attempts = 0
         self._stopping = False
         self._unavailable_logged = False
+        self._reconnect_listeners: list[Callable[[], None]] = []
         self._typed_callbacks: dict[
             Callable[[Any], None], Callable[[], None] | None
         ] = {}
@@ -154,7 +163,8 @@ class Elke27Hub:
             await self._client.async_disconnect()
         self._client = None
         self._clear_typed_subscriptions()
-        if was_connected:
+        # An intentional disconnect (unload or shutdown) is not a lost connection.
+        if was_connected and not self._stopping:
             self._log_unavailable()
 
     def get_snapshot(self) -> PanelSnapshot | None:
@@ -265,7 +275,7 @@ class Elke27Hub:
             # report it later), so ask the panel for the light's status now and
             # once more after a short delay.
             await self._async_refresh_light(light_id)
-            self._hass.async_create_background_task(
+            self._create_background_task(
                 self._async_refresh_light_later(light_id),
                 f"elke27 light {light_id} status refresh",
             )
@@ -494,9 +504,15 @@ class Elke27Hub:
             return False
         result = await client.async_execute(command_key, **params)
         if not result.ok:
-            if result.error is not None:
+            if isinstance(result.error, Elke27PinRequiredError):
                 raise result.error
-            return False
+            if result.error is not None:
+                _LOGGER.warning("Command %s failed: %s", command_key, result.error)
+                raise HomeAssistantError(_error_message(result.error)) from (
+                    result.error
+                )
+            _LOGGER.warning("Command %s was not accepted by the panel", command_key)
+            raise HomeAssistantError(NOT_ACCEPTED_MESSAGE)
         return True
 
     def _require_client(self) -> Elke27Client:
@@ -605,9 +621,17 @@ class Elke27Hub:
         if self._reconnect_task is not None and not self._reconnect_task.done():
             return
         _LOGGER.debug("Creating reconnect task")
-        self._reconnect_task = self._hass.async_create_task(
-            self._async_reconnect_loop()
+        self._reconnect_task = self._create_background_task(
+            self._async_reconnect_loop(), "elke27 reconnect"
         )
+
+    def _create_background_task(
+        self, coro: Coroutine[Any, Any, None], name: str
+    ) -> asyncio.Task[None]:
+        """Create a task that is cancelled when the config entry unloads."""
+        if self._entry is not None:
+            return self._entry.async_create_background_task(self._hass, coro, name)
+        return self._hass.async_create_background_task(coro, name)
 
     @callback
     def _cancel_reconnect(self) -> None:
@@ -618,6 +642,28 @@ class Elke27Hub:
             self._reconnect_task.cancel()
         self._reconnect_task = None
         self._reconnect_attempts = 0
+
+    def add_reconnect_listener(
+        self, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """
+        Call listener after each successful automatic reconnect.
+
+        The connected event can fire before callbacks are re-attached on the new
+        client, so listeners must not rely on seeing it.
+        """
+        self._reconnect_listeners.append(listener)
+
+        def _remove() -> None:
+            if listener in self._reconnect_listeners:
+                self._reconnect_listeners.remove(listener)
+
+        return _remove
+
+    def _notify_reconnected(self) -> None:
+        """Tell reconnect listeners the client is connected again."""
+        for listener in list(self._reconnect_listeners):
+            listener()
 
     def _log_unavailable(self) -> None:
         """Log the panel as unavailable once."""
@@ -639,6 +685,7 @@ class Elke27Hub:
                 _LOGGER.debug("Reconnect attempt failed: %s", err)
             else:
                 self._reconnect_attempts = 0
+                self._notify_reconnected()
                 return
             self._reconnect_attempts += 1
             delay = min(300, 2**self._reconnect_attempts)

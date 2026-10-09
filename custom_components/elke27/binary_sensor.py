@@ -199,7 +199,8 @@ class Elke27ZoneBinarySensor(
     def available(self) -> bool:
         """Return if the entity is available."""
         return (
-            self._hub.is_ready
+            super().available
+            and self._hub.is_ready
             and _get_zone(self.coordinator.data, self._zone_id) is not None
         )
 
