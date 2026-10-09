@@ -7,7 +7,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING
 
-from elke27_lib import ArmMode
+from elke27_lib import ArmMode, ZoneState
 from elke27_lib.errors import (
     Elke27ConnectionError,
     Elke27DisconnectedError,
@@ -16,8 +16,10 @@ from elke27_lib.errors import (
 )
 import voluptuous as vol
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
+from homeassistant.core import callback
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -33,7 +35,7 @@ from homeassistant.helpers.target import (
 from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, CONF_PANEL, DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import unique_base
-from .hub import Elke27Hub
+from .hub import Elke27Hub, ZoneBypassFailedError, zone_bypass_label
 from .identity import async_get_integration_serial
 from .models import Elke27RuntimeData
 
@@ -46,8 +48,12 @@ _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 SERVICE_ALARM_ARM_AUTOMATIC = "alarm_arm_automatic"
+EVENT_ARM_AUTOMATIC_FAILED = "elke27_arm_automatic_failed"
 ATTR_MODE = "mode"
 ATTR_CODE = "code"
+ATTR_AREA_ID = "area_id"
+ATTR_ZONE_ID = "zone_id"
+ATTR_REASON = "reason"
 
 SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA = cv.make_entity_service_schema(
     {
@@ -243,12 +249,63 @@ async def _async_arm_automatic_entity(
     entity_entry, runtime_data = _entity_runtime_data(
         hass, entity_id, Platform.ALARM_CONTROL_PANEL, "alarm control panel"
     )
+    area_id = _area_id_from_unique_id(entity_entry.unique_id)
+    try:
+        await runtime_data.hub.async_bypass_faulted_zones(
+            area_id, runtime_data.coordinator.data, code
+        )
+    except ZoneBypassFailedError as err:
+        _async_report_arm_automatic_failure(
+            hass,
+            entity_id=entity_id,
+            area_id=area_id,
+            zone=err.zone,
+            reason=err.reason,
+            config_entry_id=entity_entry.config_entry_id,
+        )
+        raise
     await runtime_data.hub.async_arm_area(
-        _area_id_from_unique_id(entity_entry.unique_id),
+        area_id,
         _service_mode_to_arm_mode(mode_name),
         code,
         auto_stay_cancel=True,
         exit_delay_cancel=True,
+    )
+
+
+def _arm_automatic_notification_id(config_entry_id: str, area_id: int) -> str:
+    """Return a stable notification ID for automatic arming failures."""
+    return f"elke27_arm_automatic_{config_entry_id}_{area_id}"
+
+
+@callback
+def _async_report_arm_automatic_failure(
+    hass: HomeAssistant,
+    *,
+    entity_id: str,
+    area_id: int,
+    zone: ZoneState,
+    reason: str,
+    config_entry_id: str,
+) -> None:
+    """Notify the user and emit an event when automatic arming cannot bypass a zone."""
+    zone_label = zone_bypass_label(zone)
+    persistent_notification.async_create(
+        hass,
+        title="Elk E27 automatic arming failed",
+        message=(
+            f"{zone_label} could not be bypassed: {reason}. The area was not armed."
+        ),
+        notification_id=_arm_automatic_notification_id(config_entry_id, area_id),
+    )
+    hass.bus.async_fire(
+        EVENT_ARM_AUTOMATIC_FAILED,
+        {
+            "entity_id": entity_id,
+            ATTR_AREA_ID: area_id,
+            ATTR_ZONE_ID: zone.zone_id,
+            ATTR_REASON: reason,
+        },
     )
 
 

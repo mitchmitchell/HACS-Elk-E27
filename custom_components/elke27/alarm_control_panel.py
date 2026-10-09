@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
+from .hub import area_faulted_zones
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -131,7 +132,7 @@ class Elke27AreaAlarmControlPanel(
                 "faulted_zone_ids": None,
                 "faulted_zones": None,
             }
-        faulted_zones = _area_faulted_zones(self.coordinator.data, self._area_id)
+        faulted_zones = area_faulted_zones(self.coordinator.data, self._area_id)
         definitions = self.coordinator.data.zone_definitions
         return {
             "ready": area.ready,
@@ -163,17 +164,13 @@ class Elke27AreaAlarmControlPanel(
     async def async_alarm_arm_custom_bypass(self, code: str | None = None) -> None:
         """Arm the area with a custom bypass."""
         code = _normalize_code(code)
-        for zone in _area_faulted_zones(self.coordinator.data, self._area_id):
-            try:
-                bypassed = await self._hub.async_set_zone_bypass(
-                    zone.zone_id, bypassed=True, pin=code
-                )
-            except Elke27PinRequiredError as err:
-                msg = "PIN required to perform this action."
-                raise HomeAssistantError(msg) from err
-            if not bypassed:
-                msg = f"Zone {zone.zone_id} bypass was not acknowledged."
-                raise HomeAssistantError(msg)
+        try:
+            await self._hub.async_bypass_faulted_zones(
+                self._area_id, self.coordinator.data, code
+            )
+        except Elke27PinRequiredError as err:
+            msg = "PIN required to perform this action."
+            raise HomeAssistantError(msg) from err
         await self._async_arm(ArmMode.ARMED_AWAY, code)
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
@@ -220,15 +217,6 @@ def _area_state_to_ha(area: AreaState) -> AlarmControlPanelState | None:
     if area.arm_mode is ArmMode.ARMED_AWAY:
         return AlarmControlPanelState.ARMED_AWAY
     return None
-
-
-def _area_faulted_zones(
-    snapshot: PanelSnapshot | None, area_id: int
-) -> list[ZoneState]:
-    """Return open, non-bypassed zones assigned to the given area."""
-    if snapshot is None:
-        return []
-    return [zone for zone in snapshot.faulted_zones if zone.area_id == area_id]
 
 
 def _zone_display_name(zone: ZoneState, definitions: Mapping[int, Any]) -> str:

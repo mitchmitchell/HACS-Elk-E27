@@ -250,17 +250,21 @@ This action only performs the arm.
 | `mode` | yes | `away` or `home` |
 | `code` | yes | Numeric alarm user code |
 
-This is meant for unattended arming. The integration sends the arm request with the panel's
-auto-stay-cancel and exit-delay-cancel flags set, so the panel:
+This is meant for unattended geofence-style arming. Before arming, the integration bypasses
+every open (faulted), not-yet-bypassed zone in each targeted area using your code. Zones in
+other areas are never changed. If a bypass fails, the area is **not** armed: Home Assistant
+raises an error, creates a persistent notification, and fires an
+[`elke27_arm_automatic_failed`](#elke27_arm_automatic_failed-event) event so you can alert
+yourself.
+
+The integration sends the arm request with the panel's auto-stay-cancel and exit-delay-cancel
+flags set, so the panel:
 
 - **cancels auto-stay** (arm away stays away even if no exit is detected), and
 - **cancels the exit delay** (the area arms immediately).
 
-It does **not** bypass zones. If a zone in the area is open, the panel rejects the arm
-(*area not ready*). Close the zone first, or bypass it with
-[`elke27.zone_bypass`](#elke27zone_bypass). Use the standard
-`alarm_control_panel.alarm_arm_away` / `alarm_arm_home` actions to arm with the panel's
-normal behaviour.
+Use the standard `alarm_control_panel.alarm_arm_away` / `alarm_arm_home` actions when you
+want the panel's normal exit delay and auto-stay behaviour without automatic bypasses.
 
 Single action call:
 
@@ -304,6 +308,31 @@ so not in the UI automation editor.
 
 The same pattern works with occupancy: trigger when your occupancy sensors have shown no
 presence for a while, and use `mode: home` to arm stay instead.
+
+#### `elke27_arm_automatic_failed` event
+
+Fired when `elke27.alarm_arm_automatic` cannot bypass an open zone in the targeted area, so
+the arm is aborted. The event data includes:
+
+| Key | Description |
+|---|---|
+| `entity_id` | Alarm control panel entity that was being armed |
+| `area_id` | Elk area number |
+| `zone_id` | Zone that could not be bypassed |
+| `reason` | Panel or integration reason (the alarm code is never included) |
+
+Example automation trigger:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: elke27_arm_automatic_failed
+actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      title: "Elk E27 did not arm"
+      message: "Zone {{ trigger.event.data.zone_id }}: {{ trigger.event.data.reason }}"
+```
 
 ### `elke27.zone_bypass`
 

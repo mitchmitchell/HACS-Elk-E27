@@ -119,7 +119,7 @@
   "services": {
     "alarm_arm_automatic": {
       "name": "Arm automatic",
-      "description": "Arms Elk E27 areas from automations, such as geofence- or occupancy-based arming when everyone leaves. It cancels auto-stay and the exit delay. It does not bypass zones: close or bypass any open zones first, or the panel rejects the arm.",
+      "description": "Arms Elk E27 areas from automations, such as geofence- or occupancy-based arming when everyone leaves. Open (faulted) zones in each targeted area are bypassed before arming; zones in other areas are not changed. It cancels auto-stay and the exit delay so the area arms immediately.",
       "fields": {
         "mode": {
           "name": "Arming mode",

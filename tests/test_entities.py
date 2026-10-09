@@ -38,6 +38,7 @@ if _HAS_DEPS:
     from custom_components.elke27.binary_sensor import Elke27ZoneBinarySensor
     from custom_components.elke27.climate import Elke27Thermostat
     from custom_components.elke27.entity import get_panel_field
+    from custom_components.elke27.hub import ZoneBypassFailedError, area_faulted_zones
     from custom_components.elke27.light import Elke27Light
     from homeassistant.components.alarm_control_panel import (
         AlarmControlPanelEntity,
@@ -45,7 +46,6 @@ if _HAS_DEPS:
         AlarmControlPanelState,
     )
     from homeassistant.components.binary_sensor import BinarySensorDeviceClass
-    from homeassistant.exceptions import HomeAssistantError
 
 
 def _snapshot(**kwargs: Any) -> Any:
@@ -69,6 +69,16 @@ def _hub() -> Any:
     hub.is_ready = True
     hub.async_set_zone_bypass = AsyncMock(return_value=True)
     hub.async_arm_area = AsyncMock(return_value=True)
+
+    async def _bypass_faulted(area_id: int, snapshot: Any, pin: str | None) -> None:
+        for zone in area_faulted_zones(snapshot, area_id):
+            bypassed = await hub.async_set_zone_bypass(
+                zone.zone_id, bypassed=True, pin=pin
+            )
+            if not bypassed:
+                raise ZoneBypassFailedError(zone, "bypass was not acknowledged.")
+
+    hub.async_bypass_faulted_zones = AsyncMock(side_effect=_bypass_faulted)
     return hub
 
 
@@ -129,7 +139,7 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         hub = _hub()
         hub.async_set_zone_bypass.return_value = False
         entity = _area_entity(_two_area_snapshot(), hub)
-        with self.assertRaises(HomeAssistantError):
+        with self.assertRaises(ZoneBypassFailedError):
             await entity.async_alarm_arm_custom_bypass("1234")
         assert hub.async_set_zone_bypass.await_count == 1
         hub.async_arm_area.assert_not_called()
