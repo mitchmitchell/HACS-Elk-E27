@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +15,8 @@ from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
 
 if TYPE_CHECKING:
+    from elke27_lib import PanelSnapshot, ZoneDefinition, ZoneState
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -81,29 +82,20 @@ async def async_setup_entry(
             _LOGGER.debug("Zone entities skipped because snapshot is unavailable")
             return
         entities: list[Elke27ZoneBinarySensor] = []
-        zones = list(_iter_zones(snapshot))
-        if not zones:
+        if not snapshot.zones:
             _LOGGER.debug("No zones available for entity creation")
             return
         added = 0
         skipped = 0
-        for zone in zones:
-            zone_id = getattr(zone, "zone_id", None)
-            if not isinstance(zone_id, int):
-                continue
-            zone_definition = _zone_definition_entry(snapshot, zone_id)
-            definition = _zone_definition_value(zone, zone_definition)
+        for zone_id, zone in snapshot.zones.items():
+            zone_definition = snapshot.zone_definitions.get(zone_id)
+            definition = _zone_definition_value(zone_definition)
             if definition == "UNDEFINED":
                 if zone_id not in skipped_zone_ids:
-                    zone_name = (
-                        zone.get("name")
-                        if isinstance(zone, Mapping)
-                        else getattr(zone, "name", None)
-                    )
                     _LOGGER.debug(
                         "Skipping zone entity %s (%s): definition=UNDEFINED",
                         zone_id,
-                        zone_name,
+                        zone.name,
                     )
                     skipped_zone_ids.add(zone_id)
                 skipped += 1
@@ -145,8 +137,8 @@ class Elke27ZoneBinarySensor(
         hub: Elke27Hub,
         entry: ConfigEntry,
         zone_id: int,
-        zone: Any,
-        zone_definition: Any | None,
+        zone: ZoneState,
+        zone_definition: ZoneDefinition | None,
     ) -> None:
         """Initialize the zone entity."""
         super().__init__(coordinator)
@@ -161,7 +153,7 @@ class Elke27ZoneBinarySensor(
         )
         self._attr_device_info = device_info_for_entry(hub, coordinator, entry)
         self._missing_logged = False
-        self._attr_device_class = _zone_device_class(zone, zone_definition)
+        self._attr_device_class = _zone_device_class(zone_definition)
 
     @property
     def is_on(self) -> bool | None:
@@ -170,8 +162,7 @@ class Elke27ZoneBinarySensor(
         if zone is None:
             self._log_missing()
             return None
-        is_open = getattr(zone, "open", None)
-        return bool(is_open) if isinstance(is_open, bool) else None
+        return zone.open
 
     @property
     def icon(self) -> str | None:
@@ -179,12 +170,12 @@ class Elke27ZoneBinarySensor(
         zone = _get_zone(self.coordinator.data, self._zone_id)
         if zone is None:
             return None
-        zone_definition = _zone_definition_entry(self.coordinator.data, self._zone_id)
-        definition = _zone_definition_value(zone, zone_definition)
+        definition = _zone_definition_value(
+            _zone_definition_entry(self.coordinator.data, self._zone_id)
+        )
         if not definition:
             return None
-        is_open = getattr(zone, "open", None)
-        if isinstance(is_open, bool) and is_open:
+        if zone.open:
             return _ZONE_OPEN_ICON_BY_DEFINITION.get(
                 definition
             ) or _ZONE_ICON_BY_DEFINITION.get(definition)
@@ -198,10 +189,10 @@ class Elke27ZoneBinarySensor(
             return {}
         return {
             "definition": _zone_definition_value(
-                zone, _zone_definition_entry(self.coordinator.data, self._zone_id)
+                _zone_definition_entry(self.coordinator.data, self._zone_id)
             ),
-            "bypassed": getattr(zone, "bypassed", None),
-            "trouble": getattr(zone, "trouble", None),
+            "bypassed": zone.bypassed,
+            "trouble": zone.trouble,
         }
 
     @property
@@ -220,60 +211,38 @@ class Elke27ZoneBinarySensor(
         _LOGGER.debug("Zone %s missing from snapshot", self._zone_id)
 
 
-def _iter_zones(snapshot: Any) -> Iterable[Any]:
-    zones = getattr(snapshot, "zones", None)
-    if zones is None:
-        return []
-    if isinstance(zones, Mapping):
-        return list(zones.values())
-    if isinstance(zones, list | tuple):
-        return zones
-    return []
+def _get_zone(snapshot: PanelSnapshot | None, zone_id: int) -> ZoneState | None:
+    if snapshot is None:
+        return None
+    return snapshot.zones.get(zone_id)
 
 
-def _get_zone(snapshot: Any, zone_id: int) -> Any | None:
-    for zone in _iter_zones(snapshot):
-        if getattr(zone, "zone_id", None) == zone_id:
-            return zone
-    return None
+def _zone_definition_entry(
+    snapshot: PanelSnapshot | None, zone_id: int
+) -> ZoneDefinition | None:
+    if snapshot is None:
+        return None
+    return snapshot.zone_definitions.get(zone_id)
 
 
-def _zone_definition_entry(snapshot: Any | None, zone_id: int) -> Any | None:
-    definitions = (
-        getattr(snapshot, "zone_definitions", None) if snapshot is not None else None
-    )
-    if isinstance(definitions, Mapping):
-        return definitions.get(zone_id)
-    return None
+def _zone_definition_value(zone_definition: ZoneDefinition | None) -> str | None:
+    if zone_definition is None or not zone_definition.definition:
+        return None
+    return str(zone_definition.definition)
 
 
-def _zone_definition_value(zone: Any, zone_definition: Any | None) -> str | None:
-    definition = getattr(zone_definition, "definition", None)
-    if definition:
-        return str(definition)
-    definition = (
-        zone.get("definition")
-        if isinstance(zone, Mapping)
-        else getattr(zone, "definition", None)
-    )
-    return str(definition) if definition else None
-
-
-def _zone_name(zone: Any, zone_definition: Any | None) -> str | None:
-    name = getattr(zone_definition, "name", None)
-    if name:
-        return sanitize_name(name)
-    return sanitize_name(getattr(zone, "name", None))
+def _zone_name(zone: ZoneState, zone_definition: ZoneDefinition | None) -> str | None:
+    if zone_definition is not None and zone_definition.name:
+        return sanitize_name(zone_definition.name)
+    return sanitize_name(zone.name)
 
 
 def _zone_device_class(
-    zone: Any, zone_definition: Any | None
+    zone_definition: ZoneDefinition | None,
 ) -> BinarySensorDeviceClass:
-    zone_type = getattr(zone_definition, "zone_type", None) or getattr(
-        zone_definition, "kind", None
-    )
-    if zone_type is None:
-        zone_type = getattr(zone, "zone_type", None) or getattr(zone, "kind", None)
+    zone_type = None
+    if zone_definition is not None:
+        zone_type = zone_definition.zone_type or zone_definition.kind
     if isinstance(zone_type, str):
         normalized = zone_type.lower()
         if "motion" in normalized:

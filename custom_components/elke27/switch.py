@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +15,8 @@ from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
 
 if TYPE_CHECKING:
+    from elke27_lib import OutputState, PanelSnapshot
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -48,14 +49,10 @@ async def async_setup_entry(
             _LOGGER.debug("Output switches skipped because snapshot is unavailable")
             return
         entities: list[Elke27OutputSwitch] = []
-        outputs = list(_iter_outputs(snapshot))
-        if not outputs:
+        if not snapshot.outputs:
             _LOGGER.debug("No outputs available for entity creation")
             return
-        for output in outputs:
-            output_id = getattr(output, "output_id", None)
-            if not isinstance(output_id, int):
-                continue
+        for output_id, output in snapshot.outputs.items():
             if output_id in known_output_ids:
                 continue
             known_output_ids.add(output_id)
@@ -81,15 +78,13 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         hub: Elke27Hub,
         entry: ConfigEntry,
         output_id: int,
-        output: Any,
+        output: OutputState,
     ) -> None:
         """Initialize the output entity."""
         super().__init__(coordinator)
         self._hub = hub
         self._output_id = output_id
-        self._attr_name = (
-            sanitize_name(getattr(output, "name", None)) or f"Output {output_id}"
-        )
+        self._attr_name = sanitize_name(output.name) or f"Output {output_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "output",
@@ -105,8 +100,7 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         if output is None:
             self._log_missing()
             return None
-        is_on = getattr(output, "state", None)
-        return bool(is_on) if isinstance(is_on, bool) else None
+        return output.state
 
     @property
     def available(self) -> bool:
@@ -140,19 +134,7 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         _LOGGER.debug("Output %s missing from snapshot", self._output_id)
 
 
-def _iter_outputs(snapshot: Any) -> Iterable[Any]:
-    outputs = getattr(snapshot, "outputs", None)
-    if outputs is None:
-        return []
-    if isinstance(outputs, Mapping):
-        return list(outputs.values())
-    if isinstance(outputs, list | tuple):
-        return outputs
-    return []
-
-
-def _get_output(snapshot: Any, output_id: int) -> Any | None:
-    for output in _iter_outputs(snapshot):
-        if getattr(output, "output_id", None) == output_id:
-            return output
-    return None
+def _get_output(snapshot: PanelSnapshot | None, output_id: int) -> OutputState | None:
+    if snapshot is None:
+        return None
+    return snapshot.outputs.get(output_id)

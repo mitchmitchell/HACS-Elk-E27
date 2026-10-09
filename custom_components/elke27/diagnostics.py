@@ -33,8 +33,8 @@ async def async_get_config_entry_diagnostics(
 
     snapshot_meta = _to_jsonable(
         {
-            "version": getattr(snapshot, "version", None),
-            "updated_at": getattr(snapshot, "updated_at", None),
+            "version": snapshot.version if snapshot is not None else None,
+            "updated_at": snapshot.updated_at if snapshot is not None else None,
         }
     )
 

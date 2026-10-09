@@ -1,0 +1,261 @@
+# ruff: noqa: S101, PT027
+"""Tests for Elke27 entities against elke27 0.3.8 snapshot types."""
+
+from __future__ import annotations
+
+import dataclasses
+import importlib.util
+from pathlib import Path
+import sys
+from types import MappingProxyType
+from typing import Any
+import unittest
+from unittest.mock import AsyncMock, MagicMock
+
+_HAS_DEPS = all(
+    importlib.util.find_spec(name) is not None
+    for name in ("homeassistant", "elke27_lib")
+)
+
+if _HAS_DEPS:
+    sys.path.insert(0, str(Path(__file__).parents[1]))
+
+    from elke27_lib import (
+        AreaState,
+        ArmMode,
+        LightState,
+        PanelInfo,
+        PanelSnapshot,
+        ZoneDefinition,
+        ZoneState,
+    )
+
+    from custom_components.elke27.alarm_control_panel import (
+        Elke27AreaAlarmControlPanel,
+        _area_state_to_ha,
+    )
+    from custom_components.elke27.binary_sensor import Elke27ZoneBinarySensor
+    from custom_components.elke27.entity import get_panel_field
+    from custom_components.elke27.light import Elke27Light
+    from homeassistant.components.alarm_control_panel import (
+        AlarmControlPanelEntityFeature,
+        AlarmControlPanelState,
+    )
+    from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+    from homeassistant.exceptions import HomeAssistantError
+
+
+def _snapshot(**kwargs: Any) -> Any:
+    values = {
+        key: MappingProxyType(value) if isinstance(value, dict) else value
+        for key, value in kwargs.items()
+    }
+    values.setdefault("panel", PanelInfo(mac="00:11:22:33:44:55"))
+    return dataclasses.replace(PanelSnapshot.empty(), **values)
+
+
+def _coordinator(snapshot: Any) -> Any:
+    coordinator = MagicMock()
+    coordinator.data = snapshot
+    return coordinator
+
+
+def _hub() -> Any:
+    hub = MagicMock()
+    hub.panel_name = None
+    hub.is_ready = True
+    hub.async_set_zone_bypass = AsyncMock(return_value=True)
+    hub.async_arm_area = AsyncMock(return_value=True)
+    return hub
+
+
+def _entry() -> Any:
+    entry = MagicMock()
+    entry.data = {"host": "192.0.2.10"}
+    entry.title = "Panel"
+    entry.unique_id = None
+    entry.entry_id = "entry-1"
+    return entry
+
+
+def _two_area_snapshot() -> Any:
+    return _snapshot(
+        areas={
+            1: AreaState(area_id=1, name="House", ready=False),
+            2: AreaState(area_id=2, name="Garage", ready=True),
+        },
+        zones={
+            1: ZoneState(zone_id=1, name="Front Door", area_id=1, open=True),
+            2: ZoneState(zone_id=2, name="Back Door", area_id=1, open=True),
+            3: ZoneState(
+                zone_id=3, name="Bypassed", area_id=1, open=True, bypassed=True
+            ),
+            4: ZoneState(zone_id=4, name="Garage Door", area_id=2, open=True),
+            5: ZoneState(zone_id=5, name="No Area", area_id=None, open=True),
+            6: ZoneState(zone_id=6, name="Closed", area_id=1, open=False),
+        },
+        zone_definitions={
+            2: ZoneDefinition(zone_id=2, name="Rear Door", definition="BURG EE DELAY"),
+        },
+    )
+
+
+def _area_entity(snapshot: Any, hub: Any, area_id: int = 1) -> Any:
+    return Elke27AreaAlarmControlPanel(
+        _coordinator(snapshot), hub, _entry(), area_id, snapshot.areas[area_id]
+    )
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
+    """Test the area alarm control panel."""
+
+    async def test_custom_bypass_only_bypasses_zones_in_area(self) -> None:
+        """Only open, non-bypassed zones in this area are bypassed, then arm away."""
+        hub = _hub()
+        entity = _area_entity(_two_area_snapshot(), hub)
+        await entity.async_alarm_arm_custom_bypass("0123")
+        bypassed = [call.args[0] for call in hub.async_set_zone_bypass.await_args_list]
+        assert bypassed == [1, 2]
+        for call in hub.async_set_zone_bypass.await_args_list:
+            assert call.kwargs == {"bypassed": True, "pin": "0123"}
+        hub.async_arm_area.assert_awaited_once_with(1, ArmMode.ARMED_AWAY, "0123")
+
+    async def test_custom_bypass_failure_stops_arming(self) -> None:
+        """An unacknowledged bypass raises and the area is not armed."""
+        hub = _hub()
+        hub.async_set_zone_bypass.return_value = False
+        entity = _area_entity(_two_area_snapshot(), hub)
+        with self.assertRaises(HomeAssistantError):
+            await entity.async_alarm_arm_custom_bypass("1234")
+        assert hub.async_set_zone_bypass.await_count == 1
+        hub.async_arm_area.assert_not_called()
+
+    async def test_arm_night_supported(self) -> None:
+        """Arm night is advertised and sent as ARMED_NIGHT."""
+        hub = _hub()
+        entity = _area_entity(_two_area_snapshot(), hub)
+        assert entity.supported_features & AlarmControlPanelEntityFeature.ARM_NIGHT
+        await entity.async_alarm_arm_night("1234")
+        hub.async_arm_area.assert_awaited_once_with(1, ArmMode.ARMED_NIGHT, "1234")
+
+    def test_attributes_are_area_scoped(self) -> None:
+        """Attributes list only this area's faulted zones and drop dead fields."""
+        entity = _area_entity(_two_area_snapshot(), _hub())
+        assert entity.extra_state_attributes == {
+            "ready": False,
+            "faulted_zone_ids": [1, 2],
+            "faulted_zones": ["Front Door", "Rear Door"],
+        }
+        garage = _area_entity(_two_area_snapshot(), _hub(), area_id=2)
+        assert garage.extra_state_attributes["faulted_zone_ids"] == [4]
+
+    def test_state_mapping(self) -> None:
+        """Arm modes map to Home Assistant alarm states."""
+        cases = {
+            None: AlarmControlPanelState.DISARMED,
+            ArmMode.DISARMED: AlarmControlPanelState.DISARMED,
+            ArmMode.ARMED_STAY: AlarmControlPanelState.ARMED_HOME,
+            ArmMode.ARMED_NIGHT: AlarmControlPanelState.ARMED_NIGHT,
+            ArmMode.ARMED_AWAY: AlarmControlPanelState.ARMED_AWAY,
+        }
+        for mode, expected in cases.items():
+            assert _area_state_to_ha(AreaState(area_id=1, arm_mode=mode)) is expected
+        triggered = AreaState(area_id=1, arm_mode=ArmMode.ARMED_AWAY, alarm_active=True)
+        assert _area_state_to_ha(triggered) is AlarmControlPanelState.TRIGGERED
+
+    def test_missing_area(self) -> None:
+        """A missing area makes the entity unavailable with no state."""
+        snapshot = _two_area_snapshot()
+        entity = _area_entity(snapshot, _hub())
+        entity.coordinator.data = dataclasses.replace(
+            snapshot, areas=MappingProxyType({})
+        )
+        assert entity.alarm_state is None
+        assert not entity.available
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class LightEntityTest(unittest.TestCase):
+    """Test the light entity."""
+
+    def _light(self, light: Any) -> Any:
+        snapshot = _snapshot(lights={light.light_id: light})
+        return Elke27Light(
+            _coordinator(snapshot), _hub(), _entry(), light.light_id, light
+        )
+
+    def test_is_on_uses_state(self) -> None:
+        """is_on follows LightState.state, even without a level."""
+        assert self._light(LightState(light_id=1, state=True)).is_on is True
+        assert self._light(LightState(light_id=1, state=False, level=50)).is_on is False
+
+    def test_is_on_falls_back_to_level(self) -> None:
+        """Without a state, a non-zero level means on."""
+        assert self._light(LightState(light_id=1, level=30)).is_on is True
+        assert self._light(LightState(light_id=1, level=0)).is_on is False
+        assert self._light(LightState(light_id=1)).is_on is None
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class ZoneEntityTest(unittest.TestCase):
+    """Test the zone binary sensor."""
+
+    def test_definition_and_device_class_from_zone_definition(self) -> None:
+        """Definition, name and device class come from ZoneDefinition."""
+        zone = ZoneState(zone_id=7, name="Raw", open=True, trouble=False)
+        definition = ZoneDefinition(
+            zone_id=7,
+            name="Kitchen Window",
+            definition="BURG PERIM INST",
+            zone_type="Window",
+        )
+        snapshot = _snapshot(zones={7: zone}, zone_definitions={7: definition})
+        entity = Elke27ZoneBinarySensor(
+            _coordinator(snapshot), _hub(), _entry(), 7, zone, definition
+        )
+        assert entity.name == "Kitchen Window"
+        assert entity.device_class is BinarySensorDeviceClass.WINDOW
+        assert entity.is_on is True
+        assert entity.icon == "mdi:window-open"
+        assert entity.extra_state_attributes == {
+            "definition": "BURG PERIM INST",
+            "bypassed": None,
+            "trouble": False,
+        }
+
+    def test_no_zone_definition(self) -> None:
+        """Without a ZoneDefinition, fall back to the zone name and opening class."""
+        zone = ZoneState(zone_id=8, name="Hall", open=False)
+        snapshot = _snapshot(zones={8: zone})
+        entity = Elke27ZoneBinarySensor(
+            _coordinator(snapshot), _hub(), _entry(), 8, zone, None
+        )
+        assert entity.name == "Hall"
+        assert entity.device_class is BinarySensorDeviceClass.OPENING
+        assert entity.icon is None
+        assert entity.is_on is False
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class PanelFieldTest(unittest.TestCase):
+    """Test panel field lookup from the typed snapshot."""
+
+    def test_panel_fields(self) -> None:
+        """Fields come from snapshot.panel; a hub name overrides the name."""
+        snapshot = _snapshot(
+            panel=PanelInfo(
+                mac="aa:bb", serial="S1", model="E27", firmware="1.2", panel_name="Main"
+            )
+        )
+        assert get_panel_field(snapshot, None, "name") == "Main"
+        assert get_panel_field(snapshot, "Override", "name") == "Override"
+        assert get_panel_field(snapshot, None, "mac") == "aa:bb"
+        assert get_panel_field(snapshot, None, "serial") == "S1"
+        assert get_panel_field(snapshot, None, "model") == "E27"
+        assert get_panel_field(snapshot, None, "firmware") == "1.2"
+        assert get_panel_field(None, None, "mac") is None
+
+
+if __name__ == "__main__":
+    unittest.main()

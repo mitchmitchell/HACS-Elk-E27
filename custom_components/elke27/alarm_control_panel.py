@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 import logging
 from typing import TYPE_CHECKING, Any
 
-from elke27_lib import ArmMode
+from elke27_lib import AreaState, ArmMode, PanelSnapshot, ZoneState
 from elke27_lib.errors import Elke27PinRequiredError
 
 from homeassistant.components.alarm_control_panel import (
@@ -22,6 +21,8 @@ from .coordinator import Elke27DataUpdateCoordinator
 from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -56,14 +57,10 @@ async def async_setup_entry(
             _LOGGER.debug("Area entities skipped because snapshot is unavailable")
             return
         entities: list[Elke27AreaAlarmControlPanel] = []
-        areas = list(_iter_areas(snapshot))
-        if not areas:
+        if not snapshot.areas:
             _LOGGER.debug("No areas available for entity creation")
             return
-        for area in areas:
-            area_id = getattr(area, "area_id", None)
-            if not isinstance(area_id, int):
-                continue
+        for area_id, area in snapshot.areas.items():
             if area_id in known_ids:
                 continue
             known_ids.add(area_id)
@@ -89,6 +86,7 @@ class Elke27AreaAlarmControlPanel(
     _attr_supported_features = (
         AlarmControlPanelEntityFeature.ARM_AWAY
         | AlarmControlPanelEntityFeature.ARM_HOME
+        | AlarmControlPanelEntityFeature.ARM_NIGHT
         | AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
     )
 
@@ -98,16 +96,14 @@ class Elke27AreaAlarmControlPanel(
         hub: Elke27Hub,
         entry: ConfigEntry,
         area_id: int,
-        area: Any,
+        area: AreaState,
     ) -> None:
         """Initialize the area entity."""
         super().__init__(coordinator)
         self._hub = hub
         self._entry = entry
         self._area_id = area_id
-        self._attr_name = (
-            sanitize_name(getattr(area, "name", None)) or f"Area {area_id}"
-        )
+        self._attr_name = sanitize_name(area.name) or f"Area {area_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "area",
@@ -132,25 +128,17 @@ class Elke27AreaAlarmControlPanel(
         if area is None:
             return {
                 "ready": None,
-                "ready_status": None,
-                "ready_status_display": None,
-                "trouble": None,
                 "faulted_zone_ids": None,
                 "faulted_zones": None,
             }
-        faulted_zones = _faulted_zones(self.coordinator.data)
-        ready_status_display = (
-            _ready_status_display(area)
-            if self.alarm_state == AlarmControlPanelState.DISARMED
-            else None
-        )
+        faulted_zones = _area_faulted_zones(self.coordinator.data, self._area_id)
+        definitions = self.coordinator.data.zone_definitions
         return {
-            "ready": getattr(area, "ready", None),
-            "ready_status": _ready_status_value(area),
-            "ready_status_display": ready_status_display,
-            "trouble": getattr(area, "trouble", None),
-            "faulted_zone_ids": [zone_id for zone_id, _ in faulted_zones],
-            "faulted_zones": [name for _, name in faulted_zones],
+            "ready": area.ready,
+            "faulted_zone_ids": [zone.zone_id for zone in faulted_zones],
+            "faulted_zones": [
+                _zone_display_name(zone, definitions) for zone in faulted_zones
+            ],
         }
 
     @property
@@ -176,12 +164,17 @@ class Elke27AreaAlarmControlPanel(
     async def async_alarm_arm_custom_bypass(self, code: str | None = None) -> None:
         """Arm the area with a custom bypass."""
         code = _normalize_code(code)
-        for zone_id, _ in _faulted_zones(self.coordinator.data):
+        for zone in _area_faulted_zones(self.coordinator.data, self._area_id):
             try:
-                await self._hub.async_set_zone_bypass(zone_id, bypassed=True, pin=code)
+                bypassed = await self._hub.async_set_zone_bypass(
+                    zone.zone_id, bypassed=True, pin=code
+                )
             except Elke27PinRequiredError as err:
                 msg = "PIN required to perform this action."
                 raise HomeAssistantError(msg) from err
+            if not bypassed:
+                msg = f"Zone {zone.zone_id} bypass was not acknowledged."
+                raise HomeAssistantError(msg)
         await self._async_arm(ArmMode.ARMED_AWAY, code)
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
@@ -210,121 +203,40 @@ class Elke27AreaAlarmControlPanel(
         _LOGGER.debug("Area %s missing from snapshot", self._area_id)
 
 
-def _iter_areas(snapshot: Any) -> Iterable[Any]:
-    areas = getattr(snapshot, "areas", None)
-    if areas is None:
-        return []
-    if isinstance(areas, Mapping):
-        return list(areas.values())
-    if isinstance(areas, list | tuple):
-        return areas
-    return []
-
-
-def _get_area(snapshot: Any, area_id: int) -> Any | None:
-    for area in _iter_areas(snapshot):
-        if getattr(area, "area_id", None) == area_id:
-            return area
-    return None
-
-
-def _area_state_to_ha(area: Any) -> AlarmControlPanelState:
-    if getattr(area, "alarm_active", False):
-        return AlarmControlPanelState.TRIGGERED
-    arm_mode = getattr(area, "arm_mode", None)
-    if arm_mode is None:
-        return AlarmControlPanelState.DISARMED
-    if isinstance(arm_mode, ArmMode):
-        custom_mode = _custom_bypass_mode()
-        if arm_mode is custom_mode:
-            return AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-        if arm_mode is ArmMode.DISARMED:
-            return AlarmControlPanelState.DISARMED
-        if arm_mode is ArmMode.ARMED_STAY:
-            return AlarmControlPanelState.ARMED_HOME
-        if arm_mode is ArmMode.ARMED_NIGHT:
-            return AlarmControlPanelState.ARMED_NIGHT
-        if arm_mode is ArmMode.ARMED_AWAY:
-            return AlarmControlPanelState.ARMED_AWAY
-    mode_value = str(arm_mode).lower()
-    if mode_value in {"disarmed", "disarm"}:
-        return AlarmControlPanelState.DISARMED
-    if "stay" in mode_value:
-        return AlarmControlPanelState.ARMED_HOME
-    if "night" in mode_value:
-        return AlarmControlPanelState.ARMED_NIGHT
-    if "away" in mode_value:
-        return AlarmControlPanelState.ARMED_AWAY
-    if "bypass" in mode_value:
-        return AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-    return AlarmControlPanelState.ARMED_AWAY
-
-
-def _custom_bypass_mode() -> ArmMode | str:
-    return getattr(ArmMode, "ARMED_CUSTOM_BYPASS", "ARMED_CUSTOM_BYPASS")
-
-
-def _ready_status_value(area: Any) -> str | None:
-    ready_status = getattr(area, "ready_status", None)
-    if ready_status is None and isinstance(area, Mapping):
-        ready_status = area.get("ready_status")
-    return str(ready_status) if isinstance(ready_status, str) else None
-
-
-def _ready_status_display(area: Any) -> str | None:
-    ready_status = _ready_status_value(area)
-    if ready_status is None:
+def _get_area(snapshot: PanelSnapshot | None, area_id: int) -> AreaState | None:
+    if snapshot is None:
         return None
-    status = ready_status.upper()
-    if status == "RDY_AWAY":
-        return "Ready away"
-    if status == "RDY_STAY":
-        return "Ready stay"
-    if status == "RDY_NOT":
-        return "Not ready"
+    return snapshot.areas.get(area_id)
+
+
+def _area_state_to_ha(area: AreaState) -> AlarmControlPanelState | None:
+    if area.alarm_active:
+        return AlarmControlPanelState.TRIGGERED
+    if area.arm_mode is None or area.arm_mode is ArmMode.DISARMED:
+        return AlarmControlPanelState.DISARMED
+    if area.arm_mode is ArmMode.ARMED_STAY:
+        return AlarmControlPanelState.ARMED_HOME
+    if area.arm_mode is ArmMode.ARMED_NIGHT:
+        return AlarmControlPanelState.ARMED_NIGHT
+    if area.arm_mode is ArmMode.ARMED_AWAY:
+        return AlarmControlPanelState.ARMED_AWAY
     return None
 
 
-def _faulted_zones(snapshot: Any) -> list[tuple[int, str]]:
-    zones = getattr(snapshot, "zones", None) if snapshot is not None else None
-    if zones is None:
+def _area_faulted_zones(
+    snapshot: PanelSnapshot | None, area_id: int
+) -> list[ZoneState]:
+    """Return open, non-bypassed zones assigned to the given area."""
+    if snapshot is None:
         return []
-    if isinstance(zones, Mapping):
-        zone_values = list(zones.values())
-    elif isinstance(zones, list | tuple):
-        zone_values = list(zones)
-    else:
-        return []
-    definitions = getattr(snapshot, "zone_definitions", None)
-    results: list[tuple[int, str]] = []
-    for zone in zone_values:
-        zone_id = getattr(zone, "zone_id", None)
-        if not isinstance(zone_id, int):
-            continue
-        is_open = getattr(zone, "open", None)
-        if not isinstance(is_open, bool) or not is_open:
-            continue
-        bypassed = getattr(zone, "bypassed", None)
-        if isinstance(bypassed, bool) and bypassed:
-            continue
-        name = _zone_display_name(zone, definitions)
-        results.append((zone_id, name))
-    return results
+    return [zone for zone in snapshot.faulted_zones if zone.area_id == area_id]
 
 
-def _zone_display_name(zone: Any, definitions: Any | None) -> str:
-    zone_id = getattr(zone, "zone_id", None)
-    if isinstance(definitions, Mapping) and isinstance(zone_id, int):
-        entry = definitions.get(zone_id)
-        name = getattr(entry, "name", None)
-        if name:
-            return sanitize_name(name) or f"Zone {zone_id}"
-    name = sanitize_name(getattr(zone, "name", None))
-    if name:
-        return name
-    if isinstance(zone_id, int):
-        return f"Zone {zone_id}"
-    return "Zone"
+def _zone_display_name(zone: ZoneState, definitions: Mapping[int, Any]) -> str:
+    definition = definitions.get(zone.zone_id)
+    if definition is not None and definition.name:
+        return sanitize_name(definition.name) or f"Zone {zone.zone_id}"
+    return sanitize_name(zone.name) or f"Zone {zone.zone_id}"
 
 
 def _normalize_code(code: str | None) -> str | None:

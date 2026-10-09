@@ -311,12 +311,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors=errors,
                 )
 
-            snapshot = client.snapshot
-            panel_info = _snapshot_to_dict(
-                getattr(snapshot, "panel_info", None)
-                or getattr(snapshot, "panel", None)
-            )
-            table_info = _snapshot_to_dict(getattr(snapshot, "table_info", None))
+            snapshot = client.get_snapshot()
+            panel_info = asdict(snapshot.panel)
+            table_info = asdict(snapshot.table_info)
         except InvalidCredentials:
             errors["base"] = "invalid_auth"
         except Elke27AuthError:
@@ -514,18 +511,3 @@ def _panel_label(panel: Any, *, already_configured: bool = False) -> str:
     if already_configured:
         return f"{label} (already configured)"
     return label
-
-
-def _snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
-    """Serialize a snapshot to a dict."""
-    if snapshot is None:
-        return {}
-    if is_dataclass(snapshot) and not isinstance(snapshot, type):
-        return asdict(snapshot)
-    if isinstance(snapshot, dict):
-        return dict(snapshot)
-    return {
-        key: value
-        for key, value in snapshot.__dict__.items()
-        if not key.startswith("_")
-    }

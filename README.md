@@ -46,7 +46,7 @@ or `Zone 12` is used.
 
 | Platform | One entity per | What you can do |
 |---|---|---|
-| Alarm control panel | Area | Arm away, arm home, arm custom bypass and disarm, all with a numeric user code |
+| Alarm control panel | Area | Arm away, arm home, arm night, arm custom bypass and disarm, all with a numeric user code |
 | Binary sensor | Zone (zones defined as `UNDEFINED` are skipped) | See whether the zone is open/violated, bypassed or in trouble |
 | Light | Panel light | Turn on/off and set brightness |
 | Lock | Panel lock | Lock and unlock |
@@ -56,10 +56,11 @@ or `Zone 12` is used.
 
 ### Alarm control panel (areas)
 
-- **Arm away**, **arm home** (the panel's *Stay* mode) and **disarm**. Each one needs your
-  numeric alarm user code, which is entered in the Home Assistant keypad.
-- **Arm custom bypass** bypasses every zone that is currently open and not already bypassed,
-  using the code you enter, and then arms the area in **away** mode.
+- **Arm away**, **arm home** (the panel's *Stay* mode), **arm night** and **disarm**. Each
+  one needs your numeric alarm user code, which is entered in the Home Assistant keypad.
+- **Arm custom bypass** bypasses every zone *in this area* that is currently open and not
+  already bypassed, using the code you enter, and then arms the area in **away** mode. If the
+  panel rejects a bypass, the area is not armed and an error is shown.
 - States reported: `disarmed`, `armed_home`, `armed_away`, `armed_night`,
   `armed_custom_bypass` and `triggered` (alarm active).
 - Extra attributes:
@@ -67,10 +68,7 @@ or `Zone 12` is used.
   | Attribute | Meaning |
   |---|---|
   | `ready` | The panel's ready flag for the area |
-  | `ready_status` | Raw ready status from the panel, such as `RDY_AWAY`, `RDY_STAY` or `RDY_NOT` |
-  | `ready_status_display` | Friendly text (`Ready away`, `Ready stay`, `Not ready`). Only set while disarmed |
-  | `trouble` | The area trouble flag |
-  | `faulted_zone_ids` | IDs of zones that are open and not bypassed |
+  | `faulted_zone_ids` | IDs of zones in this area that are open and not bypassed |
   | `faulted_zones` | Names of those zones |
 
 ### Binary sensors (zones)
@@ -319,8 +317,7 @@ locks, climate and switches also work with this integration's entities.
 
 - **Arming**
   - A numeric user code is always required to arm or disarm.
-  - **Arm night** and **arm vacation** are not offered. A panel that is armed in night mode
-    still shows as `armed_night`.
+  - **Arm vacation** is not offered.
   - **Custom bypass** always arms in away mode after bypassing the open zones.
 - **No code prompt for other devices:** lights, locks, outputs and thermostats are controlled
   without a user code. If your panel demands a code for one of those commands, the action
