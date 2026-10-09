@@ -354,6 +354,10 @@ async def _async_arm_automatic_locked(
     """Bypass, arm and (on a definitive refusal) roll back one area."""
     hub = runtime_data.hub
 
+    async def _gate() -> None:
+        # Pause before every command while a disarm of this area is pending.
+        await hub.async_wait_disarm_clear(area_id)
+
     async def _fail(
         stage: str,
         reason: str,
@@ -365,7 +369,7 @@ async def _async_arm_automatic_locked(
         # Definitive refusal: undo this call's bypasses, one un-bypass per
         # zone, never retried.
         rolled_back, still_bypassed = await hub.async_rollback_bypasses(
-            tuple(bypassed), code
+            tuple(bypassed), code, gate=_gate
         )
         summary = _rollback_summary(rolled_back, still_bypassed)
         _async_report_arm_automatic_failure(
@@ -436,7 +440,7 @@ async def _async_arm_automatic_locked(
         return
     try:
         bypassed = await hub.async_bypass_faulted_zones(
-            area_id, snapshot, code, attempted=attempted
+            area_id, snapshot, code, attempted=attempted, gate=_gate
         )
     except ZoneBypassFailedError as err:
         if is_already_armed_refusal(err):
@@ -448,6 +452,7 @@ async def _async_arm_automatic_locked(
             "bypass", err.reason, zone=err.zone, bypassed=err.bypassed_zones, cause=err
         )
 
+    await _gate()
     arm_sent.append(True)
     try:
         sent = await hub.async_arm_area(

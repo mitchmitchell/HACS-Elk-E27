@@ -182,16 +182,29 @@ class Elke27AreaAlarmControlPanel(
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Disarm the area."""
+        # Validate the code first: an invalid or missing code changes nothing
+        # and never touches automatic arming.
         code = _normalize_code(code)
-        # Disarm wins: it does not wait on the area lock. Any automatic arming
-        # in flight (or queued) for this area is cancelled first and sends no
-        # more commands; then the disarm is sent straight away.
-        self._hub.cancel_arm_automatic(self._area_id)
-        try:
-            await self._hub.async_disarm_area(self._area_id, code)
-        except Elke27PinRequiredError as err:
+        if code is None:
             msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+            raise HomeAssistantError(msg)
+        # Disarm wins without waiting on the area lock. While the disarm is
+        # pending, automatic arming of this area pauses before its next
+        # command, so it cannot send an arm (or bypass) that lands after the
+        # disarm. Only an accepted disarm cancels it; a refused one lets it
+        # carry on.
+        hub = self._hub
+        hub.begin_disarm(self._area_id)
+        try:
+            try:
+                accepted = await hub.async_disarm_area(self._area_id, code)
+            except Elke27PinRequiredError as err:
+                msg = "PIN required to perform this action."
+                raise HomeAssistantError(msg) from err
+            if accepted:
+                hub.cancel_arm_automatic(self._area_id)
+        finally:
+            hub.end_disarm(self._area_id)
 
     async def _async_arm(self, mode: ArmMode, code: str | None) -> None:
         """Arm the area; the caller holds the area lock."""

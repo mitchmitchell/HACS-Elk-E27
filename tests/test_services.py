@@ -953,6 +953,112 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         assert held == [True]
         hub.async_arm_area.assert_awaited_once()
 
+    async def test_disarm_with_bad_code_does_not_cancel(self) -> None:
+        """An invalid or missing code is rejected before anything is cancelled."""
+        snapshot = _two_area_snapshot()
+        runtime = _alarm_runtime(snapshot)
+        hub = runtime.hub
+        task = asyncio.create_task(asyncio.sleep(10))
+        hub.register_arm_automatic(1, task)
+        entity = _area_entity(snapshot, hub)
+        for bad in ("12a4", None):
+            with self.assertRaises(HomeAssistantError):
+                await entity.async_alarm_disarm(bad)
+        hub.async_disarm_area.assert_not_called()
+        assert not task.cancelled()
+        await hub.async_wait_disarm_clear(1)  # no disarm left pending
+        task.cancel()
+        hub.unregister_arm_automatic(1, task)
+
+    async def test_disarm_refused_by_panel_lets_automatic_continue(self) -> None:
+        """A refused disarm (wrong code) cancels nothing; arming carries on."""
+        hass = MagicMock()
+        snapshot = _two_area_snapshot()
+        runtime = _alarm_runtime(snapshot)
+        hub = runtime.hub
+        order: list[str] = []
+        first_bypass_sent = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _bypass(zone_id: int, **_kwargs: Any) -> bool:
+            order.append(f"bypass{zone_id}")
+            first_bypass_sent.set()
+            await release.wait()
+            return True
+
+        async def _disarm(*_args: Any, **_kwargs: Any) -> bool:
+            order.append("disarm")
+            release.set()  # the bypass reply arrives while the disarm is out
+            for _ in range(5):
+                await asyncio.sleep(0)
+            # Paused: no further automatic command while the disarm is pending.
+            assert order == ["bypass1", "disarm"]
+            refusal = "Panel rejected the request: invalid user code (error 11004)."
+            raise HomeAssistantError(refusal)
+
+        hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
+        hub.async_disarm_area = AsyncMock(side_effect=_disarm)
+        entity = _area_entity(snapshot, hub)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        automatic = asyncio.create_task(
+            self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        )
+        await first_bypass_sent.wait()
+        with self.assertRaises(HomeAssistantError):
+            await entity.async_alarm_disarm("9999")
+        await automatic  # not cancelled: it finishes and arms
+        assert order == ["bypass1", "disarm", "bypass2"]
+        hub.async_arm_area.assert_awaited_once()
+        hass.bus.async_fire.assert_not_called()
+
+    async def test_disarm_while_arm_in_flight_ends_disarmed(self) -> None:
+        """Arm already sent: the disarm goes after it, and nothing re-arms."""
+        hass = MagicMock()
+        snapshot = _two_area_snapshot()
+        runtime = _alarm_runtime(snapshot)
+        hub = runtime.hub
+        panel: list[str] = []  # commands in the order the panel receives them
+        arm_sent = asyncio.Event()
+        arm_reply = asyncio.Event()
+
+        async def _bypass(zone_id: int, **kwargs: Any) -> bool:
+            panel.append(f"bypass{zone_id}:{kwargs['bypassed']}")
+            return True
+
+        async def _arm(*_args: Any, **_kwargs: Any) -> bool:
+            panel.append("arm")
+            arm_sent.set()
+            await arm_reply.wait()
+            return True
+
+        async def _disarm(*_args: Any, **_kwargs: Any) -> bool:
+            panel.append("disarm")
+            arm_reply.set()
+            return True
+
+        hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
+        hub.async_arm_area = AsyncMock(side_effect=_arm)
+        hub.async_disarm_area = AsyncMock(side_effect=_disarm)
+        entity = _area_entity(snapshot, hub)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with patch.object(integration.persistent_notification, "async_create"):
+            automatic = asyncio.create_task(
+                self._run(hass, {"mode": "away", "code": "1234"}, entities)
+            )
+            await arm_sent.wait()
+            await asyncio.wait_for(entity.async_alarm_disarm("1234"), timeout=1)
+            with self.assertRaises(HomeAssistantError):
+                await automatic
+        # The disarm is the last command: no re-arm, no rollback after it.
+        assert panel == ["bypass1:True", "bypass2:True", "arm", "disarm"]
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["stage"] == "cancelled"
+        assert data["rolled_back_zone_ids"] == []
+
     async def test_pin_required_during_bypass_is_reported(self) -> None:
         """Elke27PinRequiredError from a bypass goes through failure reporting."""
         hass = MagicMock()

@@ -278,8 +278,8 @@ Zones are named with their number, for example *Perimeter (zone 16)*.
 
 Calls for the **same area** run one at a time: a second call waits until the first has
 finished bypassing, arming and any rollback. Before acting, each call asks the panel for
-the area's arm state and the zones' bypass state (one request each, never retried; if that
-fails it uses the integration's latest copy). If the area is **already armed** (in any
+the area's arm state and the zones' bypass state and uses the panel's answers directly (one
+request each, never retried; if one fails, that part uses the integration's latest copy). If the area is **already armed** (in any
 mode), the call does nothing and succeeds: no bypass, no arm, no rollback. Zones that are
 already bypassed are skipped, and only zones bypassed by this call are ever rolled back. If
 the panel refuses a bypass or the arm because the area is already armed (error 11028), the
@@ -288,14 +288,19 @@ notification or event); otherwise the result is reported as unknown. Nothing is 
 in either case. Arm away, arm home, arm custom bypass and `elke27.zone_bypass` (for zones with a
 known area) share the same per-area lock, so a rollback can't race a manual change.
 
-**A disarm always wins.** Disarming an area does not wait for the lock. It first cancels any
-`elke27.alarm_arm_automatic` call for that area, running or still queued, and then sends the
-disarm straight away. The cancelled call sends nothing more: no further bypasses, no arm and
-no rollback. It reports `stage: cancelled` (`outcome: not_armed`) with the zones it had
-bypassed, or was bypassing, when it was stopped. Disarming an **armed** area clears its
-bypasses on the panel; if the area never armed, those zones may still be bypassed, so check
-them and clear any that are with `elke27.zone_bypass` and `bypass: false`. If the arm had
-already been sent, the disarm that follows makes it moot. Nothing is retried.
+**A disarm always wins.** Disarming an area does not wait for the lock. The code is checked
+first; a missing or non-numeric code is rejected and changes nothing. While the disarm is
+being sent, any `elke27.alarm_arm_automatic` call for that area (running or still queued)
+**pauses before its next command**, so it cannot send a bypass or an arm that lands after the
+disarm. If the panel **accepts** the disarm, the paused call is cancelled and sends nothing
+more: no further bypasses, no arm and no rollback. It reports `stage: cancelled`
+(`outcome: not_armed`) with the zones it had bypassed, or was bypassing. If the panel
+**refuses** the disarm (for example a wrong code), nothing is cancelled and automatic arming
+carries on. A command the call had already sent before the disarm (a bypass, or the arm
+itself) still reaches the panel first, so the disarm comes after it and the area ends
+disarmed. Disarming an **armed** area clears its bypasses on the panel; if the area never
+armed, the zones listed may still be bypassed, so clear any that are with
+`elke27.zone_bypass` and `bypass: false`. Nothing is retried.
 
 In each case Home Assistant raises an error, creates a persistent notification for that
 area, and fires an [`elke27_arm_automatic_failed`](#elke27_arm_automatic_failed-event)

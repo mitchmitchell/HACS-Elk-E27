@@ -119,7 +119,7 @@
   "services": {
     "alarm_arm_automatic": {
       "name": "Arm automatic",
-      "description": "Arms Elk E27 areas from automations, such as geofence- or occupancy-based arming when everyone leaves. Open (faulted) zones in each targeted area are bypassed before arming; zones in other areas are not changed. It cancels auto-stay and the exit delay so the area arms immediately. Refusals are never retried; if a bypass or the arm is refused, the area is not armed and the bypasses it made are undone. If the arm result is unknown (for example a timeout), the bypasses are left in place and you are told to check the panel. An area that is already armed is left unchanged. Disarming the area cancels a running call at once; it sends nothing more and does not roll back.",
+      "description": "Arms Elk E27 areas from automations, such as geofence- or occupancy-based arming when everyone leaves. Open (faulted) zones in each targeted area are bypassed before arming; zones in other areas are not changed. It cancels auto-stay and the exit delay so the area arms immediately. Refusals are never retried; if a bypass or the arm is refused, the area is not armed and the bypasses it made are undone. If the arm result is unknown (for example a timeout), the bypasses are left in place and you are told to check the panel. An area that is already armed is left unchanged. A pending disarm of the area pauses a running call before its next command; if the panel accepts the disarm, the call is cancelled, sends nothing more and does not roll back.",
       "fields": {
         "mode": {
           "name": "Arming mode",
