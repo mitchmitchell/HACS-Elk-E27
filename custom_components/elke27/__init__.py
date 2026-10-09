@@ -21,6 +21,7 @@ from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
+    HomeAssistantError,
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv, entity_registry as er
@@ -55,6 +56,16 @@ SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA = cv.make_entity_service_schema(
     }
 )
 
+SERVICE_ZONE_BYPASS = "zone_bypass"
+ATTR_BYPASS = "bypass"
+
+SERVICE_ZONE_BYPASS_SCHEMA = cv.make_entity_service_schema(
+    {
+        vol.Required(ATTR_CODE): cv.string,
+        vol.Optional(ATTR_BYPASS, default=True): cv.boolean,
+    }
+)
+
 PLATFORMS: list[Platform] = [
     Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
@@ -78,6 +89,17 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
             SERVICE_ALARM_ARM_AUTOMATIC,
             _handle_alarm_arm_automatic,
             schema=SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA,
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_ZONE_BYPASS):
+
+        async def _handle_zone_bypass(call: ServiceCall) -> None:
+            await _async_handle_zone_bypass(hass, call)
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_ZONE_BYPASS,
+            _handle_zone_bypass,
+            schema=SERVICE_ZONE_BYPASS_SCHEMA,
         )
     return True
 
@@ -218,13 +240,29 @@ async def _async_arm_automatic_entity(
     code: str,
 ) -> None:
     """Handle the automatic arming service for one entity."""
+    entity_entry, runtime_data = _entity_runtime_data(
+        hass, entity_id, Platform.ALARM_CONTROL_PANEL, "alarm control panel"
+    )
+    await runtime_data.hub.async_arm_area(
+        _area_id_from_unique_id(entity_entry.unique_id),
+        _service_mode_to_arm_mode(mode_name),
+        code,
+        auto_stay_cancel=True,
+        exit_delay_cancel=True,
+    )
+
+
+def _entity_runtime_data(
+    hass: HomeAssistant, entity_id: str, platform: Platform, label: str
+) -> tuple[er.RegistryEntry, Elke27RuntimeData]:
+    """Return the registry entry and loaded runtime data for an Elke27 entity."""
     entity_entry = er.async_get(hass).async_get(entity_id)
     if (
         entity_entry is None
         or entity_entry.platform != DOMAIN
-        or entity_entry.domain != Platform.ALARM_CONTROL_PANEL
+        or entity_entry.domain != platform
     ):
-        msg = f"Entity {entity_id} is not an Elke27 alarm control panel"
+        msg = f"Entity {entity_id} is not an Elke27 {label}"
         raise ServiceValidationError(msg)
 
     config_entry = hass.config_entries.async_get_entry(entity_entry.config_entry_id)
@@ -239,14 +277,30 @@ async def _async_arm_automatic_entity(
     if runtime_data is None:
         msg = f"Runtime data for {entity_id} is unavailable"
         raise ServiceValidationError(msg)
+    return entity_entry, runtime_data
 
-    await runtime_data.hub.async_arm_area(
-        _area_id_from_unique_id(entity_entry.unique_id),
-        _service_mode_to_arm_mode(mode_name),
-        code,
-        auto_stay_cancel=True,
-        exit_delay_cancel=True,
-    )
+
+async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Bypass or un-bypass the targeted Elke27 zones."""
+    code = call.data[ATTR_CODE]
+    bypass = call.data[ATTR_BYPASS]
+
+    entity_ids = _entity_ids_from_service_call(hass, call)
+    if not entity_ids:
+        msg = "No Elke27 zone target was provided"
+        raise ServiceValidationError(msg)
+
+    for entity_id in entity_ids:
+        entity_entry, runtime_data = _entity_runtime_data(
+            hass, entity_id, Platform.BINARY_SENSOR, "zone"
+        )
+        zone_id = _numeric_id_from_unique_id(entity_entry.unique_id, "zone")
+        acknowledged = await runtime_data.hub.async_set_zone_bypass(
+            zone_id, bypassed=bypass, pin=code
+        )
+        if not acknowledged:
+            msg = f"Zone {zone_id} bypass was not acknowledged; is the panel connected?"
+            raise HomeAssistantError(msg)
 
 
 def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:
@@ -261,13 +315,18 @@ def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:
 
 def _area_id_from_unique_id(unique_id: str) -> int:
     """Extract an area ID from an Elke27 alarm entity unique ID."""
-    prefix = ":area:"
+    return _numeric_id_from_unique_id(unique_id, "area")
+
+
+def _numeric_id_from_unique_id(unique_id: str, domain: str) -> int:
+    """Extract the numeric ID from an Elke27 ``<base>:<domain>:<id>`` unique ID."""
+    prefix = f":{domain}:"
     if prefix not in unique_id:
-        msg = "Entity unique ID is not a recognized Elke27 area identifier"
+        msg = f"Entity unique ID is not a recognized Elke27 {domain} identifier"
         raise ServiceValidationError(msg)
-    area_id_str = unique_id.rsplit(prefix, 1)[1]
+    id_str = unique_id.rsplit(prefix, 1)[1]
     try:
-        return int(area_id_str)
+        return int(id_str)
     except ValueError as err:
-        msg = f"Invalid Elke27 area ID in unique ID: {unique_id}"
+        msg = f"Invalid Elke27 {domain} ID in unique ID: {unique_id}"
         raise ServiceValidationError(msg) from err

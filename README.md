@@ -46,7 +46,7 @@ or `Zone 12` is used.
 
 | Platform | One entity per | What you can do |
 |---|---|---|
-| Alarm control panel | Area | Arm away, arm home, arm night, arm custom bypass and disarm, all with a numeric user code |
+| Alarm control panel | Area | Arm away, arm home, arm custom bypass and disarm, all with a numeric user code |
 | Binary sensor | Zone (zones defined as `UNDEFINED` are skipped) | See whether the zone is open/violated, bypassed or in trouble |
 | Light | Panel light | Turn on/off and set brightness |
 | Lock | Panel lock | Lock and unlock |
@@ -56,18 +56,27 @@ or `Zone 12` is used.
 
 ### Alarm control panel (areas)
 
-- **Arm away**, **arm home** (the panel's *Stay* mode), **arm night** and **disarm**. Each
-  one needs your numeric alarm user code, which is entered in the Home Assistant keypad.
+- **Arm away**, **arm home** (the panel's *Stay* mode) and **disarm**. Each one needs your
+  numeric alarm user code, which is entered in the Home Assistant keypad. The E27 has no
+  *Night* mode, so arm night is not offered.
 - **Arm custom bypass** bypasses every zone *in this area* that is currently open and not
   already bypassed, using the code you enter, and then arms the area in **away** mode. If the
   panel rejects a bypass, the area is not armed and an error is shown.
-- States reported: `disarmed`, `armed_home`, `armed_away`, `armed_night`,
-  `armed_custom_bypass` and `triggered` (alarm active).
+  - The area then shows `armed_away` while the exit delay runs. If no entry/exit zone opens
+    before the exit delay ends, the panel's auto-stay switches it to Stay and it shows
+    `armed_home`. This is panel behavior.
+  - Disarming the area clears all zone bypasses (panel behavior).
+- When the panel rejects a request, the error says why, for example *invalid user code*,
+  *area not ready (open or faulted zones)* or *area is in alarm; disarm to clear it first*
+  (needs elke27 0.3.10 or later). The reason and panel error code are also logged as a
+  warning.
+- States reported: `disarmed`, `armed_home`, `armed_away` and `triggered` (alarm active).
 - Extra attributes:
 
   | Attribute | Meaning |
   |---|---|
-  | `ready` | The panel's ready flag for the area |
+  | `ready` | The panel's ready flag for the area (needs elke27 0.3.10 or later) |
+  | `ready_status` | The panel's ready status: `RDY_AWAY`, `RDY_STAY` or `RDY_NOT` (needs elke27 0.3.10 or later) |
   | `faulted_zone_ids` | IDs of zones in this area that are open and not bypassed |
   | `faulted_zones` | Names of those zones |
 
@@ -80,12 +89,15 @@ or `Zone 12` is used.
   tamper, fire, CO, panic, medical, automation, power supervision, water, hi/lo temp) and
   changes when the zone opens.
 - Attributes: `definition`, `bypassed`, `trouble`.
+- To bypass a zone, use the [`elke27.zone_bypass`](#elke27zone_bypass) action.
 
 ### Lights
 
 - On/off with brightness. The panel's 0–99 level is mapped to Home Assistant's brightness
   scale.
 - Turning a light on without a brightness value sets it to full (level 99).
+- After a change, the integration asks the panel for the light's status right away and
+  again 3 seconds later, because some (Z-Wave) devices report their new state late.
 
 ### Locks
 
@@ -97,6 +109,8 @@ or `Zone 12` is used.
 - **Fan modes:** Auto, On.
 - **Setpoints:** a heat (low) and cool (high) setpoint, shown as a temperature range.
 - **Units and range:** °F, 40–99 °F. The panel takes whole degrees.
+- **Current humidity** is shown when the thermostat reports it (a reading of 0 is treated as
+  "no humidity sensor").
 
 ### Switches (outputs)
 
@@ -236,14 +250,15 @@ This action only performs the arm.
 | `mode` | yes | `away` or `home` |
 | `code` | yes | Numeric alarm user code |
 
-This is meant for unattended arming. With this request, the panel:
+This is meant for unattended arming. The integration sends the arm request with the panel's
+auto-stay-cancel and exit-delay-cancel flags set, so the panel:
 
-- **bypasses any open (faulted) zones** so the area can arm,
-- **cancels auto-stay**, and
-- **cancels the exit delay**.
+- **cancels auto-stay** (arm away stays away even if no exit is detected), and
+- **cancels the exit delay** (the area arms immediately).
 
-The integration sends the request with the panel's auto-stay-cancel and exit-delay-cancel
-flags set. The zone bypass is done by the panel itself. Use the standard
+It does **not** bypass zones. If a zone in the area is open, the panel rejects the arm
+(*area not ready*). Close the zone first, or bypass it with
+[`elke27.zone_bypass`](#elke27zone_bypass). Use the standard
 `alarm_control_panel.alarm_arm_away` / `alarm_arm_home` actions to arm with the panel's
 normal behaviour.
 
@@ -290,6 +305,30 @@ so not in the UI automation editor.
 The same pattern works with occupancy: trigger when your occupancy sensors have shown no
 presence for a while, and use `mode: home` to arm stay instead.
 
+### `elke27.zone_bypass`
+
+Bypasses one or more zones so they are ignored while the area is armed, or removes the
+bypass.
+
+| Field | Required | Description |
+|---|---|---|
+| `target` | yes | One or more Elk E27 zone binary sensors |
+| `code` | yes | Numeric alarm user code |
+| `bypass` | no | `true` (default) to bypass, `false` to remove the bypass |
+
+```yaml
+action: elke27.zone_bypass
+target:
+  entity_id: binary_sensor.garage_door   # example entity ID
+data:
+  code: !secret elk_alarm_code
+  bypass: true
+```
+
+The zone's `bypassed` attribute shows the result. If the panel refuses (for example the
+zone is not bypassable, or the code is wrong), the action fails with the panel's reason.
+Disarming the area clears all bypasses (panel behavior).
+
 The standard Home Assistant actions for alarm panels (`alarm_control_panel.*`), lights,
 locks, climate and switches also work with this integration's entities.
 
@@ -317,8 +356,11 @@ locks, climate and switches also work with this integration's entities.
 
 - **Arming**
   - A numeric user code is always required to arm or disarm.
-  - **Arm vacation** is not offered.
-  - **Custom bypass** always arms in away mode after bypassing the open zones.
+  - **Arm vacation** is not offered. **Arm night** is not offered because the E27 has no
+    Night mode.
+  - **Custom bypass** always arms in away mode after bypassing the open zones. The panel's
+    auto-stay may then switch it to Stay (`armed_home`) when no exit is detected.
+  - Disarming clears all zone bypasses (panel behavior).
 - **No code prompt for other devices:** lights, locks, outputs and thermostats are controlled
   without a user code. If your panel demands a code for one of those commands, the action
   fails with *"PIN required to perform this action."*

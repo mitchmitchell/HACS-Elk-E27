@@ -119,7 +119,7 @@
   "services": {
     "alarm_arm_automatic": {
       "name": "Arm automatic",
-      "description": "Arms Elk E27 areas from automations, such as geofence- or occupancy-based arming when everyone leaves. The panel bypasses any open (faulted) zones and cancels auto-stay and the exit delay.",
+      "description": "Arms Elk E27 areas from automations, such as geofence- or occupancy-based arming when everyone leaves. It cancels auto-stay and the exit delay. It does not bypass zones: close or bypass any open zones first, or the panel rejects the arm.",
       "fields": {
         "mode": {
           "name": "Arming mode",
@@ -128,6 +128,20 @@
         "code": {
           "name": "Code",
           "description": "Numeric alarm user code used to arm the area."
+        }
+      }
+    },
+    "zone_bypass": {
+      "name": "Bypass zone",
+      "description": "Bypasses Elk E27 zones so they are ignored while the area is armed, or removes the bypass. Disarming the area clears all bypasses.",
+      "fields": {
+        "code": {
+          "name": "Code",
+          "description": "Numeric alarm user code used to bypass the zone."
+        },
+        "bypass": {
+          "name": "Bypass",
+          "description": "Turn on to bypass the zone, off to remove the bypass."
         }
       }
     }
