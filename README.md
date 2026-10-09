@@ -65,7 +65,7 @@ or `Zone 12` is used.
   - The area then shows `armed_away` while the exit delay runs. If no entry/exit zone opens
     before the exit delay ends, the panel's auto-stay switches it to Stay and it shows
     `armed_home`. This is panel behavior.
-  - Disarming the area clears all zone bypasses (panel behavior).
+  - Disarming an armed area clears all zone bypasses (panel behavior). Disarming an area that is already disarmed does not.
 - When the panel rejects a request, the error says why, for example *invalid user code*,
   *area not ready (open or faulted zones)* or *area is in alarm; disarm to clear it first*
   (needs elke27 0.3.10 or later). The reason and panel error code are also logged as a
@@ -254,19 +254,23 @@ This is meant for unattended geofence-style arming. Before arming, the integrati
 every open (faulted), not-yet-bypassed zone in each targeted area using your code. Zones in
 other areas are never changed.
 
-**When something fails.** Panel refusals are never retried, and nothing is rolled back,
-because a rollback is more commands that could fail while nobody is home. Instead, the
-failure is reported straight away, with the area, the zone and the panel's reason:
+**When something fails.** Panel refusals are never retried. The failure is reported straight
+away, with the area, the zone and the panel's reason, and the bypasses this call made in that
+area are undone:
 
 - **A bypass fails** (for example zone A is bypassed, then the panel refuses zone B): the
-  area is **not** armed. Zone A **stays bypassed** until the area is disarmed or you remove
-  the bypass with [`elke27.zone_bypass`](#elke27zone_bypass). The error, the notification and
-  the event name the failed zone, the reason, and the zones already bypassed
-  (`bypassed_zone_ids`).
+  area is **not** armed, and zone A is un-bypassed again.
 - **The arm itself is refused** (for example *area not ready*): the bypasses made for that
-  area stay in place and are listed in the same way.
+  area are undone in the same way.
 - **No user code reached the panel** (*a user code is required*): this is reported the same
   way.
+
+The rollback sends one un-bypass per zone, in reverse order, and never retries it. This
+matters because the panel only clears bypasses when an **armed** area is disarmed;
+disarming an area that never armed leaves them in place. If an un-bypass fails, the error,
+the notification and the event name those zones as still bypassed
+(`still_bypassed_zone_ids`). Clear them with [`elke27.zone_bypass`](#elke27zone_bypass) and
+`bypass: false`. Zones are named with their number, for example *Perimeter (zone 16)*.
 
 In each case Home Assistant raises an error, creates a persistent notification for that
 area, and fires an [`elke27_arm_automatic_failed`](#elke27_arm_automatic_failed-event)
@@ -341,7 +345,9 @@ includes:
 | `stage` | `bypass` (a zone bypass failed, so the area was not armed) or `arm` (the bypasses succeeded but the panel did not arm the area) |
 | `zone_id` | Zone that could not be bypassed (`null` when `stage` is `arm`) |
 | `reason` | Panel or integration reason (the alarm code is never included) |
-| `bypassed_zone_ids` | Zones in this area that were bypassed before the failure. They stay bypassed until the area is disarmed |
+| `bypassed_zone_ids` | Zones in this area that this call bypassed before the failure |
+| `rolled_back_zone_ids` | Of those, the zones whose bypass was undone after the failure |
+| `still_bypassed_zone_ids` | Zones that could not be un-bypassed and are still bypassed. Clear them with `elke27.zone_bypass` and `bypass: false` |
 
 Example automation trigger:
 
@@ -381,7 +387,7 @@ data:
 
 The zone's `bypassed` attribute shows the result. If the panel refuses (for example the
 zone is not bypassable, or the code is wrong), the action fails with the panel's reason.
-Disarming the area clears all bypasses (panel behavior).
+Disarming an armed area clears all bypasses (panel behavior); disarming an area that is already disarmed does not.
 
 The standard Home Assistant actions for alarm panels (`alarm_control_panel.*`), lights,
 locks, climate and switches also work with this integration's entities.
@@ -414,7 +420,7 @@ locks, climate and switches also work with this integration's entities.
     Night mode.
   - **Custom bypass** always arms in away mode after bypassing the open zones. The panel's
     auto-stay may then switch it to Stay (`armed_home`) when no exit is detected.
-  - Disarming clears all zone bypasses (panel behavior).
+  - Disarming an armed area clears all zone bypasses (panel behavior).
 - **No code prompt for other devices:** lights, locks, outputs and thermostats are controlled
   without a user code. If your panel demands a code for one of those commands, the action
   fails with *"PIN required to perform this action."*

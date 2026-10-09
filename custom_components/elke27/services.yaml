@@ -4,7 +4,9 @@ alarm_arm_automatic:
     Arms Elk E27 areas from automations, such as geofence- or occupancy-based
     arming when everyone leaves. Open (faulted) zones in each targeted area are
     bypassed before arming; zones in other areas are not changed. It cancels
-    auto-stay and the exit delay so the area arms immediately.
+    auto-stay and the exit delay so the area arms immediately. Refusals are
+    never retried; if a bypass or the arm fails, the area is not armed and the
+    bypasses it made are undone.
   target:
     entity:
       domain: alarm_control_panel
@@ -30,7 +32,8 @@ zone_bypass:
   name: Bypass zone
   description: >-
     Bypasses Elk E27 zones so they are ignored while the area is armed, or
-    removes the bypass. Disarming the area clears all bypasses.
+    removes the bypass. Disarming an armed area clears all bypasses;
+    disarming an area that is already disarmed does not.
   target:
     entity:
       domain: binary_sensor

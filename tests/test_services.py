@@ -245,13 +245,13 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_partial_bypass_failure_names_bypassed_zones(self) -> None:
-        """Zone A bypasses, zone B fails: no arm, no rollback, A is reported."""
+        """Zone A bypasses, zone B fails: no arm, A is rolled back once."""
         hass = MagicMock()
         runtime = _alarm_runtime(_two_area_snapshot())
         panel_reason = "not authorized (error 11008)"
 
-        async def _bypass(zone_id: int, **_kwargs: Any) -> bool:
-            if zone_id == 2:
+        async def _bypass(zone_id: int, **kwargs: Any) -> bool:
+            if zone_id == 2 and kwargs["bypassed"]:
                 raise HomeAssistantError(panel_reason)
             return True
 
@@ -270,14 +270,15 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         assert str(ctx.exception) == (
-            "Area 1 was not armed: Back Door: not authorized (error 11008)"
-            " (already bypassed: Front Door)"
+            "Area 1 was not armed: Back Door (zone 2): not authorized (error 11008)."
+            " The bypasses made before the failure were undone: Front Door (zone 1)."
         )
         assert isinstance(ctx.exception.__cause__, ZoneBypassFailedError)
-        # No retry of the refusal and no rollback of zone 1.
+        # No retry of the refusal; zone 1 is un-bypassed exactly once.
         assert runtime.hub.async_set_zone_bypass.await_args_list == [
             unittest.mock.call(1, bypassed=True, pin="1234"),
             unittest.mock.call(2, bypassed=True, pin="1234"),
+            unittest.mock.call(1, bypassed=False, pin="1234"),
         ]
         runtime.hub.async_arm_area.assert_not_called()
         create_notification.assert_called_once()
@@ -286,9 +287,12 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         message = create_notification.call_args.kwargs["message"]
         assert "Area 1 (alarm_control_panel.house) was not armed" in message
         assert (
-            "Back Door could not be bypassed: not authorized (error 11008)" in message
+            "Back Door (zone 2) could not be bypassed: not authorized (error 11008)."
+            in message
         )
-        assert "Front Door" in message
+        assert "were undone: Front Door (zone 1)." in message
+        assert ".." not in message
+        assert "until the area is disarmed" not in message
         assert "1234" not in message
         hass.bus.async_fire.assert_called_once_with(
             integration.EVENT_ARM_AUTOMATIC_FAILED,
@@ -299,6 +303,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
                 "zone_id": 2,
                 "reason": panel_reason,
                 "bypassed_zone_ids": [1],
+                "rolled_back_zone_ids": [1],
+                "still_bypassed_zone_ids": [],
             },
         )
 
@@ -348,7 +354,10 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert str(ctx.exception) == f"Area 2 was not armed: {arm_reason}"
+        assert str(ctx.exception) == (
+            f"Area 2 was not armed: {arm_reason}"
+            " The bypasses made before the failure were undone: Garage Door (zone 4)."
+        )
         house.hub.async_arm_area.assert_awaited_once()
         garage.hub.async_arm_area.assert_awaited_once()  # tried once, not retried
         create_notification.assert_called_once()
@@ -369,6 +378,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
                 "zone_id": None,
                 "reason": arm_reason,
                 "bypassed_zone_ids": [4],
+                "rolled_back_zone_ids": [4],
+                "still_bypassed_zone_ids": [],
             },
         )
 
@@ -396,6 +407,81 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         assert "Area 1 was not armed: busy" in str(ctx.exception)
         assert "Area 2 was not armed: nope" in str(ctx.exception)
         assert hass.bus.async_fire.call_count == 2
+
+    async def test_rollback_partial_failure_names_still_bypassed(self) -> None:
+        """An un-bypass that fails is named, with how to clear it, and not retried."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        runtime.hub.async_arm_area = AsyncMock(
+            side_effect=HomeAssistantError("area not ready (error 11015).")
+        )
+
+        async def _bypass(zone_id: int, **kwargs: Any) -> bool:
+            if zone_id == 2 and not kwargs["bypassed"]:
+                refusal = "not authorized (error 11008)"
+                raise HomeAssistantError(refusal)
+            return True
+
+        runtime.hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(
+                integration.persistent_notification, "async_create"
+            ) as create_notification,
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert runtime.hub.async_set_zone_bypass.await_args_list == [
+            unittest.mock.call(1, bypassed=True, pin="1234"),
+            unittest.mock.call(2, bypassed=True, pin="1234"),
+            unittest.mock.call(2, bypassed=False, pin="1234"),
+            unittest.mock.call(1, bypassed=False, pin="1234"),
+        ]
+        runtime.hub.async_arm_area.assert_awaited_once()
+        for text in (
+            str(ctx.exception),
+            create_notification.call_args.kwargs["message"],
+        ):
+            assert "still bypassed: Back Door (zone 2)." in text
+            assert "were undone: Front Door (zone 1)." in text
+            assert "elke27.zone_bypass" in text
+            assert "bypass: false" in text
+            assert ".." not in text
+            assert "1234" not in text
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["stage"] == "arm"
+        assert data["bypassed_zone_ids"] == [1, 2]
+        assert data["rolled_back_zone_ids"] == [1]
+        assert data["still_bypassed_zone_ids"] == [2]
+
+    async def test_arm_failure_rolls_back_each_zone_once(self) -> None:
+        """Arm refused after bypasses: every bypass is undone once, in reverse."""
+        hass = MagicMock()
+        runtime = _alarm_runtime(_two_area_snapshot())
+        runtime.hub.async_arm_area = AsyncMock(
+            side_effect=HomeAssistantError("area not ready (error 11015)")
+        )
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert runtime.hub.async_set_zone_bypass.await_args_list == [
+            unittest.mock.call(1, bypassed=True, pin="1234"),
+            unittest.mock.call(2, bypassed=True, pin="1234"),
+            unittest.mock.call(2, bypassed=False, pin="1234"),
+            unittest.mock.call(1, bypassed=False, pin="1234"),
+        ]
+        runtime.hub.async_arm_area.assert_awaited_once()
+        assert "still bypassed" not in str(ctx.exception)
+        data = hass.bus.async_fire.call_args.args[1]
+        assert data["rolled_back_zone_ids"] == [2, 1]
+        assert data["still_bypassed_zone_ids"] == []
 
     async def test_pin_required_during_bypass_is_reported(self) -> None:
         """Elke27PinRequiredError from a bypass goes through failure reporting."""
@@ -443,7 +529,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert str(ctx.exception) == "Area 1 was not armed: a user code is required"
+        assert str(ctx.exception) == "Area 1 was not armed: a user code is required."
         create_notification.assert_called_once()
         hass.bus.async_fire.assert_called_once_with(
             integration.EVENT_ARM_AUTOMATIC_FAILED,
@@ -454,6 +540,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
                 "zone_id": None,
                 "reason": "a user code is required",
                 "bypassed_zone_ids": [],
+                "rolled_back_zone_ids": [],
+                "still_bypassed_zone_ids": [],
             },
         )
 

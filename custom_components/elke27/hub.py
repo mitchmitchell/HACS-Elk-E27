@@ -276,9 +276,9 @@ class Elke27Hub:
         Bypass open, non-bypassed zones assigned to the given area.
 
         Return the zones that were bypassed. Stop at the first failure without
-        retrying or undoing earlier bypasses (a refusal is reported, never retried);
-        ZoneBypassFailedError names the failed zone, the reason, and the zones
-        already bypassed.
+        retrying it (a refusal is reported, never retried); ZoneBypassFailedError
+        names the failed zone, the reason, and the zones already bypassed. The
+        caller decides whether to roll those back with async_rollback_bypasses.
         """
         bypassed: list[ZoneState] = []
         for zone in area_faulted_zones(snapshot, area_id):
@@ -298,6 +298,33 @@ class Elke27Hub:
                 )
             bypassed.append(zone)
         return bypassed
+
+    async def async_rollback_bypasses(
+        self, zones: list[ZoneState] | tuple[ZoneState, ...], pin: str | None
+    ) -> tuple[list[ZoneState], list[ZoneState]]:
+        """
+        Un-bypass zones this integration just bypassed, in reverse order.
+
+        Each zone is attempted exactly once; a failure is not retried, it is
+        reported. Return (rolled_back, still_bypassed), both in attempt order.
+        """
+        rolled_back: list[ZoneState] = []
+        still_bypassed: list[ZoneState] = []
+        for zone in reversed(tuple(zones)):
+            try:
+                acknowledged = await self.async_set_zone_bypass(
+                    zone.zone_id, bypassed=False, pin=pin
+                )
+            except (Elke27PinRequiredError, HomeAssistantError) as err:
+                _LOGGER.warning(
+                    "Could not undo bypass of zone %s: %s", zone.zone_id, err
+                )
+                acknowledged = False
+            if acknowledged:
+                rolled_back.append(zone)
+            else:
+                still_bypassed.append(zone)
+        return rolled_back, still_bypassed
 
     async def async_set_zone_bypass(
         self, zone_id: int, *, bypassed: bool, pin: str | None = None
@@ -524,10 +551,10 @@ def area_faulted_zones(snapshot: PanelSnapshot | None, area_id: int) -> list[Zon
 
 
 def zone_bypass_label(zone: ZoneState) -> str:
-    """Return a user-facing label for a zone."""
+    """Return a user-facing label for a zone, such as 'Perimeter (zone 16)'."""
     name = (zone.name or "").strip()
     if name:
-        return name
+        return f"{name} (zone {zone.zone_id})"
     return f"Zone {zone.zone_id}"
 
 

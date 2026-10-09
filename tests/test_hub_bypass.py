@@ -77,9 +77,9 @@ class AreaFaultedZonesTest(unittest.TestCase):
         assert area_faulted_zones(None, 1) == []
 
     def test_zone_bypass_label(self) -> None:
-        """Zones are labeled by name when available."""
+        """Zones are labeled by name and zone number."""
         zone = ZoneState(zone_id=9, name="  Porch  ", area_id=1, open=True)
-        assert zone_bypass_label(zone) == "Porch"
+        assert zone_bypass_label(zone) == "Porch (zone 9)"
         unnamed = ZoneState(zone_id=9, name="", area_id=1, open=True)
         assert zone_bypass_label(unnamed) == "Zone 9"
 
@@ -116,11 +116,11 @@ class AsyncBypassFaultedZonesTest(unittest.IsolatedAsyncioTestCase):
             await hub.async_bypass_faulted_zones(1, _two_area_snapshot(), "1234")
         assert ctx.exception.zone.zone_id == 1
         assert ctx.exception.reason == "not authorized (error 11008)"
-        assert str(ctx.exception) == "Front Door: not authorized (error 11008)"
+        assert str(ctx.exception) == "Front Door (zone 1): not authorized (error 11008)"
         assert ctx.exception.bypassed_zones == ()
 
     async def test_partial_failure_names_zones_already_bypassed(self) -> None:
-        """Zone A bypasses, zone B fails: A is reported, not rolled back or retried."""
+        """Zone A bypasses, zone B fails: A is reported; the hub does not retry."""
         hub = _hub()
         refusal = "zone cannot be bypassed (error 11023)"
 
@@ -135,10 +135,10 @@ class AsyncBypassFaultedZonesTest(unittest.IsolatedAsyncioTestCase):
         assert ctx.exception.zone.zone_id == 2
         assert [zone.zone_id for zone in ctx.exception.bypassed_zones] == [1]
         assert str(ctx.exception) == (
-            "Back Door: zone cannot be bypassed (error 11023)"
-            " (already bypassed: Front Door)"
+            "Back Door (zone 2): zone cannot be bypassed (error 11023)"
+            " (already bypassed: Front Door (zone 1))"
         )
-        # One call per zone: no retry of the refusal and no un-bypass of zone 1.
+        # One call per zone: no retry of the refusal (rollback is the caller's job).
         assert hub.async_set_zone_bypass.await_args_list == [
             unittest.mock.call(1, bypassed=True, pin="1234"),
             unittest.mock.call(2, bypassed=True, pin="1234"),
@@ -162,3 +162,43 @@ class AsyncBypassFaultedZonesTest(unittest.IsolatedAsyncioTestCase):
             await hub.async_bypass_faulted_zones(1, _two_area_snapshot(), "1234")
         assert ctx.exception.zone.zone_id == 1
         assert hub.async_set_zone_bypass.await_count == 1
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class AsyncRollbackBypassesTest(unittest.IsolatedAsyncioTestCase):
+    """Test undoing bypasses through the hub."""
+
+    def _zones(self) -> list[ZoneState]:
+        return [
+            ZoneState(zone_id=zone_id, name="Perimeter", area_id=1, open=True)
+            for zone_id in (1, 2, 3)
+        ]
+
+    async def test_rollback_all_ok_reverse_order_once_each(self) -> None:
+        """Each zone is un-bypassed once, last bypassed first."""
+        hub = _hub()
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        rolled_back, still = await hub.async_rollback_bypasses(self._zones(), "1234")
+        assert [zone.zone_id for zone in rolled_back] == [3, 2, 1]
+        assert still == []
+        assert hub.async_set_zone_bypass.await_args_list == [
+            unittest.mock.call(3, bypassed=False, pin="1234"),
+            unittest.mock.call(2, bypassed=False, pin="1234"),
+            unittest.mock.call(1, bypassed=False, pin="1234"),
+        ]
+
+    async def test_rollback_failures_are_not_retried(self) -> None:
+        """A refused or unacknowledged un-bypass is reported, never retried."""
+        hub = _hub()
+
+        async def _unbypass(zone_id: int, **_kwargs: Any) -> bool:
+            if zone_id == 2:
+                refusal = "not authorized (error 11008)"
+                raise HomeAssistantError(refusal)
+            return zone_id != 3
+
+        hub.async_set_zone_bypass = AsyncMock(side_effect=_unbypass)
+        rolled_back, still = await hub.async_rollback_bypasses(self._zones(), "1234")
+        assert [zone.zone_id for zone in rolled_back] == [1]
+        assert [zone.zone_id for zone in still] == [3, 2]
+        assert hub.async_set_zone_bypass.await_count == 3
