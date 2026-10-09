@@ -28,6 +28,7 @@ if _HAS_DEPS:
 
     from elke27_lib import AreaState, ArmMode, ZoneState
     from elke27_lib.errors import (
+        Elke27ConnectionError,
         Elke27PanelError,
         Elke27PinRequiredError,
         Elke27TimeoutError,
@@ -1013,6 +1014,57 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub.async_arm_area.assert_awaited_once()
         hass.bus.async_fire.assert_not_called()
 
+    async def _disarm_outcome(self, disarm: Any) -> tuple[bool, BaseException | None]:
+        """Run a disarm with a pending automatic call; return (cancelled, error)."""
+        snapshot = _two_area_snapshot()
+        runtime = _alarm_runtime(snapshot)
+        hub = runtime.hub
+        hub.async_disarm_area = disarm
+        task = asyncio.create_task(asyncio.sleep(10))
+        hub.register_arm_automatic(1, task)
+        entity = _area_entity(snapshot, hub)
+        error: BaseException | None = None
+        try:
+            await entity.async_alarm_disarm("1234")
+        except HomeAssistantError as err:
+            error = err
+        await asyncio.sleep(0)
+        cancelled = task.cancelled()
+        await hub.async_wait_disarm_clear(1)
+        task.cancel()
+        hub.unregister_arm_automatic(1, task)
+        return cancelled, error
+
+    async def test_disarm_timeout_cancels_automatic(self) -> None:
+        """A disarm that timed out may have been accepted, so arming is cancelled."""
+        timeout = Elke27TimeoutError("Timed out waiting for the reply.")
+        disarm = AsyncMock(side_effect=_wrapped(timeout))
+        cancelled, error = await self._disarm_outcome(disarm)
+        assert cancelled
+        assert error is not None
+
+    async def test_disarm_transport_error_cancels_automatic(self) -> None:
+        """A transport error after sending also cancels automatic arming."""
+        disarm = AsyncMock(side_effect=_wrapped(Elke27ConnectionError("dropped")))
+        cancelled, error = await self._disarm_outcome(disarm)
+        assert cancelled
+        assert error is not None
+
+    async def test_disarm_wrong_code_lets_automatic_resume(self) -> None:
+        """A definitive refusal (panel error code) does not cancel arming."""
+        refusal = Elke27PanelError(11004, "invalid user code")
+        disarm = AsyncMock(side_effect=_wrapped(refusal))
+        cancelled, error = await self._disarm_outcome(disarm)
+        assert not cancelled
+        assert error is not None
+
+    async def test_disarm_while_disconnected_raises_and_resumes(self) -> None:
+        """A disarm that was never sent raises and leaves arming running."""
+        cancelled, error = await self._disarm_outcome(AsyncMock(return_value=False))
+        assert not cancelled
+        assert error is not None
+        assert "not connected" in str(error)
+
     async def test_disarm_while_arm_in_flight_ends_disarmed(self) -> None:
         """Arm already sent: the disarm goes after it, and nothing re-arms."""
         hass = MagicMock()
@@ -1144,3 +1196,10 @@ class ServiceDescriptionTest(unittest.TestCase):
             assert "does not bypass zones" not in description
             assert "bypassed before arming" in description
             assert set(strings["zone_bypass"]["fields"]) == {"code", "bypass"}
+
+
+def _wrapped(err: Exception) -> HomeAssistantError:
+    """Wrap a library error the way the hub does."""
+    wrapped = HomeAssistantError(str(err))
+    wrapped.__cause__ = err
+    return wrapped
