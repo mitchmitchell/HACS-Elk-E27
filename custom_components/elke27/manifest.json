@@ -10,6 +10,6 @@
   "issue_tracker": "https://github.com/mitchmitchell/HACS-Elk-E27/issues",
   "loggers": ["elke27_lib"],
   "quality_scale": "bronze",
-  "requirements": ["elke27 @ git+https://github.com/mitchmitchell/elke27@d3e86ff"],
+  "requirements": ["elke27 @ git+https://github.com/mitchmitchell/elke27@fix/tester-pr24-0.3.10"],
   "version": "0.1.6"
 }
