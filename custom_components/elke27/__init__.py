@@ -7,7 +7,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, NoReturn
 
-from elke27_lib import ArmMode, ZoneState
+from elke27_lib import ArmMode, PanelSnapshot, ZoneState
 from elke27_lib.errors import (
     Elke27ConnectionError,
     Elke27DisconnectedError,
@@ -40,7 +40,6 @@ from .hub import (
     PIN_REQUIRED_REASON,
     Elke27Hub,
     ZoneBypassFailedError,
-    area_is_armed,
     is_already_armed_refusal,
     is_definitive_refusal,
     zone_bypass_label,
@@ -50,8 +49,6 @@ from .models import Elke27RuntimeData
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from elke27_lib import PanelSnapshot
 
     from homeassistant.core import HomeAssistant, ServiceCall
     from homeassistant.helpers.typing import ConfigType
@@ -424,18 +421,16 @@ async def _async_arm_automatic_locked(
     async def _panel_reports_armed() -> tuple[PanelSnapshot | None, bool]:
         if lock_was_contended:
             return await hub.async_poll_until_area_armed(area_id, gate=_gate)
-        snapshot = await hub.async_refresh_area_state(area_id)
-        return snapshot, area_is_armed(snapshot, area_id)
+        snapshot, armed_reply = await hub.async_refresh_area_state_for_arm_check(
+            area_id
+        )
+        return snapshot, armed_reply is True
 
     async def _already_armed(
         reason: str, bypassed: Sequence[ZoneState], cause: Exception
     ) -> None:
-        # Re-read arm state from the panel: armed is a no-op success; else uncertain.
-        if lock_was_contended:
-            _fresh, armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
-        else:
-            _fresh = await hub.async_refresh_area_arm_status(area_id)
-            armed = area_is_armed(_fresh, area_id)
+        # Poll until the panel reports armed; never trust the cache on a failed read.
+        _fresh, armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
         if armed:
             _LOGGER.info(
                 "Area %s is already armed (panel said: %s); automatic arming skipped",
@@ -454,9 +449,6 @@ async def _async_arm_automatic_locked(
         snapshot = await hub.async_refresh_area_state(area_id)
     if snapshot is None:
         await _fail("arm", ARM_NOT_SENT_REASON, cause=None)
-    if area_is_armed(snapshot, area_id):
-        _LOGGER.debug("Area %s is already armed; automatic arming skipped", area_id)
-        return
     try:
         bypassed = await hub.async_bypass_faulted_zones(
             area_id, snapshot, code, attempted=attempted, gate=_gate

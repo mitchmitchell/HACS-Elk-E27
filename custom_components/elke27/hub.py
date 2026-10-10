@@ -210,28 +210,46 @@ class Elke27Hub:
         command replies at all. Each request is sent once; if one fails, that
         part falls back to the client snapshot.
         """
+        snapshot, _ = await self._async_area_state_snapshot(
+            area_id, include_zones=True
+        )
+        return snapshot
+
+    async def async_refresh_area_state_for_arm_check(
+        self, area_id: int
+    ) -> tuple[PanelSnapshot | None, bool | None]:
+        """
+        Refresh area and zone status and return whether the panel reported armed.
+
+        The armed flag comes only from the area_get_status reply. When that
+        request fails, the returned flag is None (never the cached snapshot).
+        """
+        return await self._async_area_state_snapshot(area_id, include_zones=True)
+
+    async def async_refresh_area_arm_status(
+        self, area_id: int
+    ) -> tuple[PanelSnapshot | None, bool | None]:
+        """Ask the panel for one area's arm state (no zone status)."""
+        return await self._async_area_state_snapshot(area_id, include_zones=False)
+
+    async def _async_area_state_snapshot(
+        self, area_id: int, *, include_zones: bool
+    ) -> tuple[PanelSnapshot | None, bool | None]:
         client = self._client
         if client is None:
-            return None
+            return None, None
         area_payload = await self._async_status_request(
             client, "area_get_status", area_id=area_id
         )
-        zones_payload = await self._async_status_request(
-            client, "zone_get_all_zones_status"
+        zones_payload = (
+            await self._async_status_request(client, "zone_get_all_zones_status")
+            if include_zones
+            else None
         )
-        return snapshot_with_status(
+        snapshot = snapshot_with_status(
             client.get_snapshot(), area_id, area_payload, zones_payload
         )
-
-    async def async_refresh_area_arm_status(self, area_id: int) -> PanelSnapshot | None:
-        """Ask the panel for one area's arm state (no zone status)."""
-        client = self._client
-        if client is None:
-            return None
-        area_payload = await self._async_status_request(
-            client, "area_get_status", area_id=area_id
-        )
-        return snapshot_with_status(client.get_snapshot(), area_id, area_payload, None)
+        return snapshot, area_armed_from_status_reply(area_payload)
 
     async def async_poll_until_area_armed(
         self,
@@ -240,10 +258,10 @@ class Elke27Hub:
         gate: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[PanelSnapshot | None, bool]:
         """
-        Poll area_get_status until the area reads armed or the timeout elapses.
+        Poll area_get_status until the panel reports armed or the timeout elapses.
 
-        Return the last snapshot and whether the area is armed. After a timeout
-        the caller must treat the last snapshot as the panel's reported state.
+        A failed read is not armed and polling continues. Return the last snapshot
+        and whether a reply showed armed before the timeout.
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + ARM_STATUS_POLL_TIMEOUT
@@ -251,8 +269,8 @@ class Elke27Hub:
         while True:
             if gate is not None:
                 await gate()
-            last = await self.async_refresh_area_arm_status(area_id)
-            if area_is_armed(last, area_id):
+            last, armed = await self.async_refresh_area_arm_status(area_id)
+            if armed is True:
                 return last, True
             if loop.time() >= deadline:
                 return last, False
@@ -887,6 +905,25 @@ def snapshot_with_status(
         areas=MappingProxyType(areas),
         zones=MappingProxyType(zones),
     )
+
+
+def area_armed_from_status_reply(
+    area_payload: Mapping[str, Any] | None,
+) -> bool | None:
+    """
+    Return whether area_get_status reported an armed mode.
+
+    None when the request failed: callers must not treat the cached snapshot as
+    armed for skip or no-op decisions.
+    """
+    if area_payload is None:
+        return None
+    mode = _arm_mode_from_text(
+        area_payload.get("arm_state") or area_payload.get("armed_state")
+    )
+    if mode is None:
+        return False
+    return mode in _ARMED_MODES
 
 
 def area_is_armed(snapshot: PanelSnapshot | None, area_id: int) -> bool:
