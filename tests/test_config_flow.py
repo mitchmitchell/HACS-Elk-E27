@@ -1,10 +1,11 @@
-# ruff: noqa: S101, TC001, TC002, TC003
+# ruff: noqa: S101, SLF001, TC001, TC002, TC003
 """Tests for the Elke27 config flow (manual path)."""
 
 from __future__ import annotations
 
 from collections.abc import Generator
 import dataclasses
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, create_autospec, patch
 
@@ -20,12 +21,16 @@ from elke27_lib.errors import (
 )
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import voluptuous as vol
 
 from custom_components.elke27.config_flow import (
     CONF_ACCESS_CODE,
+    CONF_PANEL,
     CONF_PASSPHRASE,
+    CONF_RESCAN,
     CONF_SETUP_METHOD,
     SETUP_METHOD_MANUAL,
+    Elke27ConfigFlow,
 )
 from custom_components.elke27.const import (
     CONF_INTEGRATION_SERIAL,
@@ -36,6 +41,7 @@ from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers.selector import SelectSelector
 from tests.conftest import HOST, INTEGRATION_SERIAL, PANEL_MAC, PORT, panel_snapshot
 
 ACCESS_CODE = "908172"
@@ -241,3 +247,47 @@ async def test_reauth_rejects_different_panel(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "wrong_panel"
     assert dict(mock_config_entry.data) == old_data
+
+
+def _panel_select(schema: vol.Schema) -> SelectSelector:
+    for marker, field in schema.schema.items():
+        if marker.schema == CONF_PANEL:
+            assert isinstance(field, SelectSelector)
+            return field
+    msg = "panel select missing from discovery schema"
+    raise AssertionError(msg)
+
+
+async def test_discovery_panel_select_rescan_and_dynamic_labels(
+    hass: HomeAssistant,
+) -> None:
+    """Rescan uses a translated label; panel rows keep host/name labels."""
+    flow = Elke27ConfigFlow()
+    flow.hass = hass
+    flow._discovered_panels = [
+        SimpleNamespace(
+            panel_name="Kitchen",
+            panel_host="192.0.2.20",
+            port=2101,
+            panel_mac="aa:bb:cc:dd:ee:01",
+            panel_model="E27",
+        ),
+        SimpleNamespace(
+            panel_name="Garage",
+            panel_host="192.0.2.21",
+            port=2101,
+            panel_mac="aa:bb:cc:dd:ee:02",
+            panel_model="E27",
+        ),
+    ]
+    schema = await flow._async_discovery_schema()
+    select_cfg = _panel_select(schema).config["select"]
+    assert "translation_key" not in select_cfg
+    options = select_cfg["options"]
+    assert options[0] == {"value": "rescan", "label": "Rescan for panels"}
+    assert options[0]["value"] == CONF_RESCAN
+    assert options[1]["value"] == "0"
+    assert "Kitchen" in options[1]["label"]
+    assert "192.0.2.20" in options[1]["label"]
+    assert options[2]["value"] == "1"
+    assert "Garage" in options[2]["label"]

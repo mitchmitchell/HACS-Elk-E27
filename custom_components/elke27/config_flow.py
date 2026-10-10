@@ -23,7 +23,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, translation
 from homeassistant.helpers.selector import selector
 
 from .const import (
@@ -43,7 +43,7 @@ CONF_ACCESS_CODE = "access_code"
 CONF_PASSPHRASE = "passphrase"
 CONF_PANEL_INFO = "panel_info"
 CONF_TABLE_INFO = "table_info"
-CONF_RESCAN = "__rescan__"
+CONF_RESCAN = "rescan"
 CONF_SETUP_METHOD = "setup_method"
 SETUP_METHOD_DISCOVER = "discover"
 SETUP_METHOD_MANUAL = "manual"
@@ -139,7 +139,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle discovery-based setup."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            data_schema = self._discovery_schema()
+            data_schema = await self._async_discovery_schema()
             if CONF_PANEL in user_input:
                 panel_idx_raw = user_input[CONF_PANEL]
                 if panel_idx_raw == CONF_RESCAN:
@@ -152,7 +152,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "no_panels_found"
                     return self.async_show_form(
                         step_id="discover",
-                        data_schema=self._discovery_schema(),
+                        data_schema=await self._async_discovery_schema(),
                         errors=errors,
                     )
                 panel = self._discovered_panels[panel_idx]
@@ -164,7 +164,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "no_panels_found"
                     return self.async_show_form(
                         step_id="discover",
-                        data_schema=self._discovery_schema(),
+                        data_schema=await self._async_discovery_schema(),
                         errors=errors,
                     )
                 self._selected_host = host
@@ -209,9 +209,25 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="discover",
-            data_schema=self._discovery_schema(),
+            data_schema=await self._async_discovery_schema(),
             errors=errors,
         )
+
+    async def _async_rescan_option_label(self) -> str:
+        """Return the translated label for the rescan select option."""
+        translations = await translation.async_get_translations(
+            self.hass,
+            self.hass.config.language,
+            "selector",
+            integrations=[DOMAIN],
+        )
+        key = f"component.{DOMAIN}.selector.panel.options.{CONF_RESCAN}"
+        fallback = "Rescan for panels"
+        return translations.get(key, fallback)
+
+    async def _async_discovery_schema(self) -> vol.Schema:
+        """Build the discover-step schema with a translated rescan option."""
+        return self._discovery_schema(await self._async_rescan_option_label())
 
     async def async_step_reauth(
         self, _entry_data: Mapping[str, Any]
@@ -352,7 +368,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             result["title"] = title
         return result
 
-    def _discovery_schema(self) -> vol.Schema:
+    def _discovery_schema(self, rescan_label: str) -> vol.Schema:
         options = [
             {
                 "value": str(idx),
@@ -363,9 +379,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             for idx, panel in enumerate(self._discovered_panels or [])
         ]
         if options:
-            options.insert(0, {"value": CONF_RESCAN, "label": "rescan"})
+            options.insert(0, {"value": CONF_RESCAN, "label": rescan_label})
         else:
-            options = [{"value": CONF_RESCAN, "label": "rescan"}]
+            options = [{"value": CONF_RESCAN, "label": rescan_label}]
         return vol.Schema(
             {
                 vol.Required(CONF_PANEL): selector(
@@ -373,7 +389,6 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                         "select": {
                             "options": options,
                             "mode": "list",
-                            "translation_key": "panel",
                         }
                     }
                 ),
