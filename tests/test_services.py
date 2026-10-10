@@ -40,6 +40,7 @@ if _HAS_DEPS:
     from custom_components import elke27 as integration
     from custom_components.elke27 import hub as elke27_hub
     from custom_components.elke27.hub import ZoneBypassFailedError
+    from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 
@@ -856,6 +857,172 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         finally:
             if lock.locked():
                 lock.release()
+        client.async_arm_area.assert_awaited_once()
+
+    async def _first_arm_into_exit_delay(
+        self, hass: Any, entities: dict[str, Any], in_exit_delay: dict[str, bool]
+    ) -> Any:
+        """Run one automatic arm and leave the panel reporting exit delay."""
+        before = _two_area_snapshot()
+
+        def _exit_delay_fields() -> dict[str, Any]:
+            if not in_exit_delay["value"]:
+                return {}
+            return {
+                "arm_cmd_state": "ARMED_AWAY",
+                "ee_timer": 45,
+                "alarm_zone": "",
+            }
+
+        hub = _hub()
+        client = _area_status_client(
+            before,
+            arm_state="DISARMED",
+            area_status_extra=_exit_delay_fields,
+        )
+
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+            in_exit_delay["value"] = True
+
+        client.async_arm_area = AsyncMock(side_effect=_panel_arm)
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        entities.clear()
+        entities["alarm_control_panel.house"] = (
+            _entry("aa:bb:cc:dd:ee:ff:area:1"),
+            runtime,
+        )
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        return client
+
+    async def test_second_automatic_call_after_195s_during_exit_delay_skips(
+        self,
+    ) -> None:
+        """Hardware replay: +1.95 s after the first arm, the second call skips."""
+        hass = MagicMock()
+        entities: dict[str, Any] = {}
+        in_exit_delay = {"value": False}
+        client = await self._first_arm_into_exit_delay(hass, entities, in_exit_delay)
+        assert in_exit_delay["value"]
+        await asyncio.sleep(1.95)
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert client.async_arm_area.await_count == 1
+        hass.bus.async_fire.assert_not_called()
+
+    async def test_second_automatic_call_after_200s_during_exit_delay_skips(
+        self,
+    ) -> None:
+        """Hardware replay: +2.0 s after the first arm, the second call skips."""
+        hass = MagicMock()
+        entities: dict[str, Any] = {}
+        in_exit_delay = {"value": False}
+        client = await self._first_arm_into_exit_delay(hass, entities, in_exit_delay)
+        assert in_exit_delay["value"]
+        await asyncio.sleep(2.0)
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert client.async_arm_area.await_count == 1
+
+    async def test_disarm_during_exit_delay_clears_entity_and_next_arm_arms(
+        self,
+    ) -> None:
+        """After disarm, a plain DISARMED reply clears ARMING and arming resumes."""
+        hass = MagicMock()
+        before = _two_area_snapshot()
+        panel = {"exit_delay": True}
+
+        def _exit_delay_fields() -> dict[str, Any]:
+            if not panel["exit_delay"]:
+                return {}
+            return {
+                "arm_cmd_state": "ARMED_AWAY",
+                "ee_timer": 20,
+                "alarm_zone": "",
+            }
+
+        hub = _hub()
+        client = _area_status_client(
+            before,
+            arm_state="DISARMED",
+            area_status_extra=_exit_delay_fields,
+        )
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        hub.async_disarm_area = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        coordinator = runtime.coordinator
+        fresh, _ = await hub.async_refresh_area_state(1)
+        coordinator.data = fresh
+        entity = _area_entity(fresh, hub)
+        entity.coordinator = coordinator
+        assert entity.alarm_state is AlarmControlPanelState.ARMING
+
+        panel["exit_delay"] = False
+        await entity.async_alarm_disarm("1234")
+        fresh, _ = await hub.async_refresh_area_state(1)
+        coordinator.data = fresh
+        assert entity.alarm_state is AlarmControlPanelState.DISARMED
+
+        entities = {
+            "alarm_control_panel.house": (
+                _entry("aa:bb:cc:dd:ee:ff:area:1"),
+                runtime,
+            )
+        }
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert client.async_arm_area.await_count == 1
+
+    async def test_failed_status_read_during_exit_delay_does_not_skip(
+        self,
+    ) -> None:
+        """A failed area_get_status must not skip even if the cache looks arming."""
+        hass = MagicMock()
+        before = _two_area_snapshot()
+        stale = dataclasses.replace(
+            before,
+            areas=MappingProxyType(
+                {
+                    **before.areas,
+                    1: AreaState(
+                        area_id=1,
+                        name="House",
+                        arm_mode=ArmMode.DISARMED,
+                        arm_cmd_mode=ArmMode.ARMED_AWAY,
+                        ee_timer=30,
+                        alarm_zone="",
+                    ),
+                }
+            ),
+        )
+        hub = _hub()
+        client = MagicMock()
+        client.get_snapshot = MagicMock(return_value=stale)
+        client.async_arm_area = AsyncMock(return_value=None)
+
+        def _execute(command_key: str, **_params: Any) -> Any:
+            if command_key == "area_get_status":
+                quiet = TimeoutError("no reply")
+                raise quiet
+            if command_key == "zone_get_all_zones_status":
+                return MagicMock(ok=True, data={"status": "99"}, error=None)
+            return MagicMock(ok=True, data={}, error=None)
+
+        client.async_execute = AsyncMock(side_effect=_execute)
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        entities = {
+            "alarm_control_panel.house": (
+                _entry("aa:bb:cc:dd:ee:ff:area:1"),
+                runtime,
+            )
+        }
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         client.async_arm_area.assert_awaited_once()
 
     async def test_concurrent_second_call_no_ops_when_status_refresh_lags(

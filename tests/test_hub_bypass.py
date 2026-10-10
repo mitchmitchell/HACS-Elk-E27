@@ -316,6 +316,38 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
         assert not area_is_armed(fresh, 1)
         assert [zone.zone_id for zone in area_faulted_zones(fresh, 1)] == [1, 2]
 
+    async def test_disarmed_reply_clears_stale_exit_delay_on_snapshot(self) -> None:
+        """A DISARMED reply without exit-delay fields drops stale pending-arm data."""
+        hub = _hub()
+        stale = dataclasses.replace(
+            _two_area_snapshot(),
+            areas=MappingProxyType(
+                {
+                    1: AreaState(
+                        area_id=1,
+                        name="House",
+                        arm_mode=ArmMode.DISARMED,
+                        arm_cmd_mode=ArmMode.ARMED_AWAY,
+                        ee_timer=30,
+                        alarm_zone="",
+                    )
+                }
+            ),
+        )
+        client = self._client(
+            area={"area_id": 1, "arm_state": "DISARMED"},
+            zones={"status": "99"},
+        )
+        client.get_snapshot = MagicMock(return_value=stale)
+        hub._client = client  # noqa: SLF001
+        fresh, skip = await hub.async_refresh_area_state(1)
+        assert skip is False
+        area = fresh.areas[1]
+        assert area.arm_cmd_mode is None
+        assert area.ee_timer is None
+        assert area.alarm_zone is None
+        assert not area.arming
+
     async def test_failed_refresh_falls_back_to_snapshot(self) -> None:
         """A failed status request is not retried; that part uses the snapshot."""
         from elke27_lib.errors import Elke27TimeoutError  # noqa: PLC0415
@@ -431,3 +463,14 @@ class AreaStatusReplyTest(unittest.TestCase):
     def test_armed_reply_still_skips(self) -> None:
         """Fully armed areas skip without exit-delay fields."""
         assert area_skip_automatic_arm_from_status_reply({"arm_state": "ARMED_AWAY"})
+
+    def test_bool_ee_timer_is_not_arming(self) -> None:
+        """A bool ee_timer must not count as exit-delay arming (bool is not int)."""
+        payload = {
+            "arm_state": "DISARMED",
+            "arm_cmd_state": "ARMED_AWAY",
+            "ee_timer": True,
+            "alarm_zone": "",
+        }
+        assert not area_arming_from_status_reply(payload)
+        assert not area_skip_automatic_arm_from_status_reply(payload)

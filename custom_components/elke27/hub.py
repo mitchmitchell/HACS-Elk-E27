@@ -843,6 +843,11 @@ _ZONE_STATUS_VIOLATED = frozenset("9AB")
 _ZONE_STATUS_KNOWN = frozenset("0123456789ABCDEF")
 
 
+def _strict_int(value: object) -> int | None:
+    """Return the value only when it is a true int (bool excluded)."""
+    return value if type(value) is int else None
+
+
 def _arm_mode_from_text(value: Any) -> ArmMode | None:
     """Map a panel arm_state string to an ArmMode (as elke27 does)."""
     if not isinstance(value, str):
@@ -887,16 +892,35 @@ def snapshot_with_status(
         )
         if mode is not None:
             updates["arm_mode"] = mode
-        if "arm_cmd_state" in area_payload:
-            cmd_raw = area_payload.get("arm_cmd_state")
-            if isinstance(cmd_raw, str):
-                updates["arm_cmd_mode"] = _arm_mode_from_text(cmd_raw)
-        if "ee_timer" in area_payload and isinstance(area_payload["ee_timer"], int):
-            updates["ee_timer"] = area_payload["ee_timer"]
-        if "alarm_zone" in area_payload and isinstance(area_payload["alarm_zone"], str):
-            updates["alarm_zone"] = area_payload["alarm_zone"]
-        if updates:
-            areas[area_id] = dataclasses.replace(area, **updates)
+        has_exit_delay_fields = any(
+            key in area_payload for key in ("arm_cmd_state", "ee_timer", "alarm_zone")
+        )
+        if not has_exit_delay_fields:
+            updates["arm_cmd_mode"] = None
+            updates["ee_timer"] = None
+            updates["alarm_zone"] = None
+        else:
+            if "arm_cmd_state" in area_payload:
+                cmd_raw = area_payload.get("arm_cmd_state")
+                updates["arm_cmd_mode"] = (
+                    _arm_mode_from_text(cmd_raw)
+                    if isinstance(cmd_raw, str)
+                    else None
+                )
+            else:
+                updates["arm_cmd_mode"] = None
+            if "ee_timer" in area_payload:
+                updates["ee_timer"] = _strict_int(area_payload["ee_timer"])
+            else:
+                updates["ee_timer"] = None
+            if "alarm_zone" in area_payload:
+                alarm_zone = area_payload.get("alarm_zone")
+                updates["alarm_zone"] = (
+                    alarm_zone if isinstance(alarm_zone, str) else None
+                )
+            else:
+                updates["alarm_zone"] = None
+        areas[area_id] = dataclasses.replace(area, **updates)
     status = zones_payload.get("status") if zones_payload is not None else None
     if isinstance(status, str):
         for index, ch in enumerate("".join(status.split()).upper()):
@@ -947,7 +971,7 @@ def area_arming_from_status_reply(area_payload: Mapping[str, Any]) -> bool:
     if cmd_mode not in (ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY):
         return False
     ee_timer = area_payload.get("ee_timer")
-    if not isinstance(ee_timer, int) or ee_timer <= 0:
+    if type(ee_timer) is not int or ee_timer <= 0:
         return False
     if "alarm_zone" not in area_payload:
         return False

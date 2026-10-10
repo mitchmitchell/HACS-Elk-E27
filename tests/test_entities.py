@@ -234,6 +234,45 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         )
         assert _area_state_to_ha(area) is AlarmControlPanelState.ARMING
 
+    def test_arming_transitions_to_armed_away(self) -> None:
+        """The entity leaves ARMING when the snapshot reports fully armed away."""
+        base = _two_area_snapshot()
+        arming = dataclasses.replace(
+            base,
+            areas=MappingProxyType(
+                {
+                    **base.areas,
+                    1: AreaState(
+                        area_id=1,
+                        name="House",
+                        arm_mode=ArmMode.DISARMED,
+                        arm_cmd_mode=ArmMode.ARMED_AWAY,
+                        ee_timer=12,
+                        alarm_zone="",
+                    ),
+                }
+            ),
+        )
+        entity = _area_entity(arming, _hub())
+        assert entity.alarm_state is AlarmControlPanelState.ARMING
+        armed = dataclasses.replace(
+            arming,
+            areas=MappingProxyType(
+                {
+                    **arming.areas,
+                    1: dataclasses.replace(
+                        arming.areas[1],
+                        arm_mode=ArmMode.ARMED_AWAY,
+                        arm_cmd_mode=None,
+                        ee_timer=None,
+                        alarm_zone=None,
+                    ),
+                }
+            ),
+        )
+        entity.coordinator.data = armed
+        assert entity.alarm_state is AlarmControlPanelState.ARMED_AWAY
+
     def test_missing_area(self) -> None:
         """A missing area makes the entity unavailable with no state."""
         snapshot = _two_area_snapshot()
