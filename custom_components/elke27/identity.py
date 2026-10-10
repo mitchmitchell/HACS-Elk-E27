@@ -33,7 +33,7 @@ def panel_serial_from_info(panel_info: dict[str, Any]) -> str | None:
 
 
 def config_entry_unique_id(panel_info: dict[str, Any]) -> str | None:
-    """Return config entry unique_id: formatted MAC, panel serial, or None."""
+    """Return config entry unique_id: MAC, panel serial, or None (dedupe host:port)."""
     mac = panel_mac_from_info(panel_info)
     if mac:
         return format_mac(str(mac))

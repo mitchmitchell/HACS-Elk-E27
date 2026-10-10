@@ -82,7 +82,7 @@ def entry_identity_key(
     coordinator: Elke27DataUpdateCoordinator,
     entry: Elke27ConfigEntry,
 ) -> str:
-    """Return panel identity: formatted MAC, panel serial, or config entry id."""
+    """Return identity: formatted MAC, panel serial, or entry id if both absent."""
     snapshot = coordinator.data
     mac = get_panel_field(snapshot, hub.panel_name, "mac")
     if mac:

@@ -857,9 +857,13 @@ There is no in-place migration. Remove each Elk E27 config entry under **Setting
 services**, then add the panel again with the same linking credentials.
 
 - **Config entry `unique_id`** uses **formatted panel MAC** when the panel reports one, otherwise
-  the panel’s own **hardware serial** (when present), otherwise it stays unset and the entry is
-  deduplicated by **host and port** only. The integration serial used for E27 linking identifies
-  Home Assistant, not the panel, and is never used as config or entity identity.
+  the panel’s own **hardware serial** (when present). If the panel reports **neither MAC nor
+  serial** (as on some hardware today), `unique_id` stays **unset**, the entry is deduplicated by
+  **host and port** only, and devices and entities use the **config entry id** as their identity
+  until a later release adds a stronger panel identifier. **Changing the panel’s IP address** in
+  that case is treated as a new panel: delete the entry and add it again at the new host.
+- The integration serial used for E27 linking identifies Home Assistant, not the panel, and is
+  never used as config or entity identity.
 - **Entity unique IDs and entity IDs may change** (devices, entities, and automations that
   referenced the old IDs or the integration serial as an entity base will need updating).
 - Dashboards, automations, and scripts that target Elk E27 entities should be reviewed after

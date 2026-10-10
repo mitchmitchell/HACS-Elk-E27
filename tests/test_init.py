@@ -144,6 +144,86 @@ async def test_two_macless_entries_have_separate_devices_and_entity_ids(
     )
 
 
+async def test_two_panels_without_mac_or_serial_use_entry_id_identity(
+    hass: HomeAssistant, mock_client: ClientHarness
+) -> None:
+    """No MAC and no serial: host:port dedupe, devices and entities use entry id."""
+    snapshot_a = panel_snapshot()
+    mock_client.snapshot = dataclasses.replace(
+        snapshot_a,
+        panel=dataclasses.replace(
+            snapshot_a.panel, mac=None, serial=None, panel_name="Panel A"
+        ),
+    )
+    entry_a = MockConfigEntry(
+        domain=DOMAIN,
+        title="Panel A",
+        unique_id=None,
+        data={
+            "host": HOST,
+            "port": PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    entry_a.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry_a.entry_id)
+    await hass.async_block_till_done()
+
+    snapshot_b = panel_snapshot()
+    mock_client.snapshot = dataclasses.replace(
+        snapshot_b,
+        panel=dataclasses.replace(
+            snapshot_b.panel, mac=None, serial=None, panel_name="Panel B"
+        ),
+    )
+    entry_b = MockConfigEntry(
+        domain=DOMAIN,
+        title="Panel B",
+        unique_id=None,
+        data={
+            "host": HOST_2,
+            "port": PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    entry_b.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry_b.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry_a.unique_id is None
+    assert entry_b.unique_id is None
+
+    device_registry = dr.async_get(hass)
+    elke27_devices = [
+        device
+        for device in device_registry.devices.values()
+        if device.identifiers
+        and any(identifier[0] == DOMAIN for identifier in device.identifiers)
+    ]
+    assert len(elke27_devices) == 2  # noqa: PLR2004
+    device_keys = {next(iter(device.identifiers))[1] for device in elke27_devices}
+    assert device_keys == {entry_a.entry_id, entry_b.entry_id}
+
+    entity_registry = er.async_get(hass)
+    area_entities = [
+        entity
+        for entity in entity_registry.entities.values()
+        if entity.platform == DOMAIN and entity.domain == "alarm_control_panel"
+    ]
+    assert len(area_entities) == 2  # noqa: PLR2004
+    entity_bases = {entity.unique_id.split(":")[0] for entity in area_entities}
+    assert entity_bases == {entry_a.entry_id, entry_b.entry_id}
+
+    issues = ir.async_get(hass).issues
+    assert not any(
+        issue.translation_key == "duplicate_unique_id"
+        for issue in issues.values()
+        if issue.domain == DOMAIN
+    )
+
+
 async def test_setup_and_unload(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
