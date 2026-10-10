@@ -210,9 +210,7 @@ class Elke27Hub:
         command replies at all. Each request is sent once; if one fails, that
         part falls back to the client snapshot.
         """
-        snapshot, _ = await self._async_area_state_snapshot(
-            area_id, include_zones=True
-        )
+        snapshot, _ = await self._async_area_state_snapshot(area_id, include_zones=True)
         return snapshot
 
     async def async_refresh_area_state_for_arm_check(
