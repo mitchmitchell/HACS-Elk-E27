@@ -867,19 +867,10 @@ whole °F, so setpoints you set in °C are rounded.
 
 ### To 0.1.9
 
-Mostly internal cleanup (typed snapshots, strict typing). No production installs are
-expected yet, but older dev/test setups have two breaking changes:
-
-- **Legacy stored `pin` is removed on setup.** Very early builds saved a `pin` in the config
-  entry. 0.1.9 does not use it and **deletes it** from the config entry the next time the
-  integration loads (one-time cleanup). Your alarm user code is not stored in the config
-  entry; enter it when arming or bypassing.
-- **Old unique IDs are not migrated.** `<base>_<domain>_<id>` entities aren't renamed to
-  `<base>:<domain>:<id>`, so you may see duplicates. What to do: (1) before upgrading,
-  restart once on 0.1.8 so its migration runs; (2) after upgrading, delete the unavailable
-  duplicates under **Settings → Devices & services → Entities**; (3) fix automations and
-  dashboards using the old IDs. Reverting to 0.1.8 does not remove the duplicates or undo
-  registry changes.
+Mostly internal cleanup (typed snapshots, strict typing). **No breaking changes compared with
+0.1.8** (legacy `pin` cleanup and unique-ID rules are unchanged from 0.1.8). Upgrading from
+**0.1.7** straight to 0.1.9: follow **To 0.1.8** (delete the entry, upgrade, add it again,
+then update automations and dashboards).
 
 ### To 0.1.8
 
