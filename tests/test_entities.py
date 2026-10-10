@@ -223,6 +223,17 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         triggered = AreaState(area_id=1, arm_mode=ArmMode.ARMED_AWAY, alarm_active=True)
         assert _area_state_to_ha(triggered) is AlarmControlPanelState.TRIGGERED
 
+    def test_exit_delay_shows_arming(self) -> None:
+        """Exit delay (disarmed with pending arm) maps to ARMING."""
+        area = AreaState(
+            area_id=1,
+            arm_mode=ArmMode.DISARMED,
+            arm_cmd_mode=ArmMode.ARMED_AWAY,
+            ee_timer=45,
+            alarm_zone="",
+        )
+        assert _area_state_to_ha(area) is AlarmControlPanelState.ARMING
+
     def test_missing_area(self) -> None:
         """A missing area makes the entity unavailable with no state."""
         snapshot = _two_area_snapshot()

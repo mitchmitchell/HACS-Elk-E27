@@ -28,8 +28,10 @@ if _HAS_DEPS:
         Elke27Hub,
         ZoneBypassFailedError,
         area_armed_from_status_reply,
+        area_arming_from_status_reply,
         area_faulted_zones,
         area_is_armed,
+        area_skip_automatic_arm_from_status_reply,
         zone_bypass_label,
     )
     from homeassistant.exceptions import HomeAssistantError
@@ -389,3 +391,43 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
             _fresh, armed = await hub.async_poll_until_area_armed(1)
         assert not armed
         assert client.async_execute.await_count >= 2
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class AreaStatusReplyTest(unittest.TestCase):
+    """Test area_get_status skip logic for automatic arming."""
+
+    def test_exit_delay_reply_counts_as_arming(self) -> None:
+        """Disarmed with pending arm and ee_timer is exit-delay arming."""
+        payload = {
+            "arm_state": "DISARMED",
+            "arm_cmd_state": "ARMED_AWAY",
+            "ee_timer": 30,
+            "alarm_zone": "",
+        }
+        assert area_arming_from_status_reply(payload)
+        assert area_skip_automatic_arm_from_status_reply(payload)
+
+    def test_missing_alarm_zone_is_not_arming(self) -> None:
+        """alarm_zone must be present and empty to skip."""
+        payload = {
+            "arm_state": "DISARMED",
+            "arm_cmd_state": "ARMED_AWAY",
+            "ee_timer": 30,
+        }
+        assert not area_arming_from_status_reply(payload)
+        assert not area_skip_automatic_arm_from_status_reply(payload)
+
+    def test_ee_timer_zero_is_not_arming(self) -> None:
+        """ee_timer must be greater than zero to skip."""
+        payload = {
+            "arm_state": "DISARMED",
+            "arm_cmd_state": "ARMED_AWAY",
+            "ee_timer": 0,
+            "alarm_zone": "",
+        }
+        assert not area_arming_from_status_reply(payload)
+
+    def test_armed_reply_still_skips(self) -> None:
+        """Fully armed areas skip without exit-delay fields."""
+        assert area_skip_automatic_arm_from_status_reply({"arm_state": "ARMED_AWAY"})

@@ -9,6 +9,8 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/mitchmitchell/HACS-Elk-E27/issues",
   "loggers": ["elke27_lib"],
-  "requirements": ["elke27==0.3.11"],
+  "requirements": [
+    "elke27 @ git+https://github.com/mitchmitchell/elke27@5434130e78d775572b00ea5dacfa04b5fcb7ca9a"
+  ],
   "version": "0.1.7"
 }

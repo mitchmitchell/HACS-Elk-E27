@@ -252,6 +252,8 @@ def _get_area(snapshot: PanelSnapshot | None, area_id: int) -> AreaState | None:
 def _area_state_to_ha(area: AreaState) -> AlarmControlPanelState | None:
     if area.alarm_active:
         return AlarmControlPanelState.TRIGGERED
+    if area.arming:
+        return AlarmControlPanelState.ARMING
     if area.arm_mode is None or area.arm_mode is ArmMode.DISARMED:
         return AlarmControlPanelState.DISARMED
     if area.arm_mode is ArmMode.ARMED_STAY:
