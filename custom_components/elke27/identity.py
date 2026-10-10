@@ -60,9 +60,7 @@ def panel_identity_matches(
         return False
     live_serial = panel_serial_from_info(live_panel_info)
     stored_serial = panel_serial_from_info(stored_panel_info)
-    return not (
-        live_serial and stored_serial and live_serial != stored_serial
-    )
+    return not (live_serial and stored_serial and live_serial != stored_serial)
 
 
 async def async_get_integration_serial(

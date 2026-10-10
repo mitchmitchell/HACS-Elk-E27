@@ -106,9 +106,7 @@ async def test_setup_sets_unique_id_for_legacy_no_mac_entry(
     snapshot = panel_snapshot()
     mock_client.snapshot = dataclasses.replace(
         snapshot,
-        panel=dataclasses.replace(
-            snapshot.panel, mac=None, serial=PANEL_SERIAL
-        ),
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
     )
     entry = MockConfigEntry(
         domain=DOMAIN,

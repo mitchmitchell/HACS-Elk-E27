@@ -151,9 +151,7 @@ async def test_manual_create_uses_panel_serial_unique_id_when_no_mac(
     snapshot = panel_snapshot()
     flow_client.get_snapshot.return_value = dataclasses.replace(
         snapshot,
-        panel=dataclasses.replace(
-            snapshot.panel, mac=None, serial=PANEL_SERIAL
-        ),
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
     )
     result = await _start_manual(hass)
     result = await hass.config_entries.flow.async_configure(
@@ -171,9 +169,7 @@ async def test_two_macless_panels_with_different_serials_can_be_added(
     snapshot_a = panel_snapshot()
     flow_client.get_snapshot.return_value = dataclasses.replace(
         snapshot_a,
-        panel=dataclasses.replace(
-            snapshot_a.panel, mac=None, serial=PANEL_SERIAL
-        ),
+        panel=dataclasses.replace(snapshot_a.panel, mac=None, serial=PANEL_SERIAL),
     )
     result = await _start_manual(hass)
     result = await hass.config_entries.flow.async_configure(
@@ -186,9 +182,7 @@ async def test_two_macless_panels_with_different_serials_can_be_added(
     snapshot_b = panel_snapshot()
     flow_client.get_snapshot.return_value = dataclasses.replace(
         snapshot_b,
-        panel=dataclasses.replace(
-            snapshot_b.panel, mac=None, serial=PANEL_SERIAL_2
-        ),
+        panel=dataclasses.replace(snapshot_b.panel, mac=None, serial=PANEL_SERIAL_2),
     )
     result = await _start_manual(hass)
     result = await hass.config_entries.flow.async_configure(
@@ -242,9 +236,7 @@ async def test_reauth_succeeds_when_entry_unique_id_is_none_no_mac_panel(
     snapshot = panel_snapshot()
     flow_client.get_snapshot.return_value = dataclasses.replace(
         snapshot,
-        panel=dataclasses.replace(
-            snapshot.panel, mac=None, serial=PANEL_SERIAL
-        ),
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
     )
     mock_config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -391,9 +383,7 @@ async def test_manual_aborts_already_configured_legacy_none_unique_id_no_mac(
     snapshot = panel_snapshot()
     flow_client.get_snapshot.return_value = dataclasses.replace(
         snapshot,
-        panel=dataclasses.replace(
-            snapshot.panel, mac=None, serial=PANEL_SERIAL
-        ),
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
     )
     legacy = MockConfigEntry(
         domain=DOMAIN,
@@ -570,9 +560,7 @@ async def test_reauth_succeeds_when_entry_unique_id_is_panel_serial(
     snapshot = panel_snapshot()
     flow_client.get_snapshot.return_value = dataclasses.replace(
         snapshot,
-        panel=dataclasses.replace(
-            snapshot.panel, mac=None, serial=PANEL_SERIAL
-        ),
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
     )
     mock_config_entry = MockConfigEntry(
         domain=DOMAIN,
