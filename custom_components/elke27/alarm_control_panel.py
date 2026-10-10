@@ -179,8 +179,9 @@ class Elke27AreaAlarmControlPanel(
             except ZoneBypassFailedError as err:
                 if not err.pin_required:
                     raise
-                msg = "PIN required to perform this action."
-                raise HomeAssistantError(msg) from err
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="pin_required"
+                ) from err
             await self._async_arm(ArmMode.ARMED_AWAY, code)
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
@@ -189,8 +190,9 @@ class Elke27AreaAlarmControlPanel(
         # and never touches automatic arming.
         code = _normalize_code(code)
         if code is None:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg)
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="pin_required"
+            )
         # Disarm wins without waiting on the area lock. While the disarm is
         # pending, automatic arming of this area pauses before its next
         # command, so it cannot send an arm (or bypass) that lands after the
@@ -205,8 +207,9 @@ class Elke27AreaAlarmControlPanel(
             try:
                 accepted = await hub.async_disarm_area(self._area_id, code)
             except Elke27PinRequiredError as err:
-                msg = "PIN required to perform this action."
-                raise HomeAssistantError(msg) from err
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="pin_required"
+                ) from err
             except asyncio.CancelledError:
                 hub.cancel_arm_automatic(self._area_id)
                 raise
@@ -227,8 +230,9 @@ class Elke27AreaAlarmControlPanel(
             sent = await self._hub.async_arm_area(self._area_id, mode, code)
             raise_if_not_sent(sent=sent, hub=self._hub)
         except Elke27PinRequiredError as err:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="pin_required"
+            ) from err
 
     def _log_missing(self) -> None:
         """Log when the area snapshot is missing."""

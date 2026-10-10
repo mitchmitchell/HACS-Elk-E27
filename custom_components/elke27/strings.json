@@ -126,6 +126,33 @@
     },
     "code_not_numeric": {
       "message": "The code must be numeric."
+    },
+    "panel_not_ready": {
+      "message": "The client did not become ready before timeout."
+    },
+    "pin_required": {
+      "message": "PIN required to perform this action."
+    },
+    "no_alarm_target": {
+      "message": "No Elke27 alarm control panel target was provided."
+    },
+    "no_zone_target": {
+      "message": "No Elke27 zone target was provided."
+    },
+    "arm_automatic_multi_failure": {
+      "message": "Automatic arming failed for {failed} of {total} areas: {details}"
+    },
+    "arm_automatic_cancelled": {
+      "message": "Area {area_id} automatic arming was cancelled by a disarm. {advice}"
+    },
+    "arm_automatic_not_armed": {
+      "message": "Area {area_id} was not armed: {detail} {summary}"
+    },
+    "arm_automatic_uncertain": {
+      "message": "Area {area_id} arm result is unknown: {reason} {advice}"
+    },
+    "zone_bypass_not_acknowledged": {
+      "message": "Zone {zone_id} bypass was not acknowledged; is the panel connected?"
     }
   },
   "selector": {
@@ -133,6 +160,11 @@
       "options": {
         "discover": "Discover panels",
         "manual": "Manual setup"
+      }
+    },
+    "panel": {
+      "options": {
+        "__rescan__": "Rescan for panels"
       }
     }
   },

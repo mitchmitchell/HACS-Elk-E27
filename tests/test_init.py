@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 from elke27_lib.errors import (
@@ -177,12 +178,26 @@ async def test_setup_bad_link_keys_start_reauth(
     mock_client.client.async_connect.assert_not_awaited()
 
 
+async def test_setup_domain_refresh_auth_error_starts_reauth(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """An auth failure while priming domains fails setup and starts reauth."""
+    mock_client.client.async_refresh_domain_config.side_effect = Elke27AuthError(
+        "not allowed"
+    )
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert mock_config_entry.state is ConfigEntryState.SETUP_ERROR
+    assert len(_reauth_flows(hass)) == 1
+
+
 async def test_setup_domain_refresh_rejection_is_tolerated(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
     """A panel refusing one domain refresh does not block setup."""
-    mock_client.client.async_refresh_domain_config.side_effect = Elke27AuthError(
-        "not allowed"
+    mock_client.client.async_refresh_domain_config.side_effect = Elke27ProtocolError(
+        "refused"
     )
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
@@ -205,6 +220,66 @@ async def test_reconnect_auth_failure_starts_reauth(
     await hass.async_block_till_done()
     assert hub._reconnect_attempts == 0
     assert len(_reauth_flows(hass)) == 1
+
+
+async def test_reconnect_auth_failure_starts_reauth_once(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """Repeated reconnect auth failures start reauth only once."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hub = mock_config_entry.runtime_data.hub
+
+    mock_client.client.async_connect.side_effect = Elke27AuthError("bad")
+    await hub._async_reconnect_loop()
+    await hub._async_reconnect_loop()
+    await hass.async_block_till_done()
+    assert len(_reauth_flows(hass)) == 1
+
+
+async def test_reconnect_unexpected_error_retries(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """An unexpected reconnect failure is logged and the loop keeps retrying."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hub = mock_config_entry.runtime_data.hub
+    hub._stopping = False
+
+    mock_client.client.async_connect.side_effect = [
+        RuntimeError("unexpected"),
+        None,
+    ]
+    mock_client.client.wait_ready.return_value = True
+    with patch("custom_components.elke27.hub.asyncio.sleep", AsyncMock()):
+        await hub._async_reconnect_loop()
+    mock_client.client.async_connect.assert_awaited()
+    assert mock_client.client.async_connect.await_count == 2
+
+
+async def test_connect_cancellation_disconnects_client(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """A cancelled connect tears down the half-open client."""
+    connect_started = asyncio.Event()
+    release_connect = asyncio.Event()
+
+    async def _slow_connect(*_args: object, **_kwargs: object) -> None:
+        connect_started.set()
+        await release_connect.wait()
+
+    mock_client.client.async_connect.side_effect = _slow_connect
+    mock_config_entry.add_to_hass(hass)
+    setup_task = asyncio.create_task(
+        hass.config_entries.async_setup(mock_config_entry.entry_id)
+    )
+    await connect_started.wait()
+    setup_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await setup_task
+    mock_client.client.async_disconnect.assert_awaited()
 
 
 async def test_reconnect_listener_removed_on_unload(

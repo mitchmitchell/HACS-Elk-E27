@@ -20,7 +20,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
-from .hub import COMMAND_ERRORS, is_connection_error, is_timeout_error
+from .hub import AUTH_ERRORS, COMMAND_ERRORS, is_connection_error, is_timeout_error
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Iterable
@@ -56,7 +56,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
     async def async_start(self) -> None:
         """Subscribe to hub events and seed snapshot data."""
         if self._unsubscribe is not None:
-            self._unsubscribe()
+            try:
+                self._unsubscribe()
+            except Exception as err:
+                _LOGGER.debug("Hub event unsubscribe failed: %s", err)
         self._unsubscribe = self._hub.subscribe_typed(self._handle_event)
         if self._unsubscribe_reconnect is None:
             self._unsubscribe_reconnect = self._hub.add_reconnect_listener(
@@ -89,10 +92,16 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
     async def async_stop(self) -> None:
         """Stop coordinating updates and clean up resources."""
         if self._unsubscribe is not None:
-            self._unsubscribe()
+            try:
+                self._unsubscribe()
+            except Exception as err:
+                _LOGGER.debug("Hub event unsubscribe failed: %s", err)
             self._unsubscribe = None
         if self._unsubscribe_reconnect is not None:
-            self._unsubscribe_reconnect()
+            try:
+                self._unsubscribe_reconnect()
+            except Exception as err:
+                _LOGGER.debug("Reconnect listener unsubscribe failed: %s", err)
             self._unsubscribe_reconnect = None
         for task in (self._debounce_task, self._refresh_task):
             if task is not None and not task.done():
@@ -124,6 +133,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         for domain in sorted(domains):
             try:
                 await self._hub.refresh_domain_config(domain)
+            except AUTH_ERRORS:
+                raise
+            except HomeAssistantError:
+                raise
             except COMMAND_ERRORS as err:
                 if is_connection_error(err) or is_timeout_error(err):
                     raise
@@ -196,7 +209,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
                 self._pending_domains.clear()
                 try:
                     await self._async_refresh_domains_locked(domains)
-                except COMMAND_ERRORS as err:
+                except (*COMMAND_ERRORS, HomeAssistantError) as err:
                     # The link is down: drop the queue; the reconnect refresh
                     # reloads everything.
                     self._pending_domains.clear()
