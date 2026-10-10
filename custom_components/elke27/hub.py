@@ -21,13 +21,20 @@ from elke27_lib import (
 )
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
+    E27Error,
+    E27NotReady,
+    E27Timeout,
+    E27TransportError,
     Elke27AuthError,
+    Elke27ConnectionError,
+    Elke27DisconnectedError,
     Elke27Error,
     Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27PanelError,
     Elke27PermissionError,
     Elke27PinRequiredError,
+    Elke27TimeoutError,
 )
 
 from homeassistant.core import HomeAssistant, callback
@@ -44,6 +51,21 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
+TIMEOUT_MESSAGE = (
+    "The panel did not respond in time; the command may not have been applied."
+)
+CONNECTION_MESSAGE = (
+    "Lost connection to the panel; the command may not have been applied."
+)
+# Every library failure a command can surface: elke27's public errors, its
+# lower-level E27 errors (async_execute returns these), and raw timeouts/OS errors.
+COMMAND_ERRORS: tuple[type[Exception], ...] = (
+    Elke27Error,
+    Elke27InvalidArgument,
+    E27Error,
+    TimeoutError,
+    OSError,
+)
 
 # Seconds to wait before re-reading a light's status after a set_status.
 LIGHT_REFRESH_DELAY = 3.0
@@ -203,7 +225,7 @@ class Elke27Hub:
         """Send one status request; return its reply payload, or None on failure."""
         try:
             result = await client.async_execute(command_key, **params)
-        except (Elke27Error, Elke27InvalidArgument) as err:
+        except COMMAND_ERRORS as err:
             _LOGGER.debug("Status refresh %s failed: %s", command_key, err)
             return None
         if not result.ok or not isinstance(result.data, Mapping):
@@ -253,7 +275,14 @@ class Elke27Hub:
         client = self._client
         if client is None:
             return False
-        await client.async_set_output(output_id, on=state)
+        try:
+            await client.async_set_output(output_id, on=state)
+        except Elke27PinRequiredError:
+            raise
+        except COMMAND_ERRORS as err:
+            _log_command_failure("Output", output_id, "set", err)
+            self._note_command_error(err)
+            raise HomeAssistantError(_error_message(err)) from err
         return True
 
     async def async_set_light(
@@ -492,8 +521,9 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
-        except (Elke27Error, Elke27InvalidArgument) as err:
+        except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
+            self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
@@ -502,18 +532,47 @@ class Elke27Hub:
         client = self._client
         if client is None:
             return False
-        result = await client.async_execute(command_key, **params)
+        try:
+            result = await client.async_execute(command_key, **params)
+        except Elke27PinRequiredError:
+            raise
+        except COMMAND_ERRORS as err:
+            _LOGGER.warning("Command %s failed: %s", command_key, err)
+            self._note_command_error(err)
+            raise HomeAssistantError(_error_message(err)) from err
         if not result.ok:
             if isinstance(result.error, Elke27PinRequiredError):
                 raise result.error
             if result.error is not None:
                 _LOGGER.warning("Command %s failed: %s", command_key, result.error)
+                self._note_command_error(result.error)
                 raise HomeAssistantError(_error_message(result.error)) from (
                     result.error
                 )
             _LOGGER.warning("Command %s was not accepted by the panel", command_key)
             raise HomeAssistantError(NOT_ACCEPTED_MESSAGE)
         return True
+
+    def _note_command_error(self, err: BaseException) -> None:
+        """
+        Treat a command timeout as evidence the link may be dead.
+
+        Asks elke27 to probe the panel now, so a dead link is detected within
+        the keepalive timeout instead of at the next scheduled keepalive. When
+        the probe fails the library disconnects and the reconnect loop starts.
+        Older elke27 versions without request_link_check() fall back to their
+        own keepalive.
+        """
+        if not is_timeout_error(err):
+            return
+        client = self._client
+        check = getattr(client, "request_link_check", None)
+        if check is None:
+            return
+        try:
+            check()
+        except Exception as check_err:  # noqa: BLE001
+            _LOGGER.debug("Link check request failed: %s", check_err)
 
     def _require_client(self) -> Elke27Client:
         """Return the connected client or raise."""
@@ -551,8 +610,9 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
-        except (Elke27Error, Elke27InvalidArgument) as err:
+        except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
+            self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
@@ -596,8 +656,9 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
-        except (Elke27Error, Elke27InvalidArgument) as err:
+        except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
+            self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
@@ -903,8 +964,33 @@ def _log_command_failure(
         _LOGGER.warning("%s %s %s failed: %s", kind, target_id, action, err)
 
 
+def is_timeout_error(err: BaseException) -> bool:
+    """Return True for any elke27 or raw timeout."""
+    return isinstance(err, (Elke27TimeoutError, E27Timeout, TimeoutError))
+
+
+def is_connection_error(err: BaseException) -> bool:
+    """Return True for any elke27 transport/session failure."""
+    if is_timeout_error(err):
+        return False
+    return isinstance(
+        err,
+        (
+            Elke27ConnectionError,
+            Elke27DisconnectedError,
+            E27TransportError,
+            E27NotReady,
+            OSError,
+        ),
+    )
+
+
 def _error_message(err: Exception) -> str:
     """Return a user-facing message for a library error."""
+    if is_timeout_error(err):
+        return TIMEOUT_MESSAGE
+    if is_connection_error(err):
+        return CONNECTION_MESSAGE
     return getattr(err, "user_message", None) or str(err) or type(err).__name__
 
 

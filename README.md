@@ -433,6 +433,12 @@ locks, climate and switches also work with this integration's entities.
   number. The serial is taken from the MAC address of the network interface Home Assistant
   uses to reach the panel, or randomly generated if that MAC can't be found. It is stored in
   the config entry, so it stays the same across restarts.
+- **Detecting a dropped connection:** the panel is probed after 30 seconds without any
+  traffic from it. If a probe, or any command, gets no answer at all, the integration probes
+  again right away and treats the connection as lost if that probe also goes unanswered for
+  5 seconds. *(Requires elke27 0.3.11 or newer; with 0.3.10 a dead connection can take about
+  2 minutes to notice.)* Until it is noticed, commands fail with *"The panel did not respond
+  in time; the command may not have been applied."*
 - **Reconnects:** if the connection drops, entities become unavailable and the integration
   keeps reconnecting with a growing delay of up to 5 minutes between attempts. When the
   connection comes back, it refreshes everything from the panel. If the panel rejects the link
@@ -502,6 +508,19 @@ correct value.
 Check the **Panel ready** diagnostic sensor. If it says `disconnected`, the integration has
 lost its session with the panel and is reconnecting. Make sure the panel is powered and
 reachable on the network.
+
+While entities are unavailable, Home Assistant itself skips them when you call an entity
+action (for example `light.turn_on`, `lock.unlock` or `alarm_control_panel.alarm_disarm`):
+the call returns without an error, but nothing is sent to the panel. This is Home Assistant
+core behavior for every integration, not something this integration can change. In
+automations, check the entity's state first (or use a condition on it) if you need to know
+the action ran. The integration's own actions, `elke27.alarm_arm_automatic` and
+`elke27.zone_bypass`, do report an error when the panel is not connected.
+
+If a command fails with *"The panel did not respond in time; the command may not have been
+applied."* or *"Lost connection to the panel; the command may not have been applied."*, the
+connection is being checked and will be re-established automatically. Check the device's
+state before retrying.
 
 ### Debug logging
 
