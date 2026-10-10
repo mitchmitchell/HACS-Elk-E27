@@ -75,8 +75,6 @@ or `Zone 12` is used.
 | Switch | Output | Turn the output on/off |
 | Sensor (diagnostic) | Panel (2 sensors) | Panel name, and panel connection state (`connected` / `disconnected`) |
 
-<!-- TODO: screenshots (device page, alarm keypad, zone attributes) in docs/images/ -->
-
 ### Alarm control panel (areas)
 
 - **Arm away**, **arm home** (the panel's *Stay* mode) and **disarm**. Each one needs your
@@ -245,8 +243,6 @@ Configuration happens entirely in the UI. There is no YAML.
 2. **Choose a setup method:**
    - **Discover panels**: searches your network for E27 panels.
    - **Manual setup**: enter the panel's address yourself.
-
-<!-- TODO: screenshots of the setup method choice and the credentials form. -->
 
 #### Discover panels
 
@@ -630,8 +626,6 @@ These are by design or limits of the panel.
 ## Known issues
 
 These are problems that are tracked for a fix.
-<!-- TODO: link each item to its GitHub issue number. -->
-
 - **Stale zone entities:** a zone you delete in the panel, or change to `UNDEFINED`, keeps its
   entity. Delete it yourself in Home Assistant. (`UNDEFINED` zones are only skipped at first
   setup.)
@@ -704,8 +698,8 @@ error code (in 0.1.7, including 11004 and 11008). Codes not listed here are show
 | 11008 | not authorized | The user code isn't allowed to do this in that area. Check the user's permissions in the panel. |
 | 11015 | area not ready (open or faulted zones) | Close the open zones (see the area's `faulted_zones` attribute), bypass them, or use arm custom bypass. |
 | 11023 | zone cannot be bypassed | The zone's panel programming doesn't allow bypass. |
-| 11028 | area already armed | `elke27.alarm_arm_automatic` treats an already-armed area as success. |
-| 11027 | area is in alarm | Disarm the area to clear the alarm first. |
+| 11027 | area is in alarm; disarm to clear it first | Disarm the area to clear the alarm first. |
+| 11028 | not allowed while armed | The area is armed. `elke27.alarm_arm_automatic` treats this as already armed (success, no change). |
 | 11037 | invalid user code | The code isn't a valid user code on the panel. |
 
 ### "PIN required to perform this action." / "Code must be numeric."
@@ -856,17 +850,19 @@ whole °F, so setpoints you set in °C are rounded.
 
 ### To 0.1.7
 
-Unique IDs, entity IDs, settings and action names are kept, so nothing needs to be set up
-again. Review these **behavior changes** before upgrading:
+No identity or config breaking changes (unique IDs, entity IDs, settings kept). Behavior changes that may affect automations:
 
 - **`elke27.alarm_arm_automatic` now arms with open zones.** It bypasses the open (faulted)
-  zones in its area and arms. In 0.1.6 it refused with *area not ready (error 11015)*.
+  zones in its area and arms immediately. In 0.1.6 it refused with *area not ready (error 11015)*.
   Automations that relied on that refusal **will now arm**. Add your own condition (for
   example the area's `ready` attribute) if you want the old behavior.
 - **Disarming during an automatic arm can leave zones bypassed.** If you disarm before the
   area has armed, the call stops (`stage: cancelled`) and zones it already bypassed **stay
   bypassed**. Clear them with `elke27.zone_bypass` and `bypass: false`. Disarming an area that
   did arm clears its bypasses.
+- **Commands while disconnected now fail.** Commands sent while the panel isn't connected
+  **fail with an error** instead of appearing to succeed. Entities go unavailable during a
+  disconnect and recover after the automatic reconnect.
 
 Other changes:
 
@@ -874,9 +870,6 @@ Other changes:
 - Failed bypasses or arms are **rolled back** (once), except when the result is uncertain.
   Failures create a persistent notification and fire `elke27_arm_automatic_failed`.
 - **Disarm always wins** over an automatic arm in progress.
-- Commands sent while the panel isn't connected now **fail with an error** instead of
-  appearing to succeed. Entities go unavailable during a disconnect and recover after the
-  automatic reconnect.
 - Panel error messages show the panel's real reason; codes must use the digits 0–9.
 
 ### To 0.1.6
