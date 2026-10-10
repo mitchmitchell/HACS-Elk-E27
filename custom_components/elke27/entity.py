@@ -78,6 +78,7 @@ def panel_display_name(
     if hub.panel_name:
         return hub.panel_name
     panel_name = snapshot.panel.panel_name
+    # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
     if isinstance(panel_name, str) and panel_name:
         return panel_name
     return entry.title

@@ -142,6 +142,7 @@ class Elke27Hub:
         snapshot = self.get_snapshot()
         if snapshot is not None:
             panel_name = snapshot.panel.panel_name
+            # Temporary until elke27_lib ships py.typed.
             if isinstance(panel_name, str) and panel_name:
                 return panel_name
         return self._panel_name
@@ -288,6 +289,7 @@ class Elke27Hub:
 
     def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], bool]:
         """Subscribe to client events."""
+        # Temporary until elke27_lib ships py.typed (untyped client API).
         return cast("Callable[[], bool]", self._require_client().subscribe(listener))
 
     def subscribe_typed(self, listener: Callable[[Any], None]) -> Callable[[], None]:
@@ -313,6 +315,7 @@ class Elke27Hub:
         client = self._client
         if client is None:
             return False
+        # Temporary until elke27_lib ships py.typed (untyped client API).
         return cast("bool", client.unsubscribe_typed(listener))
 
     async def async_set_output(self, output_id: int, *, state: bool) -> bool:

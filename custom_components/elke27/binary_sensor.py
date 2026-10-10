@@ -237,6 +237,7 @@ def _zone_device_class(
     zone_type = None
     if zone_definition is not None:
         zone_type = zone_definition.zone_type or zone_definition.kind
+    # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
     if isinstance(zone_type, str):
         normalized = zone_type.lower()
         if "motion" in normalized:

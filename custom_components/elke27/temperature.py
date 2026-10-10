@@ -9,6 +9,7 @@ _IMPLIED_DECIMAL_TEMP_THRESHOLD = 200
 
 def normalize_temperature(value: Any) -> float | None:
     """Normalize thermostat temperatures to display units."""
+    # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
     if not isinstance(value, int | float):
         return None
     # elke27 0.3.8+ already scales values by the panel "prec" mask. Values this

@@ -39,8 +39,35 @@ async def test_setup_with_empty_snapshot_creates_only_panel_sensors(
 
     assert hass.states.get("alarm_control_panel.test_panel_house") is None
     assert hass.states.get("binary_sensor.test_panel_front_door") is None
+    assert hass.states.get("light.test_panel") is None
+    assert hass.states.get("climate.test_panel") is None
+    assert hass.states.get("lock.test_panel") is None
+    assert hass.states.get("switch.test_panel") is None
     assert hass.states.get("sensor.test_panel_panel_name") is not None
     assert hass.states.get("sensor.test_panel_panel_ready") is not None
+
+
+async def test_empty_snapshot_platforms_have_no_domain_entities(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """Each platform leaves no entity states when its snapshot section is empty."""
+    mock_client.snapshot = PanelSnapshot.empty()
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    by_domain: dict[str, list[str]] = {}
+    for state in hass.states.async_all():
+        domain = state.entity_id.split(".", 1)[0]
+        by_domain.setdefault(domain, []).append(state.entity_id)
+
+    assert "alarm_control_panel" not in by_domain
+    assert "binary_sensor" not in by_domain
+    assert "light" not in by_domain
+    assert "climate" not in by_domain
+    assert "lock" not in by_domain
+    assert "switch" not in by_domain
+    assert "sensor" in by_domain
 
 
 async def test_coordinator_data_never_none_after_init(

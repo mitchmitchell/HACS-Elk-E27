@@ -99,6 +99,7 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
         if lock.locked is not None:
             return bool(lock.locked)
         status = lock.status
+        # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
         if isinstance(status, str):
             normalized = status.strip().upper()
             if normalized in {"ON", "LOCKED"}:

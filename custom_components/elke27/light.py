@@ -1,11 +1,9 @@
 """Lights for Elke27 lights."""
 
-# mypy: disable-error-code="misc"
-
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib.errors import Elke27PinRequiredError
 
@@ -69,8 +67,8 @@ async def async_setup_entry(
 class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
     """Representation of an Elke27 light."""
 
-    _attr_color_mode: ClassVar[ColorMode] = ColorMode.BRIGHTNESS
-    _attr_supported_color_modes: ClassVar[set[ColorMode]] = {ColorMode.BRIGHTNESS}
+    _attr_color_mode = ColorMode.BRIGHTNESS
+    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}  # noqa: RUF012
     _attr_has_entity_name = True
     _attr_translation_key = "light"
 
@@ -106,6 +104,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         if light.state is not None:
             return bool(light.state)
         level = light.level
+        # elke27_lib has no py.typed yet; narrow Any snapshot fields until typed.
         if isinstance(level, int | float):
             return level > 0
         return None
@@ -119,6 +118,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         level = light.level
         if level is None:
             return None
+        # elke27_lib has no py.typed yet; narrow Any snapshot fields until typed.
         level_int = int(level) if not isinstance(level, int) else level
         bounded = max(0, min(_ELK_MAX_DIM_LEVEL, level_int))
         return round(bounded * 255 / _ELK_MAX_DIM_LEVEL)

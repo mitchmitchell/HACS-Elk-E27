@@ -1,11 +1,9 @@
 """Thermostats for the Elke27 integration."""
 
-# mypy: disable-error-code="misc"
-
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib.errors import Elke27PinRequiredError
 
@@ -104,19 +102,19 @@ class Elke27Thermostat(
 
     _attr_has_entity_name = True
     _attr_translation_key = "thermostat"
-    _attr_supported_features: ClassVar[ClimateEntityFeature] = (
+    _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE_RANGE | ClimateEntityFeature.FAN_MODE
     )
-    _attr_hvac_modes: ClassVar[list[HVACMode]] = [
+    _attr_hvac_modes = [  # noqa: RUF012
         HVACMode.OFF,
         HVACMode.HEAT,
         HVACMode.COOL,
         HVACMode.HEAT_COOL,
     ]
-    _attr_fan_modes: ClassVar[list[str]] = [FAN_AUTO, FAN_ON]
-    _attr_temperature_unit: ClassVar[str] = UnitOfTemperature.FAHRENHEIT
-    _attr_min_temp: ClassVar[float] = 40
-    _attr_max_temp: ClassVar[float] = 99
+    _attr_fan_modes = [FAN_AUTO, FAN_ON]  # noqa: RUF012
+    _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
+    _attr_min_temp = 40
+    _attr_max_temp = 99
 
     def __init__(
         self,
@@ -156,6 +154,7 @@ class Elke27Thermostat(
             self._log_missing()
             return HVACMode.OFF
         mode = tstat.mode
+        # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
         if isinstance(mode, str):
             normalized = mode.strip().upper()
             return _TSTAT_TO_HVAC_MODE.get(normalized, HVACMode.OFF)
@@ -215,6 +214,7 @@ class Elke27Thermostat(
         if tstat is None:
             return None
         fan_mode = tstat.fan_mode
+        # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
         if isinstance(fan_mode, str):
             return _TSTAT_TO_FAN_MODE.get(fan_mode.strip().upper())
         return None
