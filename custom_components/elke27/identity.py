@@ -37,6 +37,11 @@ def config_entry_unique_id(panel_info: dict[str, Any]) -> str | None:
     mac = panel_mac_from_info(panel_info)
     if mac:
         return format_mac(str(mac))
+    return panel_serial_tier(panel_info)
+
+
+def panel_serial_tier(panel_info: dict[str, Any]) -> str | None:
+    """Panel serial identity tier (drop this helper to remove the serial tier)."""
     return panel_serial_from_info(panel_info)
 
 
@@ -58,8 +63,8 @@ def panel_identity_matches(
         and format_mac(str(live_mac)) != format_mac(str(stored_mac))
     ):
         return False
-    live_serial = panel_serial_from_info(live_panel_info)
-    stored_serial = panel_serial_from_info(stored_panel_info)
+    live_serial = panel_serial_tier(live_panel_info)
+    stored_serial = panel_serial_tier(stored_panel_info)
     return not (live_serial and stored_serial and live_serial != stored_serial)
 
 

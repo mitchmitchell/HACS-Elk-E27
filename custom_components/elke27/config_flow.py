@@ -41,7 +41,7 @@ from .identity import (
     config_entry_unique_id,
     panel_identity_matches,
     panel_mac_from_info,
-    panel_serial_from_info,
+    panel_serial_tier,
 )
 
 if TYPE_CHECKING:
@@ -540,7 +540,7 @@ def _reauth_candidate_unique_ids(panel_info: dict[str, Any]) -> set[str]:
     unique_id = config_entry_unique_id(panel_info)
     if unique_id:
         candidates.add(unique_id)
-    serial = panel_serial_from_info(panel_info)
+    serial = panel_serial_tier(panel_info)
     if serial and serial != unique_id:
         candidates.add(serial)
     mac = panel_mac_from_info(panel_info)

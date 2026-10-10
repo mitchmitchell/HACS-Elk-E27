@@ -30,55 +30,22 @@ from custom_components.elke27.const import (
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from tests.conftest import (
     HOST,
+    HOST_2,
     INTEGRATION_SERIAL,
     LINK_KEYS_JSON,
-    PANEL_MAC,
     PANEL_SERIAL,
+    PANEL_SERIAL_2,
     PORT,
     ClientHarness,
     panel_snapshot,
 )
-
-
-async def test_setup_skips_unique_id_backfill_and_raises_repair_on_collision(
-    hass: HomeAssistant, mock_client: ClientHarness
-) -> None:
-    """Skip unique_id backfill and open a repair if another entry owns the identity."""
-    owner = MockConfigEntry(
-        domain=DOMAIN,
-        title="Primary Panel",
-        unique_id=PANEL_MAC,
-        data={
-            "host": "192.0.2.11",
-            "port": PORT,
-            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
-        },
-    )
-    legacy = MockConfigEntry(
-        domain=DOMAIN,
-        title="Legacy Duplicate",
-        unique_id=None,
-        data={
-            "host": HOST,
-            "port": PORT,
-            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
-        },
-    )
-    owner.add_to_hass(hass)
-    legacy.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(legacy.entry_id)
-    await hass.async_block_till_done()
-    assert legacy.unique_id is None
-    issue = ir.async_get(hass).async_get_issue(
-        DOMAIN, f"duplicate_unique_id_{legacy.entry_id}"
-    )
-    assert issue is not None
-    assert issue.translation_key == "duplicate_unique_id"
 
 
 async def test_remove_entry_deletes_duplicate_unique_id_repair(
@@ -99,19 +66,21 @@ async def test_remove_entry_deletes_duplicate_unique_id_repair(
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
 
 
-async def test_setup_sets_unique_id_for_legacy_no_mac_entry(
+async def test_two_macless_entries_have_separate_devices_and_entity_ids(
     hass: HomeAssistant, mock_client: ClientHarness
 ) -> None:
-    """Setup assigns unique_id from panel serial when the panel reports no MAC."""
-    snapshot = panel_snapshot()
+    """Two MAC-less panels stay on separate devices with distinct entity unique IDs."""
+    snapshot_a = panel_snapshot()
     mock_client.snapshot = dataclasses.replace(
-        snapshot,
-        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
+        snapshot_a,
+        panel=dataclasses.replace(
+            snapshot_a.panel, mac=None, serial=PANEL_SERIAL, panel_name="Panel A"
+        ),
     )
-    entry = MockConfigEntry(
+    entry_a = MockConfigEntry(
         domain=DOMAIN,
-        title="Legacy Panel",
-        unique_id=None,
+        title="Panel A",
+        unique_id=PANEL_SERIAL,
         data={
             "host": HOST,
             "port": PORT,
@@ -119,10 +88,60 @@ async def test_setup_sets_unique_id_for_legacy_no_mac_entry(
             CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
         },
     )
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
+    entry_a.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry_a.entry_id)
     await hass.async_block_till_done()
-    assert entry.unique_id == PANEL_SERIAL
+
+    snapshot_b = panel_snapshot()
+    mock_client.snapshot = dataclasses.replace(
+        snapshot_b,
+        panel=dataclasses.replace(
+            snapshot_b.panel, mac=None, serial=PANEL_SERIAL_2, panel_name="Panel B"
+        ),
+    )
+    entry_b = MockConfigEntry(
+        domain=DOMAIN,
+        title="Panel B",
+        unique_id=PANEL_SERIAL_2,
+        data={
+            "host": HOST_2,
+            "port": PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    entry_b.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry_b.entry_id)
+    await hass.async_block_till_done()
+
+    device_registry = dr.async_get(hass)
+    elke27_devices = [
+        device
+        for device in device_registry.devices.values()
+        if device.identifiers
+        and any(identifier[0] == DOMAIN for identifier in device.identifiers)
+    ]
+    assert len(elke27_devices) == 2  # noqa: PLR2004
+    device_keys = {next(iter(device.identifiers))[1] for device in elke27_devices}
+    assert device_keys == {PANEL_SERIAL, PANEL_SERIAL_2}
+
+    entity_registry = er.async_get(hass)
+    area_entities = [
+        entity
+        for entity in entity_registry.entities.values()
+        if entity.platform == DOMAIN and entity.domain == "alarm_control_panel"
+    ]
+    assert len(area_entities) == 2  # noqa: PLR2004
+    assert area_entities[0].unique_id != area_entities[1].unique_id
+    assert PANEL_SERIAL in area_entities[0].unique_id
+    assert PANEL_SERIAL_2 in area_entities[1].unique_id
+
+    issues = ir.async_get(hass).issues
+    assert not any(
+        issue.translation_key == "duplicate_unique_id"
+        for issue in issues.values()
+        if issue.domain == DOMAIN
+    )
 
 
 async def test_setup_and_unload(

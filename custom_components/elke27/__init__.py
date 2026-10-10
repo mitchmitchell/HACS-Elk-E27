@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import asdict
 import logging
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from elke27_lib import ArmMode, PanelSnapshot, ZoneState
 from elke27_lib.errors import E27Error, Elke27Error, Elke27PinRequiredError
 import voluptuous as vol
 
 from homeassistant.components import persistent_notification
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import callback
 from homeassistant.exceptions import (
@@ -34,7 +33,6 @@ from homeassistant.helpers.target import (
 
 from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, CONF_PANEL, DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import unique_base
 from .hub import (
     AUTH_ERRORS,
     PIN_REQUIRED_REASON,
@@ -44,7 +42,7 @@ from .hub import (
     is_definitive_refusal,
     zone_bypass_label,
 )
-from .identity import async_get_integration_serial, config_entry_unique_id
+from .identity import async_get_integration_serial
 from .models import Elke27ConfigEntry, Elke27RuntimeData
 
 if TYPE_CHECKING:
@@ -202,10 +200,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
         ) from err
 
     coordinator.async_set_updated_data(hub.get_snapshot())
-    snapshot = hub.get_snapshot()
-    if snapshot is not None:
-        _async_backfill_config_entry_unique_id(hass, entry, asdict(snapshot.panel))
-    await _async_migrate_unique_ids(hass, entry, unique_base(hub, coordinator, entry))
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -238,73 +232,6 @@ def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) ->
     """Remove repairs issues scoped to one config entry."""
     ir.async_delete_issue(hass, DOMAIN, _duplicate_unique_id_issue_id(entry.entry_id))
     # Additional entry-scoped issues (for example reconnect_failed from PR #53) go here.
-
-
-@callback
-def _async_backfill_config_entry_unique_id(
-    hass: HomeAssistant,
-    entry: Elke27ConfigEntry,
-    panel_info: dict[str, Any],
-) -> None:
-    """Assign unique_id on first setup when missing, unless another entry owns it."""
-    if entry.unique_id is not None:
-        return
-    candidate = config_entry_unique_id(panel_info)
-    if candidate is None:
-        return
-    existing = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, candidate)
-    issue_id = _duplicate_unique_id_issue_id(entry.entry_id)
-    if existing is not None and existing.entry_id != entry.entry_id:
-        _LOGGER.warning(
-            "Cannot assign unique_id %s to Elke27 entry %s: already used by %s",
-            candidate,
-            entry.entry_id,
-            existing.entry_id,
-        )
-        ir.async_create_issue(
-            hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=False,
-            severity=ir.IssueSeverity.ERROR,
-            translation_key="duplicate_unique_id",
-            translation_placeholders={
-                "candidate": candidate,
-                "other_entry": existing.title or existing.entry_id,
-            },
-        )
-        return
-    hass.config_entries.async_update_entry(entry, unique_id=candidate)
-    ir.async_delete_issue(hass, DOMAIN, issue_id)
-
-
-async def _async_migrate_unique_ids(
-    hass: HomeAssistant, entry: ConfigEntry, base: str
-) -> None:
-    """Migrate legacy unique IDs to the <base>:<domain>:<id> format."""
-    registry = er.async_get(hass)
-    prefix = f"{base}_"
-    for entity in registry.entities.values():
-        if entity.platform != DOMAIN:
-            continue
-        if entity.config_entry_id != entry.entry_id:
-            continue
-        unique_id = entity.unique_id
-        if not unique_id.startswith(prefix):
-            continue
-        rest = unique_id[len(prefix) :]
-        if "_" not in rest:
-            continue
-        domain, numeric_id = rest.rsplit("_", 1)
-        new_unique_id = f"{base}:{domain}:{numeric_id}"
-        if registry.async_get_entity_id(entity.domain, DOMAIN, new_unique_id):
-            _LOGGER.debug(
-                "Unique ID migration skipped for %s; %s already exists",
-                entity.entity_id,
-                new_unique_id,
-            )
-            continue
-        registry.async_update_entity(entity.entity_id, new_unique_id=new_unique_id)
 
 
 async def _async_handle_alarm_arm_automatic(
