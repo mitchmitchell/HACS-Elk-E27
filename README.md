@@ -850,28 +850,37 @@ whole °F, so setpoints you set in °C are rounded.
 
 ### To 0.1.9
 
-Mostly internal cleanup (typed snapshot handling, stricter typing). **No production installs
-are expected yet**, but older dev/test setups may notice:
+Mostly internal cleanup (typed snapshots, strict typing). No production installs are
+expected yet, but older dev/test setups have two breaking changes:
 
-- **Legacy stored `pin` in config entry data is no longer removed on setup.** If an entry
-  still has a `pin` key from early builds, it stays in the config entry store until you
-  clean it up manually; the integration does not use it.
-- **Legacy entity unique IDs are not migrated.** IDs in the old `<base>_<domain>_<id>`
-  underscore form are not rewritten to the current colon form. Dev/test entity registry
-  entries can **duplicate** after upgrade (old and new entities). Reverting the integration
-  version does **not** undo those registry entries; remove duplicates in **Settings →
-  Entities** if needed.
+- **A legacy stored `pin` is no longer used or removed.** Very early builds saved a `pin` in
+  the config entry. 0.1.9 ignores it and no longer deletes it, so it stays in HA's config
+  store. What to do: to remove it, delete the integration entry and add it again. Entity IDs
+  may change. Otherwise it's harmless.
+- **Old unique IDs are not migrated.** `<base>_<domain>_<id>` entities aren't renamed to
+  `<base>:<domain>:<id>`, so you may see duplicates. What to do: (1) before upgrading,
+  restart once on 0.1.8 so its migration runs; (2) after upgrading, delete the unavailable
+  duplicates under **Settings → Devices & services → Entities**; (3) fix automations and
+  dashboards using the old IDs. Reverting to 0.1.8 does not remove the duplicates or undo
+  registry changes.
 
 ### To 0.1.8
 
-No identity or config breaking changes (unique IDs, entity IDs, settings kept). Behavior
-changes:
+No entity ID, entity unique ID or config-key changes. Behavior changes that may affect you:
 
-- **Setup and reconnect errors are clearer.** Invalid link keys start **reconfigure /
-  reauth** instead of endless retries; transient connection failures still retry setup.
+- **Re-link prompt instead of endless retries.** If the panel rejects the link or
+  credentials during setup, reconnect, refresh or a command, HA shows a re-link prompt (once
+  per load). Temporary connection problems still retry. What to do: open the prompt and enter
+  the access code and passphrase.
 - **Service user codes must be numeric** (digits only) for `elke27.alarm_arm_automatic` and
-  `elke27.zone_bypass`.
-- **Coordinator and platform typing** (no user-visible entity renames).
+  `elke27.zone_bypass`. What to do: use digits only for `code` in automations and scripts
+  (e.g. `!secret`). Non-numeric codes now fail validation before anything is sent.
+- **Re-link step renamed (relink → reauth_confirm).** What to do: if a re-link prompt was open
+  during the upgrade, dismiss it, reload, and open the new one.
+- **Re-link checks it's the same panel** (MAC or integration serial) and stops with 'wrong
+  panel' otherwise. What to do: check the host; if the panel was replaced, delete and re-add
+  the entry. Entries created before 0.1.8 may have stored the MAC in a different format; if
+  re-link reports 'wrong panel' for your own panel, delete and re-add the entry.
 
 ### To 0.1.7
 
