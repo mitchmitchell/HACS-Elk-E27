@@ -3,6 +3,18 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
+## [Unreleased] - 0.1.9 (draft; #50 not merged)
+
+### Changed
+- The integration always starts from an empty panel snapshot, never `None` (#50).
+- A zone with no reported open/closed state shows unknown with the default icon (#50).
+- Strict mypy runs in CI. Unused helpers and an old library fallback were removed (#50).
+
+### Breaking
+- None found compared with 0.1.8 (checked at #50 500e00d). The legacy `pin` cleanup is
+  kept, and the unique-ID migration was already removed in 0.1.8. Upgrading from 0.1.7?
+  Follow the 0.1.8 delete-and-re-add steps.
+
 ## [Unreleased] - 0.1.8 (draft; unreleased until the FAIL 2 fix lands)
 
 0.1.8 bundles **#48** (merged `2e589767`), **#53** (reconnect policy, merged `bac4c1ac`), and **#54**
