@@ -10,7 +10,7 @@ import sys
 from types import MappingProxyType
 from typing import Any
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 _HAS_DEPS = all(
     importlib.util.find_spec(name) is not None
@@ -20,12 +20,14 @@ _HAS_DEPS = all(
 if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parents[1]))
 
-    from elke27_lib import AreaState, PanelInfo, PanelSnapshot, ZoneState
+    from elke27_lib import AreaState, ArmMode, PanelInfo, PanelSnapshot, ZoneState
     from elke27_lib.errors import Elke27PinRequiredError
 
+    from custom_components.elke27 import hub as elke27_hub
     from custom_components.elke27.hub import (
         Elke27Hub,
         ZoneBypassFailedError,
+        area_armed_from_status_reply,
         area_faulted_zones,
         area_is_armed,
         zone_bypass_label,
@@ -285,11 +287,12 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
             zones={"status": "DD19"},
         )
         hub._client = client  # noqa: SLF001
-        fresh = await hub.async_refresh_area_state(1)
+        fresh, armed_reply = await hub.async_refresh_area_state(1)
         assert client.async_execute.await_args_list == [
             unittest.mock.call("area_get_status", area_id=1),
             unittest.mock.call("zone_get_all_zones_status"),
         ]
+        assert armed_reply is True
         assert area_is_armed(fresh, 1)
         assert fresh.zones[1].bypassed is True
         assert fresh.zones[2].bypassed is True
@@ -306,7 +309,8 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
         hub._client = self._client(  # noqa: SLF001
             area={"area_id": 1, "arm_state": "DISARMED"}, zones={"status": "99"}
         )
-        fresh = await hub.async_refresh_area_state(1)
+        fresh, armed_reply = await hub.async_refresh_area_state(1)
+        assert armed_reply is False
         assert not area_is_armed(fresh, 1)
         assert [zone.zone_id for zone in area_faulted_zones(fresh, 1)] == [1, 2]
 
@@ -319,10 +323,69 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
             area=Elke27TimeoutError("timeout"), zones=Elke27TimeoutError("timeout")
         )
         hub._client = client  # noqa: SLF001
-        fresh = await hub.async_refresh_area_state(1)
+        fresh, armed_reply = await hub.async_refresh_area_state(1)
+        assert armed_reply is None
         assert fresh == _two_area_snapshot()
         assert client.async_execute.await_count == 2
 
     async def test_no_client_returns_none(self) -> None:
         """Without a client there is nothing to refresh."""
-        assert await _hub().async_refresh_area_state(1) is None
+        assert await _hub().async_refresh_area_state(1) == (None, None)
+
+    async def test_poll_until_area_armed_waits_for_lagging_status(self) -> None:
+        """Polling keeps reading area_get_status until the panel reports armed."""
+        hub = _hub()
+        reads = {"count": 0}
+
+        async def _execute(command_key: str, **_params: Any) -> Any:
+            if command_key != "area_get_status":
+                msg = command_key
+                raise AssertionError(msg)
+            reads["count"] += 1
+            arm_state = "DISARMED" if reads["count"] < 3 else "ARMED_AWAY"
+            return MagicMock(
+                ok=True, data={"area_id": 1, "arm_state": arm_state}, error=None
+            )
+
+        client = MagicMock()
+        client.async_execute = AsyncMock(side_effect=_execute)
+        client.get_snapshot = MagicMock(return_value=_two_area_snapshot())
+        hub._client = client  # noqa: SLF001
+        with (
+            patch.object(elke27_hub, "ARM_STATUS_POLL_INTERVAL", 0.01),
+            patch.object(elke27_hub, "ARM_STATUS_POLL_TIMEOUT", 1.0),
+        ):
+            fresh, armed = await hub.async_poll_until_area_armed(1)
+        assert armed
+        assert area_is_armed(fresh, 1)
+        assert reads["count"] == 3
+
+    async def test_failed_area_status_reply_is_not_armed_from_cache(self) -> None:
+        """Polling does not treat a failed area_get_status as armed from the cache."""
+        hub = _hub()
+        before = _two_area_snapshot()
+        snapshot = dataclasses.replace(
+            before,
+            areas=MappingProxyType(
+                {
+                    **before.areas,
+                    1: dataclasses.replace(
+                        before.areas[1], arm_mode=ArmMode.ARMED_AWAY
+                    ),
+                }
+            ),
+        )
+        client = MagicMock()
+        client.get_snapshot = MagicMock(return_value=snapshot)
+        client.async_execute = AsyncMock(
+            side_effect=TimeoutError("no reply"),
+        )
+        hub._client = client  # noqa: SLF001
+        assert area_armed_from_status_reply(None) is None
+        with (
+            patch.object(elke27_hub, "ARM_STATUS_POLL_INTERVAL", 0.01),
+            patch.object(elke27_hub, "ARM_STATUS_POLL_TIMEOUT", 0.03),
+        ):
+            _fresh, armed = await hub.async_poll_until_area_armed(1)
+        assert not armed
+        assert client.async_execute.await_count >= 2
