@@ -38,7 +38,10 @@ if _HAS_DEPS:
     )
     from custom_components.elke27.binary_sensor import Elke27ZoneBinarySensor
     from custom_components.elke27.climate import Elke27Thermostat
-    from custom_components.elke27.entity import get_panel_field
+    from custom_components.elke27.entity import (
+        device_info_for_entry,
+        panel_display_name,
+    )
     from custom_components.elke27.hub import ZoneBypassFailedError, area_faulted_zones
     from custom_components.elke27.light import Elke27Light
     from homeassistant.components.alarm_control_panel import (
@@ -47,6 +50,7 @@ if _HAS_DEPS:
         AlarmControlPanelState,
     )
     from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+    from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, format_mac
 
 
 def _snapshot(**kwargs: Any) -> Any:
@@ -172,9 +176,7 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         entity = _area_entity(_two_area_snapshot(), _hub())
         assert entity.extra_state_attributes == {
             "ready": False,
-            "ready_status": getattr(
-                entity.coordinator.data.areas[1], "ready_status", None
-            ),
+            "ready_status": entity.coordinator.data.areas[1].ready_status,
             "faulted_zone_ids": [1, 2],
             "faulted_zones": ["Front Door", "Rear Door"],
         }
@@ -184,10 +186,9 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
     def test_ready_status_attribute(self) -> None:
         """ready_status is shown when the library provides it (elke27 0.3.10+)."""
         snapshot = _two_area_snapshot()
-        area = snapshot.areas[1]
-        if not hasattr(area, "ready_status"):
-            self.skipTest("elke27 without AreaState.ready_status")
-        area = dataclasses.replace(area, ready=False, ready_status="RDY_NOT")
+        area = dataclasses.replace(
+            snapshot.areas[1], ready=False, ready_status="RDY_NOT"
+        )
         snapshot = dataclasses.replace(
             snapshot, areas=MappingProxyType({**snapshot.areas, 1: area})
         )
@@ -313,6 +314,23 @@ class ZoneEntityTest(unittest.TestCase):
             "trouble": False,
         }
 
+    def test_unknown_open_state(self) -> None:
+        """A zone with open=None stays unknown, not closed."""
+        zone = ZoneState(zone_id=9, name="Garage", open=None)
+        definition = ZoneDefinition(
+            zone_id=9,
+            name="Garage Door",
+            definition="BURG EE DELAY",
+            zone_type="Door",
+        )
+        snapshot = _snapshot(zones={9: zone}, zone_definitions={9: definition})
+        entity = Elke27ZoneBinarySensor(
+            _coordinator(snapshot), _hub(), _entry(), 9, zone, definition
+        )
+        assert entity.is_on is None
+        assert entity.is_on is not False
+        assert entity.icon is None
+
     def test_no_zone_definition(self) -> None:
         """Without a ZoneDefinition, fall back to the zone name and opening class."""
         zone = ZoneState(zone_id=8, name="Hall", open=False)
@@ -327,23 +345,33 @@ class ZoneEntityTest(unittest.TestCase):
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
-class PanelFieldTest(unittest.TestCase):
-    """Test panel field lookup from the typed snapshot."""
+class PanelEntityHelpersTest(unittest.TestCase):
+    """Test panel helpers that read typed snapshot fields."""
 
-    def test_panel_fields(self) -> None:
-        """Fields come from snapshot.panel; a hub name overrides the name."""
+    def test_panel_display_name_and_device_info(self) -> None:
+        """Names and device info come from snapshot.panel and the hub."""
         snapshot = _snapshot(
             panel=PanelInfo(
-                mac="aa:bb", serial="S1", model="E27", firmware="1.2", panel_name="Main"
+                mac="aa:bb:cc:dd:ee:ff",
+                serial="S1",
+                model="E27",
+                firmware="1.2",
+                panel_name="Main",
             )
         )
-        assert get_panel_field(snapshot, None, "name") == "Main"
-        assert get_panel_field(snapshot, "Override", "name") == "Override"
-        assert get_panel_field(snapshot, None, "mac") == "aa:bb"
-        assert get_panel_field(snapshot, None, "serial") == "S1"
-        assert get_panel_field(snapshot, None, "model") == "E27"
-        assert get_panel_field(snapshot, None, "firmware") == "1.2"
-        assert get_panel_field(None, None, "mac") is None
+        hub = _hub()
+        hub.panel_name = "Override"
+        entry = _entry()
+        assert panel_display_name(snapshot, hub, entry) == "Override"
+        hub.panel_name = None
+        assert panel_display_name(snapshot, hub, entry) == "Main"
+        info = device_info_for_entry(hub, _coordinator(snapshot), entry)
+        assert info["serial_number"] == "S1"
+        assert info["model"] == "E27"
+        assert info["sw_version"] == "1.2"
+        assert info["connections"] == {
+            (CONNECTION_NETWORK_MAC, format_mac("aa:bb:cc:dd:ee:ff")),
+        }
 
 
 if __name__ == "__main__":

@@ -31,8 +31,8 @@ async def async_get_config_entry_diagnostics(
 
     snapshot_meta = _to_jsonable(
         {
-            "version": snapshot.version if snapshot is not None else None,
-            "updated_at": snapshot.updated_at if snapshot is not None else None,
+            "version": snapshot.version,
+            "updated_at": snapshot.updated_at,
         }
     )
 
@@ -43,7 +43,6 @@ async def async_get_config_entry_diagnostics(
         "manufacturer_number": MANUFACTURER_NUMBER,
         "integration_serial": entry.data.get(CONF_INTEGRATION_SERIAL),
         "link_keys_present": CONF_LINK_KEYS_JSON in entry.data,
-        "snapshot_available": snapshot is not None,
         "snapshot_meta": snapshot_meta,
         "snapshot": redacted_snapshot,
     }

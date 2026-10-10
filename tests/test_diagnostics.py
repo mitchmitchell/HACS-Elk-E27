@@ -22,7 +22,6 @@ async def test_diagnostics_without_secrets(
     result = await async_get_config_entry_diagnostics(hass, mock_config_entry)
     assert result["entry_id"] == mock_config_entry.entry_id
     assert result["link_keys_present"] is True
-    assert result["snapshot_available"] is True
     assert "1" in result["snapshot"]["areas"]
     assert CONF_LINK_KEYS_JSON not in result
     assert "linkkey" not in repr(result).lower()

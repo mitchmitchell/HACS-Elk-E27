@@ -199,7 +199,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
             translation_placeholders={"host": host, "port": str(port)},
         ) from err
 
-    coordinator.async_set_updated_data(hub.get_snapshot())
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -271,6 +270,15 @@ async def _async_handle_alarm_arm_automatic(
         raise HomeAssistantError(msg) from failures[0]
 
 
+def _config_entry_id(entity_entry: er.RegistryEntry) -> str:
+    """Return the config entry id for an entity registry entry."""
+    config_entry_id = entity_entry.config_entry_id
+    if config_entry_id is None:
+        msg = "Entity is not tied to a config entry"
+        raise ServiceValidationError(msg)
+    return config_entry_id
+
+
 def _entity_ids_from_service_call(hass: HomeAssistant, call: ServiceCall) -> list[str]:
     """Extract target entity IDs from a service call."""
     referenced = async_extract_referenced_entity_ids(hass, TargetSelection(call.data))
@@ -331,7 +339,7 @@ async def _async_arm_automatic_entity(
             reason="cancelled by a disarm of this area",
             zone=None,
             bypassed_zones=attempted,
-            config_entry_id=entity_entry.config_entry_id,
+            config_entry_id=_config_entry_id(entity_entry),
             arm_sent=bool(arm_sent),
         )
         msg = (
@@ -387,7 +395,7 @@ async def _async_arm_automatic_locked(
             bypassed_zones=bypassed,
             rolled_back_zones=rolled_back,
             still_bypassed_zones=still_bypassed,
-            config_entry_id=entity_entry.config_entry_id,
+            config_entry_id=_config_entry_id(entity_entry),
         )
         detail = f"{zone_bypass_label(zone)}: {reason}" if zone is not None else reason
         msg = f"Area {area_id} was not armed: {_sentence(detail)}"
@@ -408,7 +416,7 @@ async def _async_arm_automatic_locked(
             zone=None,
             bypassed_zones=bypassed,
             still_bypassed_zones=bypassed,
-            config_entry_id=entity_entry.config_entry_id,
+            config_entry_id=_config_entry_id(entity_entry),
         )
         msg = (
             f"Area {area_id} arm result is unknown: {_sentence(reason)}"
@@ -622,7 +630,7 @@ def _entity_runtime_data(
         msg = f"Entity {entity_id} is not an Elke27 {label}"
         raise ServiceValidationError(msg)
 
-    config_entry = hass.config_entries.async_get_entry(entity_entry.config_entry_id)
+    config_entry = hass.config_entries.async_get_entry(_config_entry_id(entity_entry))
     if config_entry is None:
         msg = f"Config entry for {entity_id} was not found"
         raise ServiceValidationError(msg)

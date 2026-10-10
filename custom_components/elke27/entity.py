@@ -109,6 +109,13 @@ def build_unique_id(base: str, domain: str, numeric_id: int | str) -> str:
     return f"{base}:{domain}:{numeric_id}"
 
 
+def panel_display_name(
+    snapshot: PanelSnapshot, hub: Elke27Hub, entry: Elke27ConfigEntry
+) -> str | None:
+    """Return the panel name from the hub, snapshot, or entry title."""
+    return get_panel_field(snapshot, hub.panel_name, "name") or entry.title
+
+
 NOT_CONNECTED_MESSAGE = "The panel is not connected; the command was not sent."
 
 

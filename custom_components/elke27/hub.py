@@ -7,7 +7,7 @@ from collections.abc import Mapping
 import dataclasses
 import logging
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from elke27_lib import (
     ArmMode,
@@ -76,6 +76,10 @@ AUTH_ERRORS: tuple[type[Exception], ...] = (
     Elke27AuthError,
     Elke27CryptoError,
 )
+RECONNECT_RETRY_ERRORS: tuple[type[Exception], ...] = (
+    *COMMAND_ERRORS,
+    ConfigEntryNotReady,
+)
 
 # Seconds to wait before re-reading a light's status after a set_status.
 LIGHT_REFRESH_DELAY = 3.0
@@ -140,8 +144,11 @@ class Elke27Hub:
     def panel_name(self) -> str | None:
         """Return the panel name reported by the panel, else the configured name."""
         snapshot = self.get_snapshot()
-        if snapshot is not None and snapshot.panel.panel_name:
-            return snapshot.panel.panel_name
+        if snapshot is not None:
+            panel_name = snapshot.panel.panel_name
+            # Temporary until elke27_lib ships py.typed.
+            if isinstance(panel_name, str) and panel_name:
+                return panel_name
         return self._panel_name
 
     async def async_connect(self) -> None:
@@ -330,7 +337,8 @@ class Elke27Hub:
 
     def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], bool]:
         """Subscribe to client events."""
-        return self._require_client().subscribe(listener)
+        # Temporary until elke27_lib ships py.typed (untyped client API).
+        return cast("Callable[[], bool]", self._require_client().subscribe(listener))
 
     def subscribe_typed(self, listener: Callable[[Any], None]) -> Callable[[], None]:
         """Subscribe to typed client events."""
@@ -355,7 +363,8 @@ class Elke27Hub:
         client = self._client
         if client is None:
             return False
-        return client.unsubscribe_typed(listener)
+        # Temporary until elke27_lib ships py.typed (untyped client API).
+        return cast("bool", client.unsubscribe_typed(listener))
 
     async def async_set_output(self, output_id: int, *, state: bool) -> bool:
         """Turn an output on or off."""
@@ -861,7 +870,7 @@ class Elke27Hub:
                 self._reconnect_attempts = 0
                 self.start_reauth_once()
                 return
-            except (*COMMAND_ERRORS, ConfigEntryNotReady) as err:
+            except RECONNECT_RETRY_ERRORS as err:
                 _LOGGER.debug("Reconnect attempt failed: %s", err)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("Unexpected reconnect failure: %s", err)

@@ -177,12 +177,3 @@ class LockCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_lock()
         assert str(ctx.exception) == TIMEOUT_MESSAGE
-
-    async def test_old_library_without_link_check(self) -> None:
-        """elke27 0.3.10 has no request_link_check; the error is still clean."""
-        client = create_autospec(Elke27Client, instance=True)
-        client.async_execute.side_effect = E27Timeout("timeout")
-        entity = _lock(_hub(client))
-        with self.assertRaises(HomeAssistantError) as ctx:
-            await entity.async_lock()
-        assert str(ctx.exception) == TIMEOUT_MESSAGE

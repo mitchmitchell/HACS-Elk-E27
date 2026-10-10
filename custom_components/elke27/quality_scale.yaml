@@ -63,4 +63,8 @@ rules:
   inject-websession:
     status: exempt
     comment: The panel protocol is raw TCP; no HTTP session is used.
-  strict-typing: todo
+  strict-typing:
+    status: todo
+    comment: >-
+      CI runs strict mypy on custom_components/elke27; remaining isinstance/cast
+      at elke27_lib boundaries stay until elke27 ships py.typed.

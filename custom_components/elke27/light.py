@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib.errors import Elke27PinRequiredError
 
-from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode, LightEntity
+from homeassistant.components.light import ATTR_BRIGHTNESS, LightEntity
+from homeassistant.components.light.const import ColorMode
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -16,7 +17,6 @@ from .entity import (
     build_unique_id,
     device_info_for_entry,
     raise_if_not_sent,
-    sanitize_name,
     unique_base,
 )
 
@@ -48,9 +48,6 @@ async def async_setup_entry(
 
     def _async_add_lights() -> None:
         snapshot = coordinator.data
-        if snapshot is None:
-            _LOGGER.debug("Light entities skipped because snapshot is unavailable")
-            return
         entities: list[Elke27Light] = []
         if not snapshot.lights:
             _LOGGER.debug("No lights available for entity creation")
@@ -71,7 +68,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
     """Representation of an Elke27 light."""
 
     _attr_color_mode = ColorMode.BRIGHTNESS
-    _attr_supported_color_modes: ClassVar[set[ColorMode]] = {ColorMode.BRIGHTNESS}
+    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}  # noqa: RUF012
     _attr_has_entity_name = True
     _attr_translation_key = "light"
 
@@ -88,7 +85,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         self._hub = hub
         self._entry = entry
         self._light_id = light_id
-        self._attr_name = sanitize_name(light.name) or f"Light {light_id}"
+        self._attr_name = light.name or f"Light {light_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "light",
@@ -105,9 +102,11 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
             self._log_missing()
             return None
         if light.state is not None:
-            return light.state
-        if light.level is not None:
-            return light.level > 0
+            return bool(light.state)
+        level = light.level
+        # elke27_lib has no py.typed yet; narrow Any snapshot fields until typed.
+        if isinstance(level, int | float):
+            return level > 0
         return None
 
     @property
@@ -119,7 +118,9 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         level = light.level
         if level is None:
             return None
-        bounded = max(0, min(_ELK_MAX_DIM_LEVEL, level))
+        # elke27_lib has no py.typed yet; narrow Any snapshot fields until typed.
+        level_int = int(level) if not isinstance(level, int) else level
+        bounded = max(0, min(_ELK_MAX_DIM_LEVEL, level_int))
         return round(bounded * 255 / _ELK_MAX_DIM_LEVEL)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -176,7 +177,5 @@ def _level_from_kwargs(kwargs: dict[str, Any]) -> int:
     return _ELK_MAX_DIM_LEVEL
 
 
-def _get_light(snapshot: PanelSnapshot | None, light_id: int) -> LightState | None:
-    if snapshot is None:
-        return None
+def _get_light(snapshot: PanelSnapshot, light_id: int) -> LightState | None:
     return snapshot.lights.get(light_id)
