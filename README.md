@@ -194,6 +194,7 @@ or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| 0.1.8 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 
@@ -866,7 +867,25 @@ expected yet, but older dev/test setups have two breaking changes:
 
 ### To 0.1.8
 
-No entity ID, entity unique ID or config-key changes. Behavior changes that may affect you:
+**Breaking changes — all 0.1.7 users must delete and re-add the integration.**
+
+There is no in-place migration. Remove each Elk E27 config entry under **Settings → Devices &
+services**, then add the panel again with the same linking credentials.
+
+- **Config entry `unique_id`** uses **formatted panel MAC** when the panel reports one, otherwise
+  the panel’s own **hardware serial** (when present). If the panel reports **neither MAC nor
+  serial** (as on some hardware today), `unique_id` stays **unset**, the entry is deduplicated by
+  **host and port** only, and devices and entities use the **config entry id** as their identity
+  until a later release adds a stronger panel identifier. **Changing the panel’s IP address** in
+  that case is treated as a new panel: delete the entry and add it again at the new host.
+- The integration serial used for E27 linking identifies Home Assistant, not the panel, and is
+  never used as config or entity identity.
+- **Entity unique IDs and entity IDs may change** (devices, entities, and automations that
+  referenced the old IDs or the integration serial as an entity base will need updating).
+- Dashboards, automations, and scripts that target Elk E27 entities should be reviewed after
+  re-adding.
+
+Behavior changes that may affect you:
 
 - **Re-link prompt instead of endless retries.** If the panel rejects the link or
   credentials during setup, reconnect, refresh or a command, HA shows a re-link prompt (once

@@ -21,7 +21,11 @@ from homeassistant.exceptions import (
     HomeAssistantError,
     ServiceValidationError,
 )
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.helpers.target import (
     TargetSelection,
     async_extract_referenced_entity_ids,
@@ -207,10 +211,26 @@ async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> b
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
+    """Clean up integration state when a config entry is removed."""
+    _async_delete_entry_issues(hass, entry)
+
+
 def _panel_name_from_entry(panel: object | None) -> str | None:
     if isinstance(panel, dict):
         return panel.get("panel_name") or panel.get("name")
     return None
+
+
+def _duplicate_unique_id_issue_id(entry_id: str) -> str:
+    return f"duplicate_unique_id_{entry_id}"
+
+
+@callback
+def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
+    """Remove repairs issues scoped to one config entry."""
+    ir.async_delete_issue(hass, DOMAIN, _duplicate_unique_id_issue_id(entry.entry_id))
+    # Additional entry-scoped issues (for example reconnect_failed from PR #53) go here.
 
 
 async def _async_handle_alarm_arm_automatic(

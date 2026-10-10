@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import re
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.const import CONF_HOST
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
@@ -12,8 +12,9 @@ from homeassistant.helpers.device_registry import (
     format_mac,
 )
 
-from .const import CONF_INTEGRATION_SERIAL, DOMAIN, MANUFACTURER_NUMBER
+from .const import DOMAIN
 from .hub import NOT_ACCEPTED_MESSAGE
+from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot
@@ -21,6 +22,36 @@ if TYPE_CHECKING:
     from .coordinator import Elke27DataUpdateCoordinator
     from .hub import Elke27Hub
     from .models import Elke27ConfigEntry
+
+_NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9 _-]")
+
+
+def sanitize_name(name: str | None) -> str | None:
+    """Normalize entity names to Home Assistant-safe characters."""
+    if name is None:
+        return None
+    return name
+
+
+_PANEL_FIELDS = {
+    "name": "panel_name",
+    "mac": "mac",
+    "serial": "serial",
+    "model": "model",
+    "firmware": "firmware",
+}
+
+
+def get_panel_field(
+    snapshot: PanelSnapshot | None, panel_name: str | None, field: str
+) -> Any:
+    """Return a field from the current panel snapshot."""
+    if field == "name" and panel_name:
+        return sanitize_name(panel_name)
+    if snapshot is None:
+        return None
+    value = getattr(snapshot.panel, _PANEL_FIELDS[field])
+    return sanitize_name(value) if field == "name" else value
 
 
 def device_info_for_entry(
@@ -30,40 +61,47 @@ def device_info_for_entry(
 ) -> DeviceInfo:
     """Build device info for entities tied to a config entry."""
     snapshot = coordinator.data
-    panel = snapshot.panel
-    panel_name = hub.panel_name or panel.panel_name or entry.title
-    integration_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
-    identifier = (
-        f"{MANUFACTURER_NUMBER}-{integration_serial}"
-        if integration_serial
-        else entry.entry_id
-    )
-    identifiers = {(DOMAIN, identifier)}
+    panel_name = get_panel_field(snapshot, hub.panel_name, "name") or entry.title
+    mac = get_panel_field(snapshot, hub.panel_name, "mac")
+    panel_serial = get_panel_field(snapshot, hub.panel_name, "serial")
+    model = get_panel_field(snapshot, hub.panel_name, "model")
+    firmware = get_panel_field(snapshot, hub.panel_name, "firmware")
+    identifiers = {(DOMAIN, entry_identity_key(hub, coordinator, entry))}
     return DeviceInfo(
-        connections={(CONNECTION_NETWORK_MAC, panel.mac)} if panel.mac else set(),
+        connections={(CONNECTION_NETWORK_MAC, mac)} if mac else set(),
         identifiers=identifiers,
         name=panel_name,
-        model=panel.model,
-        sw_version=panel.firmware,
-        serial_number=panel.serial,
+        model=model,
+        sw_version=firmware,
+        serial_number=panel_serial,
     )
+
+
+def entry_identity_key(
+    hub: Elke27Hub,
+    coordinator: Elke27DataUpdateCoordinator,
+    entry: Elke27ConfigEntry,
+) -> str:
+    """Return identity: formatted MAC, panel serial, or entry id if both absent."""
+    snapshot = coordinator.data
+    mac = get_panel_field(snapshot, hub.panel_name, "mac")
+    if mac:
+        return format_mac(str(mac))
+    serial = get_panel_field(snapshot, hub.panel_name, "serial")
+    if serial is not None:
+        panel_serial = panel_serial_from_info({"serial": serial})
+        if panel_serial:
+            return panel_serial
+    return entry.entry_id
 
 
 def unique_base(
-    _hub: Elke27Hub,
+    hub: Elke27Hub,
     coordinator: Elke27DataUpdateCoordinator,
     entry: Elke27ConfigEntry,
 ) -> str:
     """Return the stable unique ID base for this config entry."""
-    mac = coordinator.data.panel.mac
-    if mac:
-        return format_mac(str(mac))
-    integration_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
-    if integration_serial:
-        return str(integration_serial)
-    if entry.unique_id:
-        return entry.unique_id
-    return str(entry.data[CONF_HOST])
+    return entry_identity_key(hub, coordinator, entry)
 
 
 def build_unique_id(base: str, domain: str, numeric_id: int | str) -> str:
@@ -75,13 +113,7 @@ def panel_display_name(
     snapshot: PanelSnapshot, hub: Elke27Hub, entry: Elke27ConfigEntry
 ) -> str | None:
     """Return the panel name from the hub, snapshot, or entry title."""
-    if hub.panel_name:
-        return hub.panel_name
-    panel_name = snapshot.panel.panel_name
-    # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
-    if isinstance(panel_name, str) and panel_name:
-        return panel_name
-    return entry.title
+    return get_panel_field(snapshot, hub.panel_name, "name") or entry.title
 
 
 NOT_CONNECTED_MESSAGE = "The panel is not connected; the command was not sent."
