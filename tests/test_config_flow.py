@@ -281,7 +281,8 @@ async def test_discovery_panel_select_rescan_and_dynamic_labels(
         ),
     ]
     schema = await flow._async_discovery_schema()
-    select_cfg = _panel_select(schema).config["select"]
+    panel_select = _panel_select(schema)
+    select_cfg = panel_select.config.get("select", panel_select.config)
     assert "translation_key" not in select_cfg
     options = select_cfg["options"]
     assert options[0] == {"value": "rescan", "label": "Rescan for panels"}
