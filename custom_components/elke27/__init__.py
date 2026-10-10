@@ -71,6 +71,7 @@ OUTCOME_NOT_ARMED = "not_armed"
 OUTCOME_UNKNOWN = "unknown"
 ARM_NOT_SENT_REASON = "the arm command was not sent (the panel is not connected)"
 
+
 def _numeric_service_code(value: str) -> str:
     """Validate a service user code is numeric."""
     code = cv.string(value).strip()
