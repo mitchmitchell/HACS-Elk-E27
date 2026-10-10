@@ -848,6 +848,31 @@ whole °F, so setpoints you set in °C are rounded.
 
 ## Upgrading
 
+### To 0.1.9
+
+Mostly internal cleanup (typed snapshot handling, stricter typing). **No production installs
+are expected yet**, but older dev/test setups may notice:
+
+- **Legacy stored `pin` in config entry data is no longer removed on setup.** If an entry
+  still has a `pin` key from early builds, it stays in the config entry store until you
+  clean it up manually; the integration does not use it.
+- **Legacy entity unique IDs are not migrated.** IDs in the old `<base>_<domain>_<id>`
+  underscore form are not rewritten to the current colon form. Dev/test entity registry
+  entries can **duplicate** after upgrade (old and new entities). Reverting the integration
+  version does **not** undo those registry entries; remove duplicates in **Settings →
+  Entities** if needed.
+
+### To 0.1.8
+
+No identity or config breaking changes (unique IDs, entity IDs, settings kept). Behavior
+changes:
+
+- **Setup and reconnect errors are clearer.** Invalid link keys start **reconfigure /
+  reauth** instead of endless retries; transient connection failures still retry setup.
+- **Service user codes must be numeric** (digits only) for `elke27.alarm_arm_automatic` and
+  `elke27.zone_bypass`.
+- **Coordinator and platform typing** (no user-visible entity renames).
+
 ### To 0.1.7
 
 No identity or config breaking changes (unique IDs, entity IDs, settings kept). Behavior changes that may affect automations:
