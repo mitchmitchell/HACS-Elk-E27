@@ -157,6 +157,28 @@ async def test_reconnect_and_connected_event_refresh_once(
     mock_client.client.async_refresh_csm.assert_awaited_once()
 
 
+async def test_debounced_refresh_stops_when_client_disconnects(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """A debounced refresh stops cleanly when the hub has no client."""
+    await _setup(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    hub = mock_config_entry.runtime_data.hub
+    coordinator._debounce_seconds = 0
+    hub._client = None
+    refresh = AsyncMock()
+    mock_client.client.async_refresh_domain_config = refresh
+
+    mock_client.emit(_domain_event("light"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    task = coordinator._debounce_task
+    assert task is not None
+    await task
+    refresh.assert_not_awaited()
+    assert coordinator._pending_domains == set()
+
+
 async def test_debounced_refresh_stops_on_connection_error(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:

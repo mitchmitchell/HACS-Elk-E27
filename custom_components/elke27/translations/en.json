@@ -126,6 +126,9 @@
     },
     "code_not_numeric": {
       "message": "The code must be numeric."
+    },
+    "panel_not_ready": {
+      "message": "The client did not become ready before timeout."
     }
   },
   "selector": {
@@ -133,6 +136,11 @@
       "options": {
         "discover": "Discover panels",
         "manual": "Manual setup"
+      }
+    },
+    "panel": {
+      "options": {
+        "rescan": "Rescan for panels"
       }
     }
   },

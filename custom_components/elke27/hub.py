@@ -38,9 +38,13 @@ from elke27_lib.errors import (
 )
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+)
 
-from .const import READY_TIMEOUT
+from .const import DOMAIN, READY_TIMEOUT
 from .identity import build_client_identity
 
 if TYPE_CHECKING:
@@ -66,6 +70,11 @@ COMMAND_ERRORS: tuple[type[Exception], ...] = (
     E27Error,
     TimeoutError,
     OSError,
+)
+AUTH_ERRORS: tuple[type[Exception], ...] = (
+    Elke27LinkRequiredError,
+    Elke27AuthError,
+    Elke27CryptoError,
 )
 RECONNECT_RETRY_ERRORS: tuple[type[Exception], ...] = (
     *COMMAND_ERRORS,
@@ -102,6 +111,7 @@ class Elke27Hub:
         self._client: Elke27Client | None = None
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._connect_lock = asyncio.Lock()
+        self._reauth_requested = False
         self._area_arm_locks: dict[int, asyncio.Lock] = {}
         self._arm_automatic_tasks: dict[int, set[asyncio.Task[Any]]] = {}
         self._disarm_cancelled: set[asyncio.Task[Any]] = set()
@@ -156,8 +166,10 @@ class Elke27Hub:
             self._client = client
 
             def _raise_not_ready() -> None:
-                msg = "The client did not become ready before timeout"
-                raise ConfigEntryNotReady(msg)
+                raise ConfigEntryNotReady(
+                    translation_domain=DOMAIN,
+                    translation_key="panel_not_ready",
+                )
 
             try:
                 await client.async_connect(self._host, self._port, link_keys)
@@ -176,7 +188,10 @@ class Elke27Hub:
                 # re-raise unchanged.
                 self._client = None
                 if self._connection_unsubscribe is not None:
-                    self._connection_unsubscribe()
+                    try:
+                        self._connection_unsubscribe()
+                    except Exception as err:  # noqa: BLE001
+                        _LOGGER.debug("Connection unsubscribe failed: %s", err)
                     self._connection_unsubscribe = None
                 await self._async_disconnect_client(client)
                 raise
@@ -197,7 +212,10 @@ class Elke27Hub:
         """Disconnect the client and unregister event handlers."""
         was_connected = self._client is not None
         if self._connection_unsubscribe is not None:
-            self._connection_unsubscribe()
+            try:
+                self._connection_unsubscribe()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("Connection unsubscribe failed: %s", err)
             self._connection_unsubscribe = None
         client = self._client
         self._client = None
@@ -652,7 +670,10 @@ class Elke27Hub:
         """Clear typed subscriptions when the client disconnects."""
         for cb, unsubscribe in list(self._typed_callbacks.items()):
             if unsubscribe is not None:
-                unsubscribe()
+                try:
+                    unsubscribe()
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("Typed callback unsubscribe failed: %s", err)
             self._typed_callbacks[cb] = None
 
     async def async_disarm_area(
@@ -763,15 +784,18 @@ class Elke27Hub:
             _LOGGER.debug("Reconnect attempt %s starting", self._reconnect_attempts + 1)
             try:
                 await self._async_connect()
-            except (Elke27LinkRequiredError, Elke27AuthError, Elke27CryptoError) as err:
+            except AUTH_ERRORS as err:
                 # The panel no longer accepts the link: retrying cannot help.
                 _LOGGER.warning("Reconnect stopped; relink required: %s", err)
                 self._reconnect_attempts = 0
-                if self._entry is not None:
+                if self._entry is not None and not self._reauth_requested:
+                    self._reauth_requested = True
                     self._entry.async_start_reauth(self._hass)
                 return
             except RECONNECT_RETRY_ERRORS as err:
                 _LOGGER.debug("Reconnect attempt failed: %s", err)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("Unexpected reconnect failure: %s", err)
             else:
                 self._reconnect_attempts = 0
                 self._notify_reconnected()
@@ -957,8 +981,9 @@ def _validated_pin(pin: str) -> str:
     """Return the user code as a digit string, or raise if it is not numeric."""
     value = str(pin).strip()
     if not value.isdigit():
-        msg = "Code must be numeric."
-        raise HomeAssistantError(msg)
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="code_not_numeric"
+        )
     return value
 
 

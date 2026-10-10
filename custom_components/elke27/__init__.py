@@ -8,14 +8,7 @@ import logging
 from typing import TYPE_CHECKING, NoReturn
 
 from elke27_lib import ArmMode, ZoneState
-from elke27_lib.errors import (
-    E27Error,
-    Elke27AuthError,
-    Elke27CryptoError,
-    Elke27Error,
-    Elke27LinkRequiredError,
-    Elke27PinRequiredError,
-)
+from elke27_lib.errors import E27Error, Elke27Error, Elke27PinRequiredError
 import voluptuous as vol
 
 from homeassistant.components import persistent_notification
@@ -37,6 +30,7 @@ from homeassistant.helpers.target import (
 from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, CONF_PANEL, DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
 from .hub import (
+    AUTH_ERRORS,
     PIN_REQUIRED_REASON,
     Elke27Hub,
     ZoneBypassFailedError,
@@ -76,10 +70,20 @@ OUTCOME_NOT_ARMED = "not_armed"
 OUTCOME_UNKNOWN = "unknown"
 ARM_NOT_SENT_REASON = "the arm command was not sent (the panel is not connected)"
 
+
+def _numeric_service_code(value: str) -> str:
+    """Validate a service user code is numeric."""
+    code = cv.string(value).strip()
+    if not code.isdigit():
+        msg = "Code must be numeric"
+        raise vol.Invalid(msg)
+    return code
+
+
 SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA = cv.make_entity_service_schema(
     {
         vol.Required(ATTR_MODE): vol.In(("away", "home")),
-        vol.Required(ATTR_CODE): cv.string,
+        vol.Required(ATTR_CODE): _numeric_service_code,
     }
 )
 
@@ -88,17 +92,12 @@ ATTR_BYPASS = "bypass"
 
 SERVICE_ZONE_BYPASS_SCHEMA = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_CODE): cv.string,
+        vol.Required(ATTR_CODE): _numeric_service_code,
         vol.Optional(ATTR_BYPASS, default=True): cv.boolean,
     }
 )
 
 # Errors that mean the stored link is no longer accepted: start reauth.
-AUTH_ERRORS: tuple[type[Exception], ...] = (
-    Elke27LinkRequiredError,
-    Elke27AuthError,
-    Elke27CryptoError,
-)
 # Any other library or network failure during setup: let Home Assistant retry.
 SETUP_RETRY_ERRORS: tuple[type[Exception], ...] = (
     Elke27Error,
@@ -106,6 +105,7 @@ SETUP_RETRY_ERRORS: tuple[type[Exception], ...] = (
     TimeoutError,
     OSError,
     ConfigEntryNotReady,
+    HomeAssistantError,
 )
 PRIMED_DOMAINS = ("light", "lock", "tstat")
 

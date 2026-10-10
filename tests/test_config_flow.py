@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, create_autospec, patch
 from elke27_lib import LinkKeys
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
+    E27Timeout,
     Elke27AuthError,
     Elke27ConnectionError,
     Elke27LinkRequiredError,
@@ -131,6 +132,25 @@ async def test_manual_errors_then_recover(
         result["flow_id"], user_input
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+@pytest.mark.parametrize(
+    "error",
+    [OSError("unreachable"), TimeoutError("slow"), E27Timeout("raw timeout")],
+)
+async def test_manual_cannot_connect_os_timeout_errors(
+    hass: HomeAssistant, flow_client: Any, error: Exception
+) -> None:
+    """OS, timeout and raw E27 errors show cannot_connect."""
+    result = await _start_manual(hass)
+    flow_client.async_link.side_effect = error
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}
+    flow_client.async_disconnect.assert_awaited()
 
 
 async def test_manual_not_ready(hass: HomeAssistant, flow_client: Any) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import asdict, is_dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -9,6 +10,7 @@ from elke27_lib import ClientConfig, LinkKeys
 from elke27_lib.client import Elke27Client
 from elke27_lib.discovery import AIOELKDiscovery
 from elke27_lib.errors import (
+    E27Error,
     Elke27AuthError,
     Elke27ConnectionError,
     Elke27DisconnectedError,
@@ -297,12 +299,15 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             errors["base"] = "invalid_auth"
         except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError):
             errors["base"] = "cannot_connect"
+        except (OSError, TimeoutError, E27Error):
+            errors["base"] = "cannot_connect"
         except Elke27LinkRequiredError:
             errors["base"] = "link_required"
         except Elke27Error:
             errors["base"] = "unknown"
         finally:
-            await client.async_disconnect()
+            with contextlib.suppress(OSError, TimeoutError, E27Error, Elke27Error):
+                await client.async_disconnect()
 
         if errors or link_keys is None:
             return self.async_show_form(
@@ -358,13 +363,19 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             for idx, panel in enumerate(self._discovered_panels or [])
         ]
         if options:
-            options.insert(0, {"value": CONF_RESCAN, "label": "Rescan for panels"})
+            options.insert(0, {"value": CONF_RESCAN, "label": "rescan"})
         else:
-            options = [{"value": CONF_RESCAN, "label": "Rescan for panels"}]
+            options = [{"value": CONF_RESCAN, "label": "rescan"}]
         return vol.Schema(
             {
                 vol.Required(CONF_PANEL): selector(
-                    {"select": {"options": options, "mode": "list"}}
+                    {
+                        "select": {
+                            "options": options,
+                            "mode": "list",
+                            "translation_key": "panel",
+                        }
+                    }
                 ),
                 vol.Required(CONF_ACCESS_CODE): selector(
                     {"text": {"type": "password"}}
