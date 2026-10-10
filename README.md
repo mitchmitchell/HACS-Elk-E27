@@ -502,8 +502,15 @@ while, and use `mode: home` to arm stay instead.
 
 ### Retry automatic arming after a failure
 
-Notifies you when automatic arming fails, waits up to 10
-minutes for the area to become ready, and tries once more.
+Notifies you whenever automatic arming fails. For a definite failure (`stage` is `bypass` or
+`arm`), it then waits up to 10 minutes for the area to become ready and tries once more.
+
+It **never retries** two kinds of failure:
+
+- **`cancelled`**: someone disarmed the area while it was arming. That disarm was deliberate,
+  so the area must not be re-armed automatically.
+- **`arm_uncertain`**: the panel may already be armed, with the bypasses still in place. A
+  person needs to check the panel first.
 
 ```yaml
 - alias: "Retry Elk E27 automatic arm after a failure"
@@ -518,6 +525,9 @@ minutes for the area to become ready, and tries once more.
           Area {{ trigger.event.data.area_id }} not armed
           ({{ trigger.event.data.stage }}): {{ trigger.event.data.reason }}.
           Still bypassed: {{ trigger.event.data.still_bypassed_zone_ids }}
+    # Stop here for a deliberate disarm or an uncertain result; only retry definite failures.
+    - condition: template
+      value_template: "{{ trigger.event.data.stage not in ['cancelled', 'arm_uncertain'] }}"
     - wait_template: "{{ state_attr(trigger.event.data.entity_id, 'ready') == true }}"
       timeout: "00:10:00"
       continue_on_timeout: false
@@ -846,12 +856,21 @@ whole °F, so setpoints you set in °C are rounded.
 
 ### To 0.1.7
 
-No breaking changes: unique IDs, entity IDs, settings and actions are kept.
+Unique IDs, entity IDs, settings and action names are kept, so nothing needs to be set up
+again. Review these **behavior changes** before upgrading:
+
+- **`elke27.alarm_arm_automatic` now arms with open zones.** It bypasses the open (faulted)
+  zones in its area and arms. In 0.1.6 it refused with *area not ready (error 11015)*.
+  Automations that relied on that refusal **will now arm**. Add your own condition (for
+  example the area's `ready` attribute) if you want the old behavior.
+- **Disarming during an automatic arm can leave zones bypassed.** If you disarm before the
+  area has armed, the call stops (`stage: cancelled`) and zones it already bypassed **stay
+  bypassed**. Clear them with `elke27.zone_bypass` and `bypass: false`. Disarming an area that
+  did arm clears its bypasses.
+
+Other changes:
 
 - **Requires `elke27` 0.3.11** (installed automatically).
-- **`elke27.alarm_arm_automatic` now bypasses open zones** in the targeted area, then arms
-  immediately. Automations that relied on it refusing to arm with a door open need their own
-  condition (for example the area's `ready` attribute).
 - Failed bypasses or arms are **rolled back** (once), except when the result is uncertain.
   Failures create a persistent notification and fire `elke27_arm_automatic_failed`.
 - **Disarm always wins** over an automatic arm in progress.
