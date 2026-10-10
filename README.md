@@ -896,10 +896,9 @@ Behavior changes that may affect you:
   (e.g. `!secret`). Non-numeric codes now fail validation before anything is sent.
 - **Re-link step renamed (relink → reauth_confirm).** What to do: if a re-link prompt was open
   during the upgrade, dismiss it, reload, and open the new one.
-- **Re-link checks it's the same panel** (MAC or integration serial) and stops with 'wrong
-  panel' otherwise. What to do: check the host; if the panel was replaced, delete and re-add
-  the entry. Entries created before 0.1.8 may have stored the MAC in a different format; if
-  re-link reports 'wrong panel' for your own panel, delete and re-add the entry.
+- **Re-link checks it's the same panel** (MAC or panel serial) and stops with 'wrong panel'
+  otherwise. What to do: check the host; if the panel was replaced, delete and re-add the
+  entry.
 
 ### To 0.1.7
 
