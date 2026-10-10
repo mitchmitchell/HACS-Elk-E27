@@ -155,6 +155,8 @@ class Elke27ZoneBinarySensor(
         if zone is None:
             self._log_missing()
             return None
+        if zone.open is None:
+            return None
         return bool(zone.open)
 
     @property
