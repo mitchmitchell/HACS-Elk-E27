@@ -317,11 +317,19 @@ class ZoneEntityTest(unittest.TestCase):
     def test_unknown_open_state(self) -> None:
         """A zone with open=None stays unknown, not closed."""
         zone = ZoneState(zone_id=9, name="Garage", open=None)
-        snapshot = _snapshot(zones={9: zone})
+        definition = ZoneDefinition(
+            zone_id=9,
+            name="Garage Door",
+            definition="BURG EE DELAY",
+            zone_type="Door",
+        )
+        snapshot = _snapshot(zones={9: zone}, zone_definitions={9: definition})
         entity = Elke27ZoneBinarySensor(
-            _coordinator(snapshot), _hub(), _entry(), 9, zone, None
+            _coordinator(snapshot), _hub(), _entry(), 9, zone, definition
         )
         assert entity.is_on is None
+        assert entity.is_on is not False
+        assert entity.icon is None
 
     def test_no_zone_definition(self) -> None:
         """Without a ZoneDefinition, fall back to the zone name and opening class."""

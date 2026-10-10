@@ -155,9 +155,10 @@ class Elke27ZoneBinarySensor(
         if zone is None:
             self._log_missing()
             return None
-        if zone.open is None:
+        open_state = zone.open
+        if open_state is None:
             return None
-        return bool(zone.open)
+        return bool(open_state)
 
     @property
     def icon(self) -> str | None:
@@ -170,7 +171,10 @@ class Elke27ZoneBinarySensor(
         )
         if not definition:
             return None
-        if zone.open:
+        open_state = zone.open
+        if open_state is None:
+            return None
+        if open_state:
             return _ZONE_OPEN_ICON_BY_DEFINITION.get(
                 definition
             ) or _ZONE_ICON_BY_DEFINITION.get(definition)
