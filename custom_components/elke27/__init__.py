@@ -156,6 +156,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         link_keys_json,
         integration_serial,
         panel_name,
+        entry=entry,
     )
     try:
         await hub.async_connect()
@@ -168,8 +169,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await hub.async_disconnect()
         msg = "The client did not become ready; check host and port"
         raise ConfigEntryNotReady(msg) from err
+    # Cleanup runs (last registered first) only after every platform unloaded,
+    # or when setup fails after this point.
+    entry.async_on_unload(hub.async_disconnect)
 
     coordinator = Elke27DataUpdateCoordinator(hass, hub, entry)
+    entry.async_on_unload(coordinator.async_stop)
     await coordinator.async_start()
     await coordinator.async_refresh_now()
     domains_to_prime = ("light", "lock", "tstat")
@@ -190,12 +195,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload an Elke27 config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    data: Elke27RuntimeData | None = entry.runtime_data
-    if data is not None:
-        await data.coordinator.async_stop()
-        await data.hub.async_disconnect()
-    return unload_ok
+    # The coordinator and client are stopped by the async_on_unload callbacks
+    # registered in setup, which Home Assistant runs only when this succeeds.
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
 def _panel_name_from_entry(panel: object | None) -> str | None:

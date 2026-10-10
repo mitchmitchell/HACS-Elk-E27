@@ -21,13 +21,20 @@ from elke27_lib import (
 )
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
+    E27Error,
+    E27NotReady,
+    E27Timeout,
+    E27TransportError,
     Elke27AuthError,
+    Elke27ConnectionError,
+    Elke27DisconnectedError,
     Elke27Error,
     Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27PanelError,
     Elke27PermissionError,
     Elke27PinRequiredError,
+    Elke27TimeoutError,
 )
 
 from homeassistant.core import HomeAssistant, callback
@@ -37,9 +44,28 @@ from .const import READY_TIMEOUT
 from .identity import build_client_identity
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Coroutine
+
+    from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
+TIMEOUT_MESSAGE = (
+    "The panel did not respond in time; the command may not have been applied."
+)
+CONNECTION_MESSAGE = (
+    "Lost connection to the panel; the command may not have been applied."
+)
+# Every library failure a command can surface: elke27's public errors, its
+# lower-level E27 errors (async_execute returns these), and raw timeouts/OS errors.
+COMMAND_ERRORS: tuple[type[Exception], ...] = (
+    Elke27Error,
+    Elke27InvalidArgument,
+    E27Error,
+    TimeoutError,
+    OSError,
+)
 
 # Seconds to wait before re-reading a light's status after a set_status.
 LIGHT_REFRESH_DELAY = 3.0
@@ -56,9 +82,13 @@ class Elke27Hub:
         link_keys_json: str,
         integration_serial: str,
         panel_name: str | None,
+        *,
+        entry: ConfigEntry | None = None,
     ) -> None:
         """Initialize the hub wrapper."""
         self._hass = hass
+        # Background tasks are tied to the config entry so unload cancels them.
+        self._entry = entry
         self._host = host
         self._port = port
         self._link_keys_json = link_keys_json
@@ -76,6 +106,7 @@ class Elke27Hub:
         self._reconnect_attempts = 0
         self._stopping = False
         self._unavailable_logged = False
+        self._reconnect_listeners: list[Callable[[], None]] = []
         self._typed_callbacks: dict[
             Callable[[Any], None], Callable[[], None] | None
         ] = {}
@@ -154,7 +185,8 @@ class Elke27Hub:
             await self._client.async_disconnect()
         self._client = None
         self._clear_typed_subscriptions()
-        if was_connected:
+        # An intentional disconnect (unload or shutdown) is not a lost connection.
+        if was_connected and not self._stopping:
             self._log_unavailable()
 
     def get_snapshot(self) -> PanelSnapshot | None:
@@ -193,7 +225,7 @@ class Elke27Hub:
         """Send one status request; return its reply payload, or None on failure."""
         try:
             result = await client.async_execute(command_key, **params)
-        except (Elke27Error, Elke27InvalidArgument) as err:
+        except COMMAND_ERRORS as err:
             _LOGGER.debug("Status refresh %s failed: %s", command_key, err)
             return None
         if not result.ok or not isinstance(result.data, Mapping):
@@ -243,7 +275,14 @@ class Elke27Hub:
         client = self._client
         if client is None:
             return False
-        await client.async_set_output(output_id, on=state)
+        try:
+            await client.async_set_output(output_id, on=state)
+        except Elke27PinRequiredError:
+            raise
+        except COMMAND_ERRORS as err:
+            _log_command_failure("Output", output_id, "set", err)
+            self._note_command_error(err)
+            raise HomeAssistantError(_error_message(err)) from err
         return True
 
     async def async_set_light(
@@ -265,7 +304,7 @@ class Elke27Hub:
             # report it later), so ask the panel for the light's status now and
             # once more after a short delay.
             await self._async_refresh_light(light_id)
-            self._hass.async_create_background_task(
+            self._create_background_task(
                 self._async_refresh_light_later(light_id),
                 f"elke27 light {light_id} status refresh",
             )
@@ -482,8 +521,9 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
-        except (Elke27Error, Elke27InvalidArgument) as err:
+        except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
+            self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
@@ -492,12 +532,47 @@ class Elke27Hub:
         client = self._client
         if client is None:
             return False
-        result = await client.async_execute(command_key, **params)
+        try:
+            result = await client.async_execute(command_key, **params)
+        except Elke27PinRequiredError:
+            raise
+        except COMMAND_ERRORS as err:
+            _LOGGER.warning("Command %s failed: %s", command_key, err)
+            self._note_command_error(err)
+            raise HomeAssistantError(_error_message(err)) from err
         if not result.ok:
-            if result.error is not None:
+            if isinstance(result.error, Elke27PinRequiredError):
                 raise result.error
-            return False
+            if result.error is not None:
+                _LOGGER.warning("Command %s failed: %s", command_key, result.error)
+                self._note_command_error(result.error)
+                raise HomeAssistantError(_error_message(result.error)) from (
+                    result.error
+                )
+            _LOGGER.warning("Command %s was not accepted by the panel", command_key)
+            raise HomeAssistantError(NOT_ACCEPTED_MESSAGE)
         return True
+
+    def _note_command_error(self, err: BaseException) -> None:
+        """
+        Treat a command timeout as evidence the link may be dead.
+
+        Asks elke27 to probe the panel now, so a dead link is detected within
+        the keepalive timeout instead of at the next scheduled keepalive. When
+        the probe fails the library disconnects and the reconnect loop starts.
+        Older elke27 versions without request_link_check() fall back to their
+        own keepalive.
+        """
+        if not is_timeout_error(err):
+            return
+        client = self._client
+        check = getattr(client, "request_link_check", None)
+        if check is None:
+            return
+        try:
+            check()
+        except Exception as check_err:  # noqa: BLE001
+            _LOGGER.debug("Link check request failed: %s", check_err)
 
     def _require_client(self) -> Elke27Client:
         """Return the connected client or raise."""
@@ -535,8 +610,9 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
-        except (Elke27Error, Elke27InvalidArgument) as err:
+        except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
+            self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
@@ -580,8 +656,9 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
-        except (Elke27Error, Elke27InvalidArgument) as err:
+        except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
+            self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
@@ -605,9 +682,17 @@ class Elke27Hub:
         if self._reconnect_task is not None and not self._reconnect_task.done():
             return
         _LOGGER.debug("Creating reconnect task")
-        self._reconnect_task = self._hass.async_create_task(
-            self._async_reconnect_loop()
+        self._reconnect_task = self._create_background_task(
+            self._async_reconnect_loop(), "elke27 reconnect"
         )
+
+    def _create_background_task(
+        self, coro: Coroutine[Any, Any, None], name: str
+    ) -> asyncio.Task[None]:
+        """Create a task that is cancelled when the config entry unloads."""
+        if self._entry is not None:
+            return self._entry.async_create_background_task(self._hass, coro, name)
+        return self._hass.async_create_background_task(coro, name)
 
     @callback
     def _cancel_reconnect(self) -> None:
@@ -618,6 +703,28 @@ class Elke27Hub:
             self._reconnect_task.cancel()
         self._reconnect_task = None
         self._reconnect_attempts = 0
+
+    def add_reconnect_listener(
+        self, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """
+        Call listener after each successful automatic reconnect.
+
+        The connected event can fire before callbacks are re-attached on the new
+        client, so listeners must not rely on seeing it.
+        """
+        self._reconnect_listeners.append(listener)
+
+        def _remove() -> None:
+            if listener in self._reconnect_listeners:
+                self._reconnect_listeners.remove(listener)
+
+        return _remove
+
+    def _notify_reconnected(self) -> None:
+        """Tell reconnect listeners the client is connected again."""
+        for listener in list(self._reconnect_listeners):
+            listener()
 
     def _log_unavailable(self) -> None:
         """Log the panel as unavailable once."""
@@ -639,6 +746,7 @@ class Elke27Hub:
                 _LOGGER.debug("Reconnect attempt failed: %s", err)
             else:
                 self._reconnect_attempts = 0
+                self._notify_reconnected()
                 return
             self._reconnect_attempts += 1
             delay = min(300, 2**self._reconnect_attempts)
@@ -856,8 +964,33 @@ def _log_command_failure(
         _LOGGER.warning("%s %s %s failed: %s", kind, target_id, action, err)
 
 
+def is_timeout_error(err: BaseException) -> bool:
+    """Return True for any elke27 or raw timeout."""
+    return isinstance(err, (Elke27TimeoutError, E27Timeout, TimeoutError))
+
+
+def is_connection_error(err: BaseException) -> bool:
+    """Return True for any elke27 transport/session failure."""
+    if is_timeout_error(err):
+        return False
+    return isinstance(
+        err,
+        (
+            Elke27ConnectionError,
+            Elke27DisconnectedError,
+            E27TransportError,
+            E27NotReady,
+            OSError,
+        ),
+    )
+
+
 def _error_message(err: Exception) -> str:
     """Return a user-facing message for a library error."""
+    if is_timeout_error(err):
+        return TIMEOUT_MESSAGE
+    if is_connection_error(err):
+        return CONNECTION_MESSAGE
     return getattr(err, "user_message", None) or str(err) or type(err).__name__
 
 

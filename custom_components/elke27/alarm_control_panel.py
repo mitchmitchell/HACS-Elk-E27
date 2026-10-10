@@ -19,7 +19,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
+from .entity import (
+    build_unique_id,
+    device_info_for_entry,
+    raise_if_not_sent,
+    sanitize_name,
+    unique_base,
+)
 from .hub import ZoneBypassFailedError, area_faulted_zones, is_definitive_refusal
 
 if TYPE_CHECKING:
@@ -150,7 +156,8 @@ class Elke27AreaAlarmControlPanel(
     def available(self) -> bool:
         """Return if the entity is available."""
         return (
-            self._hub.is_ready
+            super().available
+            and self._hub.is_ready
             and _get_area(self.coordinator.data, self._area_id) is not None
         )
 
@@ -212,9 +219,8 @@ class Elke27AreaAlarmControlPanel(
                 if not is_definitive_refusal(err):
                     hub.cancel_arm_automatic(self._area_id)
                 raise
-            if not accepted:
-                msg = "The panel is not connected; the disarm was not sent."
-                raise HomeAssistantError(msg)
+            # False: never sent (no connection), so arming may resume.
+            raise_if_not_sent(sent=accepted, hub=hub)
             hub.cancel_arm_automatic(self._area_id)
         finally:
             hub.end_disarm(self._area_id)
@@ -223,7 +229,8 @@ class Elke27AreaAlarmControlPanel(
         """Arm the area; the caller holds the area lock."""
         code = _normalize_code(code)
         try:
-            await self._hub.async_arm_area(self._area_id, mode, code)
+            sent = await self._hub.async_arm_area(self._area_id, mode, code)
+            raise_if_not_sent(sent=sent, hub=self._hub)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err

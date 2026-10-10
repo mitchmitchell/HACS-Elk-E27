@@ -247,7 +247,8 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
         client = _client()
         client.async_execute = AsyncMock(return_value=Result.failure(None))
         hub = _hub(client)
-        assert not await hub.async_set_light(3, state=True)
+        with self.assertRaisesRegex(HomeAssistantError, "did not accept"):
+            await hub.async_set_light(3, state=True)
         client.async_execute.assert_awaited_once()
         assert hub.background_tasks == []
 
@@ -288,11 +289,21 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
         client.async_execute.assert_not_called()
 
     async def test_command_error_is_raised(self) -> None:
-        """A failed command raises the library error."""
+        """A failed command raises HomeAssistantError, chained to the lib error."""
         client = _client()
         error = Elke27AuthError("Denied.")
         client.async_execute = AsyncMock(return_value=Result.failure(error))
-        with self.assertRaises(Elke27AuthError):
+        with self.assertRaises(HomeAssistantError) as ctx:
+            await _hub(client).async_set_lock(1, locked=True)
+        assert ctx.exception.__cause__ is error
+        client.async_execute.assert_awaited_once()
+
+    async def test_command_pin_required_is_not_wrapped(self) -> None:
+        """A missing PIN stays Elke27PinRequiredError so entities can explain it."""
+        client = _client()
+        error = Elke27PinRequiredError("PIN required.")
+        client.async_execute = AsyncMock(return_value=Result.failure(error))
+        with self.assertRaises(Elke27PinRequiredError):
             await _hub(client).async_set_lock(1, locked=True)
 
     async def test_commands_without_client_return_false(self) -> None:

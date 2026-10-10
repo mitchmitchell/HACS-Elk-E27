@@ -22,7 +22,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
+from .entity import (
+    build_unique_id,
+    device_info_for_entry,
+    raise_if_not_sent,
+    sanitize_name,
+    unique_base,
+)
 from .temperature import normalize_temperature
 
 if TYPE_CHECKING:
@@ -143,7 +149,8 @@ class Elke27Thermostat(
     def available(self) -> bool:
         """Return if the entity is available."""
         return (
-            self._hub.is_ready
+            super().available
+            and self._hub.is_ready
             and _get_tstat(self.coordinator.data, self._tstat_id) is not None
         )
 
@@ -225,7 +232,8 @@ class Elke27Thermostat(
             msg = "HVAC mode is not supported."
             raise HomeAssistantError(msg)
         try:
-            await self._hub.async_set_tstat_status(self._tstat_id, mode=mode)
+            sent = await self._hub.async_set_tstat_status(self._tstat_id, mode=mode)
+            raise_if_not_sent(sent=sent, hub=self._hub)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -237,7 +245,10 @@ class Elke27Thermostat(
             msg = "Fan mode is not supported."
             raise HomeAssistantError(msg)
         try:
-            await self._hub.async_set_tstat_status(self._tstat_id, fan_mode=value)
+            sent = await self._hub.async_set_tstat_status(
+                self._tstat_id, fan_mode=value
+            )
+            raise_if_not_sent(sent=sent, hub=self._hub)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -262,11 +273,12 @@ class Elke27Thermostat(
             raise HomeAssistantError(msg)
 
         try:
-            await self._hub.async_set_tstat_status(
+            sent = await self._hub.async_set_tstat_status(
                 self._tstat_id,
                 heat_setpoint=heat_setpoint,
                 cool_setpoint=cool_setpoint,
             )
+            raise_if_not_sent(sent=sent, hub=self._hub)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err

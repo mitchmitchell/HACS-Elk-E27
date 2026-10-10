@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import CONF_HOST
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
     DeviceInfo,
@@ -13,6 +14,7 @@ from homeassistant.helpers.device_registry import (
 )
 
 from .const import CONF_INTEGRATION_SERIAL, DOMAIN, MANUFACTURER_NUMBER
+from .hub import NOT_ACCEPTED_MESSAGE
 
 if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot
@@ -102,3 +104,20 @@ def unique_base(
 def build_unique_id(base: str, domain: str, numeric_id: int | str) -> str:
     """Build a stable unique ID in <mac>:<domain>:<id> format."""
     return f"{base}:{domain}:{numeric_id}"
+
+
+NOT_CONNECTED_MESSAGE = "The panel is not connected; the command was not sent."
+
+
+def raise_if_not_sent(*, sent: bool, hub: Elke27Hub) -> None:
+    """
+    Raise when the hub reports a command did not go through.
+
+    "Not connected" only when there is no client; otherwise the panel answered
+    without accepting it.
+    """
+    if sent:
+        return
+    if hub.client is None:
+        raise HomeAssistantError(NOT_CONNECTED_MESSAGE)
+    raise HomeAssistantError(NOT_ACCEPTED_MESSAGE)

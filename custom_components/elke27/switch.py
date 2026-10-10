@@ -12,7 +12,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
+from .entity import (
+    build_unique_id,
+    device_info_for_entry,
+    raise_if_not_sent,
+    sanitize_name,
+    unique_base,
+)
 
 if TYPE_CHECKING:
     from elke27_lib import OutputState, PanelSnapshot
@@ -106,14 +112,16 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
     def available(self) -> bool:
         """Return if the entity is available."""
         return (
-            self._hub.is_ready
+            super().available
+            and self._hub.is_ready
             and _get_output(self.coordinator.data, self._output_id) is not None
         )
 
     async def async_turn_on(self, **_kwargs: Any) -> None:
         """Turn the output on if supported by the client."""
         try:
-            await self._hub.async_set_output(self._output_id, state=True)
+            sent = await self._hub.async_set_output(self._output_id, state=True)
+            raise_if_not_sent(sent=sent, hub=self._hub)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -121,7 +129,8 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
     async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the output off if supported by the client."""
         try:
-            await self._hub.async_set_output(self._output_id, state=False)
+            sent = await self._hub.async_set_output(self._output_id, state=False)
+            raise_if_not_sent(sent=sent, hub=self._hub)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
