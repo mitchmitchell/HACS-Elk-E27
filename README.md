@@ -194,6 +194,7 @@ or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| 0.1.8 (draft) | 0.3.12 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 
