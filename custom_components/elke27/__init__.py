@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING, NoReturn
 
 from elke27_lib import ArmMode, ZoneState
 from elke27_lib.errors import (
-    Elke27ConnectionError,
-    Elke27DisconnectedError,
+    E27Error,
+    Elke27AuthError,
+    Elke27CryptoError,
+    Elke27Error,
     Elke27LinkRequiredError,
     Elke27PinRequiredError,
-    Elke27TimeoutError,
 )
 import voluptuous as vol
 
@@ -46,7 +47,7 @@ from .hub import (
     zone_bypass_label,
 )
 from .identity import async_get_integration_serial
-from .models import Elke27RuntimeData
+from .models import Elke27ConfigEntry, Elke27RuntimeData
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -93,6 +94,22 @@ SERVICE_ZONE_BYPASS_SCHEMA = cv.make_entity_service_schema(
     }
 )
 
+# Errors that mean the stored link is no longer accepted: start reauth.
+AUTH_ERRORS: tuple[type[Exception], ...] = (
+    Elke27LinkRequiredError,
+    Elke27AuthError,
+    Elke27CryptoError,
+)
+# Any other library or network failure during setup: let Home Assistant retry.
+SETUP_RETRY_ERRORS: tuple[type[Exception], ...] = (
+    Elke27Error,
+    E27Error,
+    TimeoutError,
+    OSError,
+    ConfigEntryNotReady,
+)
+PRIMED_DOMAINS = ("light", "lock", "tstat")
+
 PLATFORMS: list[Platform] = [
     Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
@@ -131,15 +148,16 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Set up Elke27 from a config entry."""
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
     link_keys_json = entry.data.get(CONF_LINK_KEYS_JSON)
     panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
     if not link_keys_json:
-        msg = "Link keys are missing; relink required"
-        raise ConfigEntryAuthFailed(msg)
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="auth_failed"
+        )
     integration_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
     entry_data = dict(entry.data)
     pin_removed = entry_data.pop("pin", None)
@@ -158,33 +176,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         panel_name,
         entry=entry,
     )
-    try:
-        await hub.async_connect()
-    except Elke27LinkRequiredError as err:
-        msg = "Linking credentials are invalid; relink required"
-        raise ConfigEntryAuthFailed(msg) from err
-    except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError) as err:
-        _LOGGER.exception("Failed to set up connection to %s:%s", host, port)
-        with contextlib.suppress(Exception):
-            await hub.async_disconnect()
-        msg = "The client did not become ready; check host and port"
-        raise ConfigEntryNotReady(msg) from err
     # Cleanup runs (last registered first) only after every platform unloaded,
     # or when setup fails after this point.
     entry.async_on_unload(hub.async_disconnect)
-
     coordinator = Elke27DataUpdateCoordinator(hass, hub, entry)
     entry.async_on_unload(coordinator.async_stop)
-    await coordinator.async_start()
-    await coordinator.async_refresh_now()
-    domains_to_prime = ("light", "lock", "tstat")
-    prime_results = await asyncio.gather(
-        *(hub.refresh_domain_config(domain) for domain in domains_to_prime),
-        return_exceptions=True,
-    )
-    for domain, result in zip(domains_to_prime, prime_results, strict=True):
-        if isinstance(result, Exception):
-            _LOGGER.debug("Initial refresh for %s failed: %s", domain, result)
+    try:
+        await hub.async_connect()
+        await coordinator.async_start()
+        await coordinator.async_refresh_now()
+        await coordinator.async_refresh_domains(PRIMED_DOMAINS)
+    except AUTH_ERRORS as err:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="auth_failed"
+        ) from err
+    except SETUP_RETRY_ERRORS as err:
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN,
+            translation_key="cannot_connect",
+            translation_placeholders={"host": host, "port": str(port)},
+        ) from err
 
     coordinator.async_set_updated_data(hub.get_snapshot())
     await _async_migrate_unique_ids(hass, entry, unique_base(hub, coordinator, entry))
@@ -193,7 +204,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Unload an Elke27 config entry."""
     # The coordinator and client are stopped by the async_on_unload callbacks
     # registered in setup, which Home Assistant runs only when this succeeds.
@@ -623,11 +634,7 @@ def _entity_runtime_data(
         msg = f"Config entry for {entity_id} is not loaded"
         raise ServiceValidationError(msg)
 
-    runtime_data: Elke27RuntimeData | None = config_entry.runtime_data
-    if runtime_data is None:
-        msg = f"Runtime data for {entity_id} is unavailable"
-        raise ServiceValidationError(msg)
-    return entity_entry, runtime_data
+    return entity_entry, config_entry.runtime_data
 
 
 async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> None:

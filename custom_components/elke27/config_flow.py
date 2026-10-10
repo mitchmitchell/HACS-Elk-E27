@@ -19,7 +19,7 @@ from elke27_lib.errors import (
 )
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.selector import selector
@@ -68,14 +68,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_SETUP_METHOD, default=SETUP_METHOD_DISCOVER): selector(
             {
                 "select": {
-                    "options": [
-                        {
-                            "value": SETUP_METHOD_DISCOVER,
-                            "label": "Discover panels",
-                        },
-                        {"value": SETUP_METHOD_MANUAL, "label": "Manual setup"},
-                    ],
+                    "options": [SETUP_METHOD_DISCOVER, SETUP_METHOD_MANUAL],
                     "mode": "list",
+                    "translation_key": CONF_SETUP_METHOD,
                 }
             }
         )
@@ -94,7 +89,6 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._selected_panel: Any | None = None
         self._selected_host: str | None = None
         self._selected_port: int | None = None
-        self._reauth_entry: Any | None = None
         self._discovered_panels: list[Any] | None = None
 
     async def async_step_user(
@@ -220,45 +214,30 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(
         self, _entry_data: Mapping[str, Any]
     ) -> ConfigFlowResult:
-        """Handle reauth for missing or invalid link keys."""
-        entry_id = self.context.get("entry_id")
-        self._reauth_entry = (
-            self.hass.config_entries.async_get_entry(entry_id)
-            if entry_id is not None
-            else None
-        )
-        return await self.async_step_relink(None)
+        """Handle reauth when the stored link is missing or no longer accepted."""
+        return await self.async_step_reauth_confirm()
 
-    async def async_step_relink(
-        self, user_input: Mapping[str, Any] | None = None
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Relink using access code and passphrase."""
+        """Relink the same panel using the access code and passphrase."""
         errors: dict[str, str] = {}
-        if (
-            user_input is not None
-            and CONF_ACCESS_CODE in user_input
-            and CONF_PASSPHRASE in user_input
-        ):
-            entry = self._reauth_entry
-            if entry is None:
-                return self.async_abort(reason="missing_context")
-
-            access_code = user_input[CONF_ACCESS_CODE]
-            passphrase = user_input[CONF_PASSPHRASE]
-            self._selected_host = entry.data.get(CONF_HOST)
-            self._selected_port = entry.data.get(CONF_PORT)
+        if user_input is not None:
+            entry = self._get_reauth_entry()
+            self._selected_host = entry.data[CONF_HOST]
+            self._selected_port = entry.data[CONF_PORT]
             self._selected_panel = entry.data.get(CONF_PANEL)
             return await self._async_link_and_create_entry(
-                access_code=access_code,
-                passphrase=passphrase,
+                access_code=user_input[CONF_ACCESS_CODE],
+                passphrase=user_input[CONF_PASSPHRASE],
                 errors=errors,
-                step_id="relink",
+                step_id="reauth_confirm",
                 data_schema=STEP_REAUTH_DATA_SCHEMA,
                 entry=entry,
             )
 
         return self.async_show_form(
-            step_id="relink",
+            step_id="reauth_confirm",
             data_schema=STEP_REAUTH_DATA_SCHEMA,
             errors=errors,
         )
@@ -270,7 +249,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str],
         step_id: str,
         data_schema: vol.Schema,
-        entry: Any | None = None,
+        entry: ConfigEntry | None = None,
     ) -> ConfigFlowResult:
         """Link, connect, fetch snapshots, and create/update the entry."""
         host = self._selected_host
@@ -314,10 +293,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             snapshot = client.get_snapshot()
             panel_info = asdict(snapshot.panel)
             table_info = asdict(snapshot.table_info)
-        except InvalidCredentials:
+        except (InvalidCredentials, Elke27AuthError):
             errors["base"] = "invalid_auth"
-        except Elke27AuthError:
-            errors["base"] = "cannot_connect"
         except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError):
             errors["base"] = "cannot_connect"
         except Elke27LinkRequiredError:
@@ -352,22 +329,18 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         }
 
         unique_id = _panel_mac(panel_info) or integration_serial
-        if unique_id:
-            await self.async_set_unique_id(unique_id)
-            if entry is None:
-                self._abort_if_unique_id_configured(
-                    updates={CONF_HOST: host, CONF_PORT: port}
-                )
-
-        title = _panel_name(panel_info) or host
+        await self.async_set_unique_id(unique_id)
         if entry is not None:
-            self.hass.config_entries.async_update_entry(
+            # Reauth must relink the same panel, never re-bind the entry.
+            self._abort_if_unique_id_mismatch(reason="wrong_panel")
+            return self.async_update_reload_and_abort(
                 entry,
-                data={**entry.data, **data},
+                data_updates=data,
                 options={**entry.options, **options},
             )
-            await self.hass.config_entries.async_reload(entry.entry_id)
-            return self.async_abort(reason="reauth_successful")
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
+
+        title = _panel_name(panel_info) or host
 
         result = self.async_create_entry(title=title, data=data, options=options)
         if "title" not in result:

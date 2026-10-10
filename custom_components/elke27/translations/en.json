@@ -3,7 +3,8 @@
     "abort": {
       "already_configured": "This panel is already configured.",
       "missing_context": "Panel details are missing. Restart the flow.",
-      "reauth_successful": "Linking was updated successfully."
+      "reauth_successful": "Linking was updated successfully.",
+      "wrong_panel": "The credentials linked a different panel than the one configured for this entry."
     },
     "error": {
       "cannot_connect": "Unable to connect to the panel. Confirm the host is reachable and the panel is online.",
@@ -53,7 +54,7 @@
         "description": "Enter the host and linking credentials.",
         "title": "Manual connection"
       },
-      "relink": {
+      "reauth_confirm": {
         "data": {
           "access_code": "Access code (used for linking, NOT a PIN)",
           "passphrase": "Passphrase"
@@ -113,6 +114,25 @@
     "switch": {
       "output": {
         "name": "Output"
+      }
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "The panel no longer accepts the stored link. Relink the panel."
+    },
+    "cannot_connect": {
+      "message": "Unable to connect to the panel at {host}:{port}."
+    },
+    "code_not_numeric": {
+      "message": "The code must be numeric."
+    }
+  },
+  "selector": {
+    "setup_method": {
+      "options": {
+        "discover": "Discover panels",
+        "manual": "Manual setup"
       }
     }
   },

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
 from elke27_lib import PanelSnapshot
-from elke27_lib.errors import Elke27Error
 from elke27_lib.events import (
     ConnectionStateChanged,
     CsmSnapshotUpdated,
@@ -22,13 +20,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
+from .hub import COMMAND_ERRORS, is_connection_error, is_timeout_error
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Iterable
 
-    from homeassistant.config_entries import ConfigEntry
-
     from .hub import Elke27Hub
+    from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +38,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         self,
         hass: HomeAssistant,
         hub: Elke27Hub,
-        entry: ConfigEntry,
+        entry: Elke27ConfigEntry,
         *,
         debounce_seconds: float = 0.3,
     ) -> None:
@@ -51,6 +49,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         self._pending_domains: set[str] = set()
         self._refresh_lock = asyncio.Lock()
         self._debounce_task: asyncio.Task[None] | None = None
+        self._refresh_task: asyncio.Task[None] | None = None
         self._unsubscribe: Callable[[], None] | None = None
         self._unsubscribe_reconnect: Callable[[], None] | None = None
 
@@ -71,7 +70,21 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         # Push right away so entities become available even on a quiet panel,
         # then refresh the CSM for anything missed while disconnected.
         self._set_snapshot(self._hub.get_snapshot())
-        self._create_task(self._async_refresh_after_connect(), "refresh")
+        self._schedule_refresh_after_connect()
+
+    @callback
+    def _schedule_refresh_after_connect(self) -> None:
+        """
+        Start one refresh after a (re)connect.
+
+        Both the reconnect listener and ConnectionStateChanged(connected=True)
+        ask for this; a refresh already pending or running covers both.
+        """
+        if self._refresh_task is not None and not self._refresh_task.done():
+            return
+        self._refresh_task = self._create_background_task(
+            self._async_refresh_after_connect(), "refresh"
+        )
 
     async def async_stop(self) -> None:
         """Stop coordinating updates and clean up resources."""
@@ -81,16 +94,40 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         if self._unsubscribe_reconnect is not None:
             self._unsubscribe_reconnect()
             self._unsubscribe_reconnect = None
-        if self._debounce_task is not None:
-            self._debounce_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._debounce_task
-            self._debounce_task = None
+        for task in (self._debounce_task, self._refresh_task):
+            if task is not None and not task.done():
+                task.cancel()
+                # Wait for the task to finish without swallowing a cancellation
+                # of async_stop itself.
+                await asyncio.wait([task])
+        self._debounce_task = None
+        self._refresh_task = None
 
     async def async_refresh_now(self) -> None:
         """Perform a full CSM refresh and update the snapshot."""
-        await self._hub.refresh_csm()
+        async with self._refresh_lock:
+            await self._hub.refresh_csm()
         self._set_snapshot(self._hub.get_snapshot())
+
+    async def async_refresh_domains(self, domains: Iterable[str]) -> None:
+        """
+        Refresh domain configs one by one, then push the snapshot.
+
+        A connection error stops the refresh and is raised; any other library
+        error is logged and the remaining domains are still refreshed.
+        """
+        async with self._refresh_lock:
+            await self._async_refresh_domains_locked(set(domains))
+        self._set_snapshot(self._hub.get_snapshot())
+
+    async def _async_refresh_domains_locked(self, domains: set[str]) -> None:
+        for domain in sorted(domains):
+            try:
+                await self._hub.refresh_domain_config(domain)
+            except COMMAND_ERRORS as err:
+                if is_connection_error(err) or is_timeout_error(err):
+                    raise
+                _LOGGER.debug("Domain refresh failed for %s: %s", domain, err)
 
     def _handle_event(self, event: Any) -> None:
         """Handle hub events on the Home Assistant event loop."""
@@ -107,7 +144,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
             )
         if isinstance(event, ConnectionStateChanged):
             if event.connected:
-                self._create_task(self._async_refresh_after_connect(), "refresh")
+                self._schedule_refresh_after_connect()
             else:
                 # Push an update so entities re-read availability right away
                 # instead of showing stale state until the next panel event.
@@ -126,21 +163,28 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         """Queue a refresh for the given domains and debounce updates."""
         self._pending_domains.update(_normalize_domains(domains))
         if self._debounce_task is None or self._debounce_task.done():
-            self._debounce_task = self._create_task(
+            self._debounce_task = self._create_background_task(
                 self._async_debounced_refresh(), "debounced refresh"
             )
 
-    def _create_task(
+    def _create_background_task(
         self, coro: Coroutine[Any, Any, None], name: str
     ) -> asyncio.Task[None]:
-        """Create a task tied to the config entry, so unload cancels it."""
-        return self.config_entry.async_create_task(self.hass, coro, f"{DOMAIN} {name}")
+        """
+        Create a background task tied to the config entry.
+
+        Unload cancels it, and it does not hold up startup or
+        async_block_till_done.
+        """
+        return self.config_entry.async_create_background_task(
+            self.hass, coro, f"{DOMAIN} {name}"
+        )
 
     async def _async_refresh_after_connect(self) -> None:
         """Refresh after a reconnect; a failure is logged, the reconnect stands."""
         try:
             await self.async_refresh_now()
-        except (Elke27Error, HomeAssistantError) as err:
+        except (*COMMAND_ERRORS, HomeAssistantError) as err:
             _LOGGER.debug("Refresh after reconnect failed: %s", err)
 
     async def _async_debounced_refresh(self) -> None:
@@ -150,15 +194,14 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
             while self._pending_domains:
                 domains = set(self._pending_domains)
                 self._pending_domains.clear()
-                results = await asyncio.gather(
-                    *(self._hub.refresh_domain_config(domain) for domain in domains),
-                    return_exceptions=True,
-                )
-                for domain, result in zip(domains, results, strict=True):
-                    if isinstance(result, Exception):
-                        _LOGGER.debug(
-                            "Domain refresh failed for %s: %s", domain, result
-                        )
+                try:
+                    await self._async_refresh_domains_locked(domains)
+                except COMMAND_ERRORS as err:
+                    # The link is down: drop the queue; the reconnect refresh
+                    # reloads everything.
+                    self._pending_domains.clear()
+                    _LOGGER.debug("Domain refresh stopped: %s", err)
+                    break
         self._set_snapshot(self._hub.get_snapshot())
 
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:

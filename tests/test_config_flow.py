@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+import dataclasses
 from typing import Any
 from unittest.mock import AsyncMock, create_autospec, patch
 
 from elke27_lib import LinkKeys
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
+    Elke27AuthError,
     Elke27ConnectionError,
     Elke27LinkRequiredError,
     Elke27ProtocolError,
@@ -156,3 +158,66 @@ async def test_manual_aborts_when_host_configured(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
     flow_client.async_link.assert_not_awaited()
+
+
+async def test_manual_auth_error_is_invalid_auth(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """elke27 maps rejected credentials to Elke27AuthError: show invalid_auth."""
+    result = await _start_manual(hass)
+    flow_client.async_link.side_effect = Elke27AuthError("rejected")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_reauth_relinks_same_panel(
+    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+) -> None:
+    """Reauth relinks with the stored integration serial and reloads the entry."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+
+    flow_client.async_link.side_effect = Elke27AuthError("rejected")
+    user_input = {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+
+    flow_client.async_link.side_effect = None
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.data[CONF_LINK_KEYS_JSON] == LINK_KEYS.to_json()
+    assert mock_config_entry.data[CONF_INTEGRATION_SERIAL] == INTEGRATION_SERIAL
+    assert mock_config_entry.data[CONF_HOST] == HOST
+    assert ACCESS_CODE not in repr(mock_config_entry.data)
+    link_kwargs = flow_client.async_link.await_args.kwargs
+    assert link_kwargs["host"] == HOST
+
+
+async def test_reauth_rejects_different_panel(
+    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+) -> None:
+    """Reauth that links a different panel aborts and leaves the entry alone."""
+    mock_config_entry.add_to_hass(hass)
+    old_data = dict(mock_config_entry.data)
+    other = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        other, panel=dataclasses.replace(other.panel, mac="66:77:88:99:aa:bb")
+    )
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "wrong_panel"
+    assert dict(mock_config_entry.data) == old_data

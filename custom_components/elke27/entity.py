@@ -19,10 +19,9 @@ from .hub import NOT_ACCEPTED_MESSAGE
 if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot
 
-    from homeassistant.config_entries import ConfigEntry
-
     from .coordinator import Elke27DataUpdateCoordinator
     from .hub import Elke27Hub
+    from .models import Elke27ConfigEntry
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9 _-]")
 
@@ -58,7 +57,7 @@ def get_panel_field(
 def device_info_for_entry(
     hub: Elke27Hub,
     coordinator: Elke27DataUpdateCoordinator,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
 ) -> DeviceInfo:
     """Build device info for entities tied to a config entry."""
     snapshot = coordinator.data
@@ -87,7 +86,7 @@ def device_info_for_entry(
 def unique_base(
     hub: Elke27Hub,
     coordinator: Elke27DataUpdateCoordinator,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
 ) -> str:
     """Return the stable unique ID base for this config entry."""
     mac = get_panel_field(coordinator.data, hub.panel_name, "mac")

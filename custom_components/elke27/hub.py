@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-import contextlib
 import dataclasses
 import logging
 from types import MappingProxyType
@@ -27,6 +26,7 @@ from elke27_lib.errors import (
     E27TransportError,
     Elke27AuthError,
     Elke27ConnectionError,
+    Elke27CryptoError,
     Elke27DisconnectedError,
     Elke27Error,
     Elke27InvalidArgument,
@@ -46,7 +46,8 @@ from .identity import build_client_identity
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
 
-    from homeassistant.config_entries import ConfigEntry
+    from .models import Elke27ConfigEntry
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class Elke27Hub:
         integration_serial: str,
         panel_name: str | None,
         *,
-        entry: ConfigEntry | None = None,
+        entry: Elke27ConfigEntry | None = None,
     ) -> None:
         """Initialize the hub wrapper."""
         self._hass = hass
@@ -138,7 +139,12 @@ class Elke27Hub:
         """Connect the client, then await readiness."""
         async with self._connect_lock:
             await self._async_disconnect()
-            link_keys = LinkKeys.from_json(self._link_keys_json)
+            try:
+                link_keys = LinkKeys.from_json(self._link_keys_json)
+            except (AttributeError, TypeError, ValueError) as err:
+                # Stored link keys that cannot be read need a relink, not retries.
+                msg = "Stored link keys are invalid; relink required"
+                raise Elke27LinkRequiredError(msg) from err
             client = Elke27Client(ClientConfig())
             client.set_client_identity(build_client_identity(self._integration_serial))
             self._client = client
@@ -159,20 +165,26 @@ class Elke27Hub:
                 if self._unavailable_logged:
                     _LOGGER.info("Panel connection restored")
                     self._unavailable_logged = False
-            except Exception:
-                with contextlib.suppress(Exception):
-                    await client.async_disconnect()
+            except BaseException:
+                # Includes cancellation: tear the half-open client down, then
+                # re-raise unchanged.
                 self._client = None
+                if self._connection_unsubscribe is not None:
+                    self._connection_unsubscribe()
+                    self._connection_unsubscribe = None
+                await self._async_disconnect_client(client)
                 raise
 
     async def async_disconnect(self) -> None:
         """Disconnect the client and unregister event handlers."""
         self._stopping = True
-        if self._reconnect_task is not None:
-            self._reconnect_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._reconnect_task
-            self._reconnect_task = None
+        task = self._reconnect_task
+        self._reconnect_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            # Wait for the loop to finish without swallowing a cancellation
+            # of this call itself.
+            await asyncio.wait([task])
         await self._async_disconnect()
 
     async def _async_disconnect(self) -> None:
@@ -181,13 +193,22 @@ class Elke27Hub:
         if self._connection_unsubscribe is not None:
             self._connection_unsubscribe()
             self._connection_unsubscribe = None
-        if self._client is not None:
-            await self._client.async_disconnect()
+        client = self._client
         self._client = None
+        if client is not None:
+            await self._async_disconnect_client(client)
         self._clear_typed_subscriptions()
         # An intentional disconnect (unload or shutdown) is not a lost connection.
         if was_connected and not self._stopping:
             self._log_unavailable()
+
+    @staticmethod
+    async def _async_disconnect_client(client: Elke27Client) -> None:
+        """Disconnect a client; a library or network error is logged, not raised."""
+        try:
+            await client.async_disconnect()
+        except COMMAND_ERRORS as err:
+            _LOGGER.debug("Client disconnect failed: %s", err)
 
     def get_snapshot(self) -> PanelSnapshot | None:
         """Return the latest client snapshot."""
@@ -314,7 +335,7 @@ class Elke27Hub:
         """Request a light's status; failures are logged, not raised."""
         try:
             await self._async_execute("light_get_status", light_id=light_id)
-        except Exception as err:  # noqa: BLE001
+        except (Elke27PinRequiredError, HomeAssistantError) as err:
             _LOGGER.debug("Light %s status refresh failed: %s", light_id, err)
 
     async def _async_refresh_light_later(self, light_id: int) -> None:
@@ -571,7 +592,7 @@ class Elke27Hub:
             return
         try:
             check()
-        except Exception as check_err:  # noqa: BLE001
+        except COMMAND_ERRORS as check_err:
             _LOGGER.debug("Link check request failed: %s", check_err)
 
     def _require_client(self) -> Elke27Client:
@@ -739,10 +760,14 @@ class Elke27Hub:
             _LOGGER.debug("Reconnect attempt %s starting", self._reconnect_attempts + 1)
             try:
                 await self._async_connect()
-            except Elke27LinkRequiredError:
-                _LOGGER.exception("Reconnect aborted")
+            except (Elke27LinkRequiredError, Elke27AuthError, Elke27CryptoError) as err:
+                # The panel no longer accepts the link: retrying cannot help.
+                _LOGGER.warning("Reconnect stopped; relink required: %s", err)
+                self._reconnect_attempts = 0
+                if self._entry is not None:
+                    self._entry.async_start_reauth(self._hass)
                 return
-            except Exception as err:  # noqa: BLE001
+            except (*COMMAND_ERRORS, ConfigEntryNotReady) as err:
                 _LOGGER.debug("Reconnect attempt failed: %s", err)
             else:
                 self._reconnect_attempts = 0
