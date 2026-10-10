@@ -299,9 +299,11 @@ Nothing needs to be deleted, and your entities are kept.
 
 If the stored link keys are missing or rejected when the integration **loads**, Home Assistant
 shows a **reauthentication** notice. Open it and enter the **access code** and **passphrase**
-again (*Relink panel*). The entry reloads with new link keys. Your entities and their IDs stay
-the same. Re-linking only refreshes the link keys for the stored address; to change the
-address, see [Changing the panel's address](#changing-the-panels-address).
+again (*Relink panel*). The flow checks that you are linking the **same panel** by comparing
+**MAC address or panel serial** (not the integration serial used for E27 pairing). The entry
+reloads with new link keys. Your entities and their IDs stay the same. Re-linking only
+refreshes the link keys for the stored address; to change the address, see
+[Changing the panel's address](#changing-the-panels-address).
 
 If the keys are rejected while **reconnecting**, no notice appears: the integration stops
 retrying and entities stay unavailable. **Reload the integration** (or restart Home
@@ -851,10 +853,14 @@ whole °F, so setpoints you set in °C are rounded.
 
 ### To 0.1.8
 
+> **Upgrading from 0.1.7:** Delete each Elk E27 integration entry and add it again. There is
+> no in-place migration. **Entity and device IDs may change**, so review and update
+> **automations, scripts, and dashboards** that reference Elk E27 entities.
+
 **Breaking changes — all 0.1.7 users must delete and re-add the integration.**
 
-There is no in-place migration. Remove each Elk E27 config entry under **Settings → Devices &
-services**, then add the panel again with the same linking credentials.
+Remove each Elk E27 config entry under **Settings → Devices & services**, then add the panel
+again with the same linking credentials.
 
 - **Config entry `unique_id`** uses **formatted panel MAC** when the panel reports one, otherwise
   the panel’s own **hardware serial** (when present). If the panel reports **neither MAC nor

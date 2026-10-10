@@ -42,6 +42,7 @@ from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.selector import SelectSelector
 from tests.conftest import (
     HOST,
@@ -257,6 +258,64 @@ async def test_reauth_succeeds_when_entry_unique_id_is_none_no_mac_panel(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert mock_config_entry.unique_id == PANEL_SERIAL
+    issues = ir.async_get(hass).issues
+    assert not any(
+        issue.translation_key == "duplicate_unique_id"
+        for issue in issues.values()
+        if issue.domain == DOMAIN
+    )
+
+
+async def test_reauth_legacy_none_skips_unique_id_when_identity_is_taken(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Reauth still relinks but does not steal another entry's panel unique_id."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
+    )
+    owner = MockConfigEntry(
+        domain=DOMAIN,
+        title="Owner Panel",
+        unique_id=PANEL_SERIAL,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    owner.add_to_hass(hass)
+    legacy = MockConfigEntry(
+        domain=DOMAIN,
+        title="Legacy Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST_2,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+        options={
+            CONF_PANEL_INFO: dataclasses.asdict(
+                dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL)
+            )
+        },
+    )
+    legacy.add_to_hass(hass)
+    result = await legacy.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert legacy.unique_id is None
+    assert owner.unique_id == PANEL_SERIAL
+    issue_id = f"duplicate_unique_id_{legacy.entry_id}"
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_key == "duplicate_unique_id"
 
 
 async def test_reauth_legacy_none_accepts_live_mac_when_stored_panel_had_no_mac(

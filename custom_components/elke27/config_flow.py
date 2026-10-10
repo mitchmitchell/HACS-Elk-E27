@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import asdict, is_dataclass
+import logging
 from typing import TYPE_CHECKING, Any
 
 from elke27_lib import ClientConfig, LinkKeys
@@ -23,7 +24,12 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.helpers import config_validation as cv, translation
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import (
+    config_validation as cv,
+    issue_registry as ir,
+    translation,
+)
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.selector import selector
 
@@ -46,6 +52,8 @@ from .identity import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+_LOGGER = logging.getLogger(__name__)
 
 CONF_ACCESS_CODE = "access_code"
 CONF_PASSPHRASE = "passphrase"
@@ -86,6 +94,43 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         )
     }
 )
+
+
+def _duplicate_unique_id_issue_id(entry_id: str) -> str:
+    return f"duplicate_unique_id_{entry_id}"
+
+
+@callback
+def _async_try_backfill_config_entry_unique_id(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    candidate: str,
+) -> None:
+    """Assign unique_id when missing unless another entry already owns it."""
+    existing = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, candidate)
+    issue_id = _duplicate_unique_id_issue_id(entry.entry_id)
+    if existing is not None and existing.entry_id != entry.entry_id:
+        _LOGGER.warning(
+            "Cannot assign unique_id %s to Elke27 entry %s: already used by %s",
+            candidate,
+            entry.entry_id,
+            existing.entry_id,
+        )
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="duplicate_unique_id",
+            translation_placeholders={
+                "candidate": candidate,
+                "other_entry": existing.title or existing.entry_id,
+            },
+        )
+        return
+    hass.config_entries.async_update_entry(entry, unique_id=candidate)
+    ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -371,8 +416,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 ):
                     return self.async_abort(reason="wrong_panel")
                 if panel_unique_id is not None:
-                    self.hass.config_entries.async_update_entry(
-                        entry, unique_id=panel_unique_id
+                    _async_try_backfill_config_entry_unique_id(
+                        self.hass, entry, panel_unique_id
                     )
             else:
                 candidates = _reauth_candidate_unique_ids(panel_info)
