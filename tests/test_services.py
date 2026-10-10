@@ -1183,10 +1183,13 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
 
     def test_schema_rejects_non_numeric_code(self) -> None:
         """The code must be numeric."""
+        bad_call = {
+            "entity_id": ["alarm_control_panel.house"],
+            "mode": "away",
+            "code": "x",
+        }
         with self.assertRaises(integration.vol.Invalid):
-            integration.SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA(
-                {"entity_id": ["alarm_control_panel.house"], "mode": "away", "code": "x"}
-            )
+            integration.SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA(bad_call)
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")

@@ -363,9 +363,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             for idx, panel in enumerate(self._discovered_panels or [])
         ]
         if options:
-            options.insert(0, {"value": CONF_RESCAN, "label": CONF_RESCAN})
+            options.insert(0, {"value": CONF_RESCAN, "label": "rescan"})
         else:
-            options = [{"value": CONF_RESCAN, "label": CONF_RESCAN}]
+            options = [{"value": CONF_RESCAN, "label": "rescan"}]
         return vol.Schema(
             {
                 vol.Required(CONF_PANEL): selector(

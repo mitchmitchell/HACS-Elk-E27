@@ -248,6 +248,7 @@ async def test_reconnect_unexpected_error_retries(
     hub = mock_config_entry.runtime_data.hub
     hub._stopping = False
 
+    connects_before = mock_client.client.async_connect.await_count
     mock_client.client.async_connect.side_effect = [
         RuntimeError("unexpected"),
         None,
@@ -255,8 +256,7 @@ async def test_reconnect_unexpected_error_retries(
     mock_client.client.wait_ready.return_value = True
     with patch("custom_components.elke27.hub.asyncio.sleep", AsyncMock()):
         await hub._async_reconnect_loop()
-    mock_client.client.async_connect.assert_awaited()
-    assert mock_client.client.async_connect.await_count == 2
+    assert mock_client.client.async_connect.await_count == connects_before + 2
 
 
 async def test_connect_cancellation_disconnects_client(

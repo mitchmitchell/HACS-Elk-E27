@@ -184,7 +184,7 @@ class Elke27Hub:
                 if self._connection_unsubscribe is not None:
                     try:
                         self._connection_unsubscribe()
-                    except Exception as err:
+                    except Exception as err:  # noqa: BLE001
                         _LOGGER.debug("Connection unsubscribe failed: %s", err)
                     self._connection_unsubscribe = None
                 await self._async_disconnect_client(client)
@@ -208,7 +208,7 @@ class Elke27Hub:
         if self._connection_unsubscribe is not None:
             try:
                 self._connection_unsubscribe()
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Connection unsubscribe failed: %s", err)
             self._connection_unsubscribe = None
         client = self._client
@@ -669,7 +669,7 @@ class Elke27Hub:
             if unsubscribe is not None:
                 try:
                     unsubscribe()
-                except Exception as err:
+                except Exception as err:  # noqa: BLE001
                     _LOGGER.debug("Typed callback unsubscribe failed: %s", err)
             self._typed_callbacks[cb] = None
 
@@ -791,7 +791,7 @@ class Elke27Hub:
                 return
             except (*COMMAND_ERRORS, ConfigEntryNotReady) as err:
                 _LOGGER.debug("Reconnect attempt failed: %s", err)
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("Unexpected reconnect failure: %s", err)
             else:
                 self._reconnect_attempts = 0

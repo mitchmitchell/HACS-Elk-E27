@@ -58,7 +58,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         if self._unsubscribe is not None:
             try:
                 self._unsubscribe()
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Hub event unsubscribe failed: %s", err)
         self._unsubscribe = self._hub.subscribe_typed(self._handle_event)
         if self._unsubscribe_reconnect is None:
@@ -94,13 +94,13 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         if self._unsubscribe is not None:
             try:
                 self._unsubscribe()
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Hub event unsubscribe failed: %s", err)
             self._unsubscribe = None
         if self._unsubscribe_reconnect is not None:
             try:
                 self._unsubscribe_reconnect()
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Reconnect listener unsubscribe failed: %s", err)
             self._unsubscribe_reconnect = None
         for task in (self._debounce_task, self._refresh_task):
