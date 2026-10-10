@@ -266,6 +266,47 @@ async def test_reauth_succeeds_when_entry_unique_id_is_none_no_mac_panel(
     )
 
 
+async def test_reauth_legacy_none_backfill_clears_duplicate_unique_id_repair(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Successful reauth backfill removes a stale duplicate_unique_id repair."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
+    )
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    mock_config_entry.add_to_hass(hass)
+    issue_id = f"duplicate_unique_id_{mock_config_entry.entry_id}"
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="duplicate_unique_id",
+    )
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.unique_id == PANEL_SERIAL
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
 async def test_reauth_legacy_none_skips_unique_id_when_identity_is_taken(
     hass: HomeAssistant, flow_client: Any
 ) -> None:
