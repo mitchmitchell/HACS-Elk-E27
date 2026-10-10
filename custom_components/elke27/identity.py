@@ -18,6 +18,19 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
+def panel_mac_from_info(panel_info: dict[str, Any]) -> str | None:
+    """Return MAC from panel_info dict keys used by the config flow."""
+    return panel_info.get("mac") or panel_info.get("panel_mac")
+
+
+def config_entry_unique_id(panel_info: dict[str, Any], integration_serial: str) -> str:
+    """Return the config entry unique_id (formatted MAC or integration serial)."""
+    mac = panel_mac_from_info(panel_info)
+    if mac:
+        return format_mac(str(mac))
+    return integration_serial
+
+
 async def async_get_integration_serial(
     hass: HomeAssistant, host: str, existing: str | None = None
 ) -> str:

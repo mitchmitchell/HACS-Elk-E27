@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from unittest.mock import AsyncMock, patch
 
 from elke27_lib import ArmMode
@@ -20,11 +21,48 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.elke27.alarm_control_panel import _normalize_code
-from custom_components.elke27.const import CONF_LINK_KEYS_JSON, DOMAIN
+from custom_components.elke27.const import (
+    CONF_INTEGRATION_SERIAL,
+    CONF_LINK_KEYS_JSON,
+    DOMAIN,
+)
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from tests.conftest import ClientHarness
+from tests.conftest import (
+    HOST,
+    INTEGRATION_SERIAL,
+    LINK_KEYS_JSON,
+    PORT,
+    ClientHarness,
+    panel_snapshot,
+)
+
+
+async def test_setup_sets_unique_id_for_legacy_no_mac_entry(
+    hass: HomeAssistant, mock_client: ClientHarness
+) -> None:
+    """Setup assigns unique_id from integration serial when the panel reports no MAC."""
+    snapshot = panel_snapshot()
+    mock_client.client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None),
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Legacy Panel",
+        unique_id=None,
+        data={
+            "host": HOST,
+            "port": PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.unique_id == INTEGRATION_SERIAL
 
 
 async def test_setup_and_unload(

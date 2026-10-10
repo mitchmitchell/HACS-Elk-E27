@@ -83,7 +83,8 @@ async def _start_manual(hass: HomeAssistant) -> dict[str, Any]:
     return result
 
 
-RAW_MAC = "001122334455"
+RAW_MAC = "AABBCC112233"
+FORMATTED_RAW_MAC = "aa:bb:cc:11:22:33"
 
 
 async def test_manual_create_normalizes_mac_unique_id(
@@ -101,13 +102,24 @@ async def test_manual_create_normalizes_mac_unique_id(
         {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["result"].unique_id == PANEL_MAC
+    assert result["result"].unique_id == FORMATTED_RAW_MAC
 
 
 async def test_reauth_accepts_formatted_mac_when_panel_reports_raw_mac(
-    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+    hass: HomeAssistant, flow_client: Any
 ) -> None:
     """Reauth matches when the entry MAC is formatted and the panel returns raw MAC."""
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=FORMATTED_RAW_MAC,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
     mock_config_entry.add_to_hass(hass)
     snapshot = panel_snapshot()
     flow_client.get_snapshot.return_value = dataclasses.replace(
@@ -120,6 +132,84 @@ async def test_reauth_accepts_formatted_mac_when_panel_reports_raw_mac(
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
+
+
+async def test_manual_create_uses_serial_unique_id_when_panel_has_no_mac(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Panels without MAC use the integration serial as the config entry unique_id."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None),
+    )
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == INTEGRATION_SERIAL
+
+
+async def test_reauth_succeeds_when_entry_unique_id_is_none_no_mac_panel(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Legacy entries with unique_id unset reauth and receive the integration serial."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None),
+    )
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.unique_id == INTEGRATION_SERIAL
+
+
+async def test_manual_aborts_already_configured_legacy_none_unique_id_no_mac(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Re-adding a no-MAC panel with a legacy entry aborts already_configured."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None),
+    )
+    legacy = MockConfigEntry(
+        domain=DOMAIN,
+        title="Legacy Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    legacy.add_to_hass(hass)
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
 
 
 async def test_manual_creates_entry_without_storing_codes(

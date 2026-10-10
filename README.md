@@ -194,6 +194,7 @@ or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| 0.1.8 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 
@@ -847,6 +848,18 @@ whole °F, so setpoints you set in °C are rounded.
 ---
 
 ## Upgrading
+
+### To 0.1.8
+
+**Breaking changes (config entry identity only):**
+
+- Config entries now always have a stable **`unique_id`**: formatted panel MAC when the panel
+  reports one, otherwise the stored **integration serial** (same rule entities already used).
+- On first load after upgrade, entries that were created with **`unique_id` unset** (common on
+  panels with no MAC) are updated automatically during setup. Reauth and re-add flows use the
+  same rule, so reauth completes and a duplicate manual add is rejected as *already configured*.
+- Entity unique IDs and entity IDs are unchanged; only the config entry registry field is
+  backfilled.
 
 ### To 0.1.7
 

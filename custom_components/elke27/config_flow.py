@@ -24,7 +24,6 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers import config_validation as cv, translation
-from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.selector import selector
 
 from .const import (
@@ -35,7 +34,11 @@ from .const import (
     DOMAIN,
     READY_TIMEOUT,
 )
-from .identity import async_get_integration_serial, build_client_identity
+from .identity import (
+    async_get_integration_serial,
+    build_client_identity,
+    config_entry_unique_id,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -351,18 +354,34 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         }
 
         if entry is not None:
-            candidates = _reauth_candidate_unique_ids(panel_info, integration_serial)
-            if entry.unique_id not in candidates:
-                return self.async_abort(reason="wrong_panel")
+            panel_unique_id = config_entry_unique_id(panel_info, integration_serial)
+            if entry.unique_id is None:
+                if (
+                    entry.data.get(CONF_HOST) != host
+                    or entry.data.get(CONF_PORT, DEFAULT_PORT) != port
+                    or entry.data.get(CONF_INTEGRATION_SERIAL) != integration_serial
+                ):
+                    return self.async_abort(reason="wrong_panel")
+                self.hass.config_entries.async_update_entry(
+                    entry, unique_id=panel_unique_id
+                )
+            else:
+                candidates = _reauth_candidate_unique_ids(
+                    panel_info, integration_serial
+                )
+                if entry.unique_id not in candidates:
+                    return self.async_abort(reason="wrong_panel")
             return self.async_update_reload_and_abort(
                 entry,
                 data_updates=data,
                 options={**entry.options, **options},
             )
 
-        unique_id = _config_entry_unique_id(panel_info, integration_serial)
+        unique_id = config_entry_unique_id(panel_info, integration_serial)
         await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
+        if self._legacy_unidentified_entry_exists(host, port, integration_serial):
+            return self.async_abort(reason="already_configured")
 
         title = _panel_name(panel_info) or host
 
@@ -435,6 +454,22 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 return True
         return False
 
+    def _legacy_unidentified_entry_exists(
+        self, host: str, port: int, integration_serial: str
+    ) -> bool:
+        """Return True when a legacy entry without unique_id already owns this panel."""
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if entry.unique_id is not None:
+                continue
+            if (
+                entry.data.get(CONF_HOST) == host
+                and entry.data.get(CONF_PORT, DEFAULT_PORT) == port
+            ):
+                return True
+            if entry.data.get(CONF_INTEGRATION_SERIAL) == integration_serial:
+                return True
+        return False
+
 
 def _create_client() -> Elke27Client:
     """Create a configured client instance."""
@@ -476,23 +511,11 @@ def _normalize_panel_keys(panel: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _panel_mac(panel_info: dict[str, Any]) -> str | None:
-    return panel_info.get("mac") or panel_info.get("panel_mac")
-
-
-def _config_entry_unique_id(panel_info: dict[str, Any], integration_serial: str) -> str:
-    """Return the config entry unique_id (formatted MAC or integration serial)."""
-    mac = _panel_mac(panel_info)
-    if mac:
-        return format_mac(str(mac))
-    return integration_serial
-
-
 def _reauth_candidate_unique_ids(
     panel_info: dict[str, Any], integration_serial: str
 ) -> set[str]:
     """Return identity keys that may match an existing entry during reauth."""
-    return {_config_entry_unique_id(panel_info, integration_serial), integration_serial}
+    return {config_entry_unique_id(panel_info, integration_serial), integration_serial}
 
 
 def _panel_name(panel_info: dict[str, Any]) -> str | None:

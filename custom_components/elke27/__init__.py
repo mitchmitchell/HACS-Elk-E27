@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import asdict
 import logging
 from typing import TYPE_CHECKING, NoReturn
 
@@ -39,7 +40,7 @@ from .hub import (
     is_definitive_refusal,
     zone_bypass_label,
 )
-from .identity import async_get_integration_serial
+from .identity import async_get_integration_serial, config_entry_unique_id
 from .models import Elke27ConfigEntry, Elke27RuntimeData
 
 if TYPE_CHECKING:
@@ -197,6 +198,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
         ) from err
 
     coordinator.async_set_updated_data(hub.get_snapshot())
+    if entry.unique_id is None:
+        snapshot = hub.get_snapshot()
+        if snapshot is not None:
+            hass.config_entries.async_update_entry(
+                entry,
+                unique_id=config_entry_unique_id(
+                    asdict(snapshot.panel), integration_serial
+                ),
+            )
     await _async_migrate_unique_ids(hass, entry, unique_base(hub, coordinator, entry))
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
