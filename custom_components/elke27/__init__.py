@@ -21,13 +21,23 @@ from homeassistant.exceptions import (
     HomeAssistantError,
     ServiceValidationError,
 )
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.helpers.target import (
     TargetSelection,
     async_extract_referenced_entity_ids,
 )
 
-from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, CONF_PANEL, DOMAIN
+from .const import (
+    CONF_INTEGRATION_SERIAL,
+    CONF_LINK_KEYS_JSON,
+    CONF_PANEL,
+    DOMAIN,
+    ISSUE_RECONNECT_FAILED,
+)
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import unique_base
 from .hub import (
@@ -208,6 +218,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> b
     # The coordinator and client are stopped by the async_on_unload callbacks
     # registered in setup, which Home Assistant runs only when this succeeds.
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
+    """Remove a config entry and any integration state that unload may have skipped."""
+    ir.async_delete_issue(
+        hass, DOMAIN, f"{ISSUE_RECONNECT_FAILED}_{entry.entry_id}"
+    )
 
 
 def _panel_name_from_entry(panel: object | None) -> str | None:

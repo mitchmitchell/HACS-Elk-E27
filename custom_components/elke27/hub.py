@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 import dataclasses
 import logging
+import random
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -915,13 +916,12 @@ class Elke27Hub:
                 _LOGGER.warning("Reconnect stopped; relink required: %s", err)
                 self._reconnect_attempts = 0
                 self._reconnect_non_transport_streak = 0
+                self._clear_reconnect_repair_issue()
                 self.start_reauth_once()
                 return
             except Exception as err:  # noqa: BLE001
                 transport = is_reconnect_retryable(err)
-                if transport:
-                    self._reconnect_non_transport_streak = 0
-                else:
+                if not transport:
                     self._reconnect_non_transport_streak += 1
                     if (
                         self._reconnect_non_transport_streak
@@ -936,7 +936,8 @@ class Elke27Hub:
                 self._notify_reconnected()
                 return
             self._reconnect_attempts += 1
-            delay = min(300, 2**self._reconnect_attempts)
+            base_delay = min(300, 2**self._reconnect_attempts)
+            delay = base_delay * random.uniform(0.8, 1.2)  # noqa: S311
             _LOGGER.debug(
                 "Reconnect attempt %s sleeping for %s seconds",
                 self._reconnect_attempts,
