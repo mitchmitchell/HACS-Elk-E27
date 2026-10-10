@@ -8,17 +8,11 @@ import logging
 from typing import TYPE_CHECKING, NoReturn
 
 from elke27_lib import ArmMode, PanelSnapshot, ZoneState
-from elke27_lib.errors import (
-    Elke27ConnectionError,
-    Elke27DisconnectedError,
-    Elke27LinkRequiredError,
-    Elke27PinRequiredError,
-    Elke27TimeoutError,
-)
+from elke27_lib.errors import E27Error, Elke27Error, Elke27PinRequiredError
 import voluptuous as vol
 
 from homeassistant.components import persistent_notification
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import callback
 from homeassistant.exceptions import (
@@ -27,7 +21,11 @@ from homeassistant.exceptions import (
     HomeAssistantError,
     ServiceValidationError,
 )
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.helpers.target import (
     TargetSelection,
     async_extract_referenced_entity_ids,
@@ -35,8 +33,8 @@ from homeassistant.helpers.target import (
 
 from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, CONF_PANEL, DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import unique_base
 from .hub import (
+    AUTH_ERRORS,
     PIN_REQUIRED_REASON,
     Elke27Hub,
     ZoneBypassFailedError,
@@ -45,7 +43,7 @@ from .hub import (
     zone_bypass_label,
 )
 from .identity import async_get_integration_serial
-from .models import Elke27RuntimeData
+from .models import Elke27ConfigEntry, Elke27RuntimeData
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -75,10 +73,20 @@ OUTCOME_NOT_ARMED = "not_armed"
 OUTCOME_UNKNOWN = "unknown"
 ARM_NOT_SENT_REASON = "the arm command was not sent (the panel is not connected)"
 
+
+def _numeric_service_code(value: str) -> str:
+    """Validate a service user code is numeric."""
+    code = cv.string(value).strip()
+    if not code.isdigit():
+        msg = "Code must be numeric"
+        raise vol.Invalid(msg)
+    return code
+
+
 SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA = cv.make_entity_service_schema(
     {
         vol.Required(ATTR_MODE): vol.In(("away", "home")),
-        vol.Required(ATTR_CODE): cv.string,
+        vol.Required(ATTR_CODE): _numeric_service_code,
     }
 )
 
@@ -87,10 +95,22 @@ ATTR_BYPASS = "bypass"
 
 SERVICE_ZONE_BYPASS_SCHEMA = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_CODE): cv.string,
+        vol.Required(ATTR_CODE): _numeric_service_code,
         vol.Optional(ATTR_BYPASS, default=True): cv.boolean,
     }
 )
+
+# Errors that mean the stored link is no longer accepted: start reauth.
+# Any other library or network failure during setup: let Home Assistant retry.
+SETUP_RETRY_ERRORS: tuple[type[Exception], ...] = (
+    Elke27Error,
+    E27Error,
+    TimeoutError,
+    OSError,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
+PRIMED_DOMAINS = ("light", "lock", "tstat")
 
 PLATFORMS: list[Platform] = [
     Platform.ALARM_CONTROL_PANEL,
@@ -130,15 +150,16 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Set up Elke27 from a config entry."""
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
     link_keys_json = entry.data.get(CONF_LINK_KEYS_JSON)
     panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
     if not link_keys_json:
-        msg = "Link keys are missing; relink required"
-        raise ConfigEntryAuthFailed(msg)
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="auth_failed"
+        )
     integration_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
     entry_data = dict(entry.data)
     pin_removed = entry_data.pop("pin", None)
@@ -157,46 +178,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         panel_name,
         entry=entry,
     )
-    try:
-        await hub.async_connect()
-    except Elke27LinkRequiredError as err:
-        msg = "Linking credentials are invalid; relink required"
-        raise ConfigEntryAuthFailed(msg) from err
-    except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError) as err:
-        _LOGGER.exception("Failed to set up connection to %s:%s", host, port)
-        with contextlib.suppress(Exception):
-            await hub.async_disconnect()
-        msg = "The client did not become ready; check host and port"
-        raise ConfigEntryNotReady(msg) from err
     # Cleanup runs (last registered first) only after every platform unloaded,
     # or when setup fails after this point.
     entry.async_on_unload(hub.async_disconnect)
-
     coordinator = Elke27DataUpdateCoordinator(hass, hub, entry)
     entry.async_on_unload(coordinator.async_stop)
-    await coordinator.async_start()
-    await coordinator.async_refresh_now()
-    domains_to_prime = ("light", "lock", "tstat")
-    prime_results = await asyncio.gather(
-        *(hub.refresh_domain_config(domain) for domain in domains_to_prime),
-        return_exceptions=True,
-    )
-    for domain, result in zip(domains_to_prime, prime_results, strict=True):
-        if isinstance(result, Exception):
-            _LOGGER.debug("Initial refresh for %s failed: %s", domain, result)
+    try:
+        await hub.async_connect()
+        await coordinator.async_start()
+        await coordinator.async_refresh_now()
+        await coordinator.async_refresh_domains(PRIMED_DOMAINS)
+    except AUTH_ERRORS as err:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="auth_failed"
+        ) from err
+    except SETUP_RETRY_ERRORS as err:
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN,
+            translation_key="cannot_connect",
+            translation_placeholders={"host": host, "port": str(port)},
+        ) from err
 
     coordinator.async_set_updated_data(hub.get_snapshot())
-    await _async_migrate_unique_ids(hass, entry, unique_base(hub, coordinator, entry))
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Unload an Elke27 config entry."""
     # The coordinator and client are stopped by the async_on_unload callbacks
     # registered in setup, which Home Assistant runs only when this succeeds.
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
+    """Clean up integration state when a config entry is removed."""
+    _async_delete_entry_issues(hass, entry)
 
 
 def _panel_name_from_entry(panel: object | None) -> str | None:
@@ -205,33 +223,15 @@ def _panel_name_from_entry(panel: object | None) -> str | None:
     return None
 
 
-async def _async_migrate_unique_ids(
-    hass: HomeAssistant, entry: ConfigEntry, base: str
-) -> None:
-    """Migrate legacy unique IDs to the <base>:<domain>:<id> format."""
-    registry = er.async_get(hass)
-    prefix = f"{base}_"
-    for entity in registry.entities.values():
-        if entity.platform != DOMAIN:
-            continue
-        if entity.config_entry_id != entry.entry_id:
-            continue
-        unique_id = entity.unique_id
-        if not unique_id.startswith(prefix):
-            continue
-        rest = unique_id[len(prefix) :]
-        if "_" not in rest:
-            continue
-        domain, numeric_id = rest.rsplit("_", 1)
-        new_unique_id = f"{base}:{domain}:{numeric_id}"
-        if registry.async_get_entity_id(entity.domain, DOMAIN, new_unique_id):
-            _LOGGER.debug(
-                "Unique ID migration skipped for %s; %s already exists",
-                entity.entity_id,
-                new_unique_id,
-            )
-            continue
-        registry.async_update_entity(entity.entity_id, new_unique_id=new_unique_id)
+def _duplicate_unique_id_issue_id(entry_id: str) -> str:
+    return f"duplicate_unique_id_{entry_id}"
+
+
+@callback
+def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
+    """Remove repairs issues scoped to one config entry."""
+    ir.async_delete_issue(hass, DOMAIN, _duplicate_unique_id_issue_id(entry.entry_id))
+    # Additional entry-scoped issues (for example reconnect_failed from PR #53) go here.
 
 
 async def _async_handle_alarm_arm_automatic(
@@ -630,11 +630,7 @@ def _entity_runtime_data(
         msg = f"Config entry for {entity_id} is not loaded"
         raise ServiceValidationError(msg)
 
-    runtime_data: Elke27RuntimeData | None = config_entry.runtime_data
-    if runtime_data is None:
-        msg = f"Runtime data for {entity_id} is unavailable"
-        raise ServiceValidationError(msg)
-    return entity_entry, runtime_data
+    return entity_entry, config_entry.runtime_data
 
 
 async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> None:

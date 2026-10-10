@@ -18,6 +18,56 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
+def panel_mac_from_info(panel_info: dict[str, Any]) -> str | None:
+    """Return MAC from panel_info dict keys used by the config flow."""
+    return panel_info.get("mac") or panel_info.get("panel_mac")
+
+
+def panel_serial_from_info(panel_info: dict[str, Any]) -> str | None:
+    """Return the panel hardware serial from panel_info dict keys."""
+    serial = panel_info.get("serial") or panel_info.get("panel_serial")
+    if serial is None:
+        return None
+    value = str(serial).strip()
+    return value or None
+
+
+def config_entry_unique_id(panel_info: dict[str, Any]) -> str | None:
+    """Return config entry unique_id: MAC, panel serial, or None (dedupe host:port)."""
+    mac = panel_mac_from_info(panel_info)
+    if mac:
+        return format_mac(str(mac))
+    return panel_serial_tier(panel_info)
+
+
+def panel_serial_tier(panel_info: dict[str, Any]) -> str | None:
+    """Panel serial identity tier (drop this helper to remove the serial tier)."""
+    return panel_serial_from_info(panel_info)
+
+
+def panel_identity_matches(
+    live_panel_info: dict[str, Any],
+    stored_panel_info: dict[str, Any],
+) -> bool:
+    """
+    Return True when comparable panel identity fields agree.
+
+    Only fields present on both snapshots are compared (for example, stored
+    panel_info without a MAC does not fail when the live panel reports one).
+    """
+    live_mac = panel_mac_from_info(live_panel_info)
+    stored_mac = panel_mac_from_info(stored_panel_info)
+    if (
+        live_mac
+        and stored_mac
+        and format_mac(str(live_mac)) != format_mac(str(stored_mac))
+    ):
+        return False
+    live_serial = panel_serial_tier(live_panel_info)
+    stored_serial = panel_serial_tier(stored_panel_info)
+    return not (live_serial and stored_serial and live_serial != stored_serial)
+
+
 async def async_get_integration_serial(
     hass: HomeAssistant, host: str, existing: str | None = None
 ) -> str:

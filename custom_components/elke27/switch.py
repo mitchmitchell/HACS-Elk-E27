@@ -23,12 +23,11 @@ from .entity import (
 if TYPE_CHECKING:
     from elke27_lib import OutputState, PanelSnapshot
 
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
     from .hub import Elke27Hub
-    from .models import Elke27RuntimeData
+    from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,14 +36,11 @@ PARALLEL_UPDATES = 0
 
 async def async_setup_entry(
     _hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Elke27 switches from a config entry."""
-    data: Elke27RuntimeData | None = entry.runtime_data
-    if data is None:
-        _LOGGER.debug("Skipping switch setup because runtime data is missing")
-        return
+    data = entry.runtime_data
     hub = data.hub
     coordinator = data.coordinator
     known_output_ids: set[int] = set()
@@ -82,7 +78,7 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         self,
         coordinator: Elke27DataUpdateCoordinator,
         hub: Elke27Hub,
-        entry: ConfigEntry,
+        entry: Elke27ConfigEntry,
         output_id: int,
         output: OutputState,
     ) -> None:

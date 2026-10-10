@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.const import CONF_HOST
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
@@ -13,16 +12,16 @@ from homeassistant.helpers.device_registry import (
     format_mac,
 )
 
-from .const import CONF_INTEGRATION_SERIAL, DOMAIN, MANUFACTURER_NUMBER
+from .const import DOMAIN
 from .hub import NOT_ACCEPTED_MESSAGE
+from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot
 
-    from homeassistant.config_entries import ConfigEntry
-
     from .coordinator import Elke27DataUpdateCoordinator
     from .hub import Elke27Hub
+    from .models import Elke27ConfigEntry
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9 _-]")
 
@@ -58,7 +57,7 @@ def get_panel_field(
 def device_info_for_entry(
     hub: Elke27Hub,
     coordinator: Elke27DataUpdateCoordinator,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
 ) -> DeviceInfo:
     """Build device info for entities tied to a config entry."""
     snapshot = coordinator.data
@@ -67,13 +66,7 @@ def device_info_for_entry(
     panel_serial = get_panel_field(snapshot, hub.panel_name, "serial")
     model = get_panel_field(snapshot, hub.panel_name, "model")
     firmware = get_panel_field(snapshot, hub.panel_name, "firmware")
-    integration_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
-    identifier = (
-        f"{MANUFACTURER_NUMBER}-{integration_serial}"
-        if integration_serial
-        else entry.entry_id
-    )
-    identifiers = {(DOMAIN, identifier)}
+    identifiers = {(DOMAIN, entry_identity_key(hub, coordinator, entry))}
     return DeviceInfo(
         connections={(CONNECTION_NETWORK_MAC, mac)} if mac else set(),
         identifiers=identifiers,
@@ -84,21 +77,31 @@ def device_info_for_entry(
     )
 
 
+def entry_identity_key(
+    hub: Elke27Hub,
+    coordinator: Elke27DataUpdateCoordinator,
+    entry: Elke27ConfigEntry,
+) -> str:
+    """Return identity: formatted MAC, panel serial, or entry id if both absent."""
+    snapshot = coordinator.data
+    mac = get_panel_field(snapshot, hub.panel_name, "mac")
+    if mac:
+        return format_mac(str(mac))
+    serial = get_panel_field(snapshot, hub.panel_name, "serial")
+    if serial is not None:
+        panel_serial = panel_serial_from_info({"serial": serial})
+        if panel_serial:
+            return panel_serial
+    return entry.entry_id
+
+
 def unique_base(
     hub: Elke27Hub,
     coordinator: Elke27DataUpdateCoordinator,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
 ) -> str:
     """Return the stable unique ID base for this config entry."""
-    mac = get_panel_field(coordinator.data, hub.panel_name, "mac")
-    if mac:
-        return format_mac(str(mac))
-    integration_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
-    if integration_serial:
-        return str(integration_serial)
-    if entry.unique_id:
-        return entry.unique_id
-    return entry.data[CONF_HOST]
+    return entry_identity_key(hub, coordinator, entry)
 
 
 def build_unique_id(base: str, domain: str, numeric_id: int | str) -> str:

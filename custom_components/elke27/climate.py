@@ -34,12 +34,11 @@ from .temperature import normalize_temperature
 if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot, ThermostatState
 
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
     from .hub import Elke27Hub
-    from .models import Elke27RuntimeData
+    from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,14 +68,11 @@ _TSTAT_TO_FAN_MODE: dict[str, str] = {
 
 async def async_setup_entry(
     _hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Elke27 thermostats from a config entry."""
-    data: Elke27RuntimeData | None = entry.runtime_data
-    if data is None:
-        _LOGGER.debug("Skipping climate setup because runtime data is missing")
-        return
+    data = entry.runtime_data
     hub = data.hub
     coordinator = data.coordinator
     known_ids: set[int] = set()
@@ -128,7 +124,7 @@ class Elke27Thermostat(
         self,
         coordinator: Elke27DataUpdateCoordinator,
         hub: Elke27Hub,
-        entry: ConfigEntry,
+        entry: Elke27ConfigEntry,
         tstat_id: int,
         tstat: ThermostatState,
     ) -> None:
