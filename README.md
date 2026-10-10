@@ -299,9 +299,11 @@ Nothing needs to be deleted, and your entities are kept.
 
 If the stored link keys are missing or rejected when the integration **loads**, Home Assistant
 shows a **reauthentication** notice. Open it and enter the **access code** and **passphrase**
-again (*Relink panel*). The entry reloads with new link keys. Your entities and their IDs stay
-the same. Re-linking only refreshes the link keys for the stored address; to change the
-address, see [Changing the panel's address](#changing-the-panels-address).
+again (*Relink panel*). The flow checks that you are linking the **same panel** by comparing
+**MAC address or panel serial** (not the integration serial used for E27 pairing). The entry
+reloads with new link keys. Your entities and their IDs stay the same. Re-linking only
+refreshes the link keys for the stored address; to change the address, see
+[Changing the panel's address](#changing-the-panels-address).
 
 If the keys are rejected while **reconnecting**, no notice appears: the integration stops
 retrying and entities stay unavailable. **Reload the integration** (or restart Home
@@ -499,15 +501,20 @@ while, and use `mode: home` to arm stay instead.
 
 ### Retry automatic arming after a failure
 
-Notifies you whenever automatic arming fails. For a definite failure (`stage` is `bypass` or
-`arm`), it then waits up to 10 minutes for the area to become ready and tries once more.
-
-It **never retries** two kinds of failure:
+Notifies you whenever automatic arming fails. It retries **only** a definite failure, where
+the area is known not to be armed: `stage` is `bypass` or `arm` **and** `outcome` is
+`not_armed`. Every other failure is notified but never retried:
 
 - **`cancelled`**: someone disarmed the area while it was arming. That disarm was deliberate,
   so the area must not be re-armed automatically.
-- **`arm_uncertain`**: the panel may already be armed, with the bypasses still in place. A
-  person needs to check the panel first.
+- **`arm_uncertain`** (`outcome: unknown`): the panel may already be armed, with the bypasses
+  still in place. A person needs to check the panel first.
+- Any other or future `stage` value is also left alone, because the example only allows the
+  two it knows are safe.
+
+Before the delayed retry, it checks again that the area is **still disarmed** and that
+**nobody is home** (`zone.home` is `0`). If someone came back or armed the area in the
+meantime, it stops.
 
 ```yaml
 - alias: "Retry Elk E27 automatic arm after a failure"
@@ -520,14 +527,23 @@ It **never retries** two kinds of failure:
         title: "Elk E27 did not arm"
         message: >-
           Area {{ trigger.event.data.area_id }} not armed
-          ({{ trigger.event.data.stage }}): {{ trigger.event.data.reason }}.
+          ({{ trigger.event.data.stage }}, {{ trigger.event.data.outcome }}):
+          {{ trigger.event.data.reason }}.
           Still bypassed: {{ trigger.event.data.still_bypassed_zone_ids }}
-    # Stop here for a deliberate disarm or an uncertain result; only retry definite failures.
+    # Allowlist: only retry definite failures where the area is known not to be armed.
     - condition: template
-      value_template: "{{ trigger.event.data.stage not in ['cancelled', 'arm_uncertain'] }}"
+      value_template: >-
+        {{ trigger.event.data.stage in ['bypass', 'arm']
+           and trigger.event.data.outcome == 'not_armed' }}
     - wait_template: "{{ state_attr(trigger.event.data.entity_id, 'ready') == true }}"
       timeout: "00:10:00"
       continue_on_timeout: false
+    # Re-check right before retrying: still disarmed, and still nobody home.
+    - condition: template
+      value_template: "{{ is_state(trigger.event.data.entity_id, 'disarmed') }}"
+    - condition: state
+      entity_id: zone.home
+      state: "0"
     - action: elke27.alarm_arm_automatic
       target:
         entity_id: "{{ trigger.event.data.entity_id }}"
@@ -867,10 +883,14 @@ expected yet, but older dev/test setups have two breaking changes:
 
 ### To 0.1.8
 
+> **Upgrading from 0.1.7:** Delete each Elk E27 integration entry and add it again. There is
+> no in-place migration. **Entity and device IDs may change**, so review and update
+> **automations, scripts, and dashboards** that reference Elk E27 entities.
+
 **Breaking changes — all 0.1.7 users must delete and re-add the integration.**
 
-There is no in-place migration. Remove each Elk E27 config entry under **Settings → Devices &
-services**, then add the panel again with the same linking credentials.
+Remove each Elk E27 config entry under **Settings → Devices & services**, then add the panel
+again with the same linking credentials.
 
 - **Config entry `unique_id`** uses **formatted panel MAC** when the panel reports one, otherwise
   the panel’s own **hardware serial** (when present). If the panel reports **neither MAC nor

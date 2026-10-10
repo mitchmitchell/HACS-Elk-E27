@@ -667,14 +667,17 @@ class Elke27Hub:
         Asks elke27 to probe the panel now, so a dead link is detected within
         the keepalive timeout instead of at the next scheduled keepalive. When
         the probe fails the library disconnects and the reconnect loop starts.
+        Older elke27 versions without request_link_check() fall back to their
+        own keepalive.
         """
         if not is_timeout_error(err):
             return
         client = self._client
-        if client is None:
+        check = getattr(client, "request_link_check", None)
+        if check is None:
             return
         try:
-            client.request_link_check()
+            check()
         except COMMAND_ERRORS as check_err:
             _LOGGER.debug("Link check request failed: %s", check_err)
 
