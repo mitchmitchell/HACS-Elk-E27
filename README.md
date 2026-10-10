@@ -194,9 +194,9 @@ or `Zone 12` is used.
 
 ### Compatibility
 
-| Integration | `elke27` library | Home Assistant tested | Panel firmware |
+| Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
-| 0.1.7 | 0.3.11 | minimum 2026.1.0 | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
+| 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 
 ---
@@ -380,11 +380,13 @@ known area) share the same per-area lock, so a rollback can't race a manual chan
 first; a missing or non-numeric code is rejected and changes nothing. While the disarm is
 being sent, any `elke27.alarm_arm_automatic` call for that area (running or still queued)
 **pauses before its next command**, so it cannot send a bypass or an arm that lands after the
-disarm. If the panel **accepts** the disarm, the paused call is cancelled and sends nothing
+disarm. Once the disarm has actually been **sent**, the paused call is cancelled whatever the
+outcome (the panel accepts it, it times out, or the connection drops), unless the panel
+**definitively refuses** the disarm (for example a wrong code). A cancelled call sends nothing
 more: no further bypasses, no arm and no rollback. It reports `stage: cancelled`
-(`outcome: not_armed`) with the zones it had bypassed, or was bypassing. If the panel
-**refuses** the disarm (for example a wrong code), nothing is cancelled and automatic arming
-carries on. A command the call had already sent before the disarm (a bypass, or the arm
+(`outcome: not_armed`) with the zones it had bypassed, or was bypassing. If the panel refuses
+the disarm, or the disarm is never sent (a missing or invalid code, or the panel isn't
+connected), nothing is cancelled and automatic arming carries on. A command the call had already sent before the disarm (a bypass, or the arm
 itself) still reaches the panel first, so the disarm comes after it and the area ends
 disarmed. Disarming an **armed** area clears its bypasses on the panel; if the area never
 armed, the zones listed may still be bypassed, so clear any that are with
@@ -573,9 +575,9 @@ conditions:
   connection comes back, it refreshes everything from the panel. If the panel rejects the link
   keys, it stops retrying without showing a notice. Reload the integration (or restart Home
   Assistant) to get the re-link prompt.
-- **Detecting a dropped connection:** the panel is probed after 30 seconds without traffic,
-  and a probe or command that gets no answer triggers another probe with a 5-second wait, so a
-  dead connection is usually noticed within about 35 seconds. *"Panel connection lost"* is
+- **Detecting a dropped connection:** a dead connection is usually noticed within about
+  35 seconds for an idle link (30 seconds without traffic, plus a 5-second probe). If a command
+  is in flight, the integration first waits for that command's timeout, then probes. *"Panel connection lost"* is
   logged once when it happens. Until it's noticed, commands fail with *"The panel did not
   respond in time; the command may not have been applied."* This disconnect handling may
   still change in later releases.
@@ -645,8 +647,10 @@ number of attempts. It only stops if the panel requires re-linking (see
 [Re-linking](#re-linking-reauthentication)). Entities are unavailable while it reconnects.
 
 **Single commands are not retried.** An arm, disarm, bypass or device command is sent once.
-If the panel doesn't reply within 5 seconds, the command fails with *"The panel did not respond
-in time; the command may not have been applied."* If the connection drops while it's being
+If the panel doesn't reply in time (5 seconds after the command is sent; 15 seconds for a zone
+bypass), the command fails with *"The panel did not respond in time; the command may not have
+been applied."* Time spent waiting to be sent isn't counted, so the error can take longer to
+appear. If the connection drops while it's being
 sent, it fails with *"Lost connection to the panel; …"*. Check the device's state before
 trying again.
 
@@ -713,8 +717,9 @@ lost its session with the panel and is reconnecting. Make sure the panel is powe
 reachable on the network. Brief drops during thermostat changes are a
 [known issue](#known-issues) and recover by themselves.
 
-After the connection comes back, the integration reconnects and refreshes everything from the
-panel; entities are typically available again within about 20 seconds.
+The integration reconnects automatically, with a delay that starts at 2 seconds and doubles up
+to 300 seconds (5 minutes) between attempts. It refreshes everything from the panel, and
+entities come back shortly after the panel reconnects.
 
 While entities are unavailable, Home Assistant itself skips them when you call an entity
 action (for example `light.turn_on`, `lock.unlock` or `alarm_control_panel.alarm_disarm`):
@@ -798,7 +803,9 @@ opened during the exit delay. `elke27.alarm_arm_automatic` cancels auto-stay.
 **Does this need the cloud?** No. Everything is local.
 
 **What happens if I disarm while an automatic arm is running?** The disarm wins. It's sent
-right away, and if the panel accepts it, the automatic arm stops. See
+right away, and once it's sent, the automatic arm stops, unless the panel definitively
+refuses the disarm (for example a wrong code). A refused disarm, or one that's never sent
+(missing code, panel not connected), lets the automatic arm continue. See
 [`elke27.alarm_arm_automatic`](#elke27alarm_arm_automatic).
 
 **Why can't I find it in HACS?** It isn't in the default HACS store. Add
