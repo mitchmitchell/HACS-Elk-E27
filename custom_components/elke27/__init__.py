@@ -222,9 +222,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> b
 
 async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
     """Remove a config entry and any integration state that unload may have skipped."""
-    ir.async_delete_issue(
-        hass, DOMAIN, f"{ISSUE_RECONNECT_FAILED}_{entry.entry_id}"
-    )
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_RECONNECT_FAILED}_{entry.entry_id}")
 
 
 def _panel_name_from_entry(panel: object | None) -> str | None:

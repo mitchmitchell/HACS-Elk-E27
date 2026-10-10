@@ -936,12 +936,13 @@ class Elke27Hub:
                 self._notify_reconnected()
                 return
             self._reconnect_attempts += 1
+            # Cap the base delay at 300 s before jitter (max sleep is about 360 s).
             base_delay = min(300, 2**self._reconnect_attempts)
             delay = base_delay * random.uniform(0.8, 1.2)  # noqa: S311
             _LOGGER.debug(
                 "Reconnect attempt %s sleeping for %s seconds",
                 self._reconnect_attempts,
-                delay,
+                round(delay, 2),
             )
             await asyncio.sleep(delay)
 

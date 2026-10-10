@@ -310,6 +310,36 @@ async def test_reconnect_auth_failure_starts_reauth_once(
     assert len(_reauth_flows(hass)) == 1
 
 
+async def test_reconnect_backoff_jitter_scales_base_delay(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """Reconnect sleep applies jitter between 0.8x and 1.2x of the base backoff."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hub = mock_config_entry.runtime_data.hub
+    hub._stopping = False
+
+    mock_client.client.async_connect.side_effect = [
+        Elke27ConnectionError("down"),
+        Elke27ConnectionError("still down"),
+        None,
+    ]
+    mock_client.client.wait_ready.return_value = True
+    sleep_mock = AsyncMock()
+    with (
+        patch("custom_components.elke27.hub.asyncio.sleep", sleep_mock),
+        patch(
+            "custom_components.elke27.hub.random.uniform",
+            side_effect=[0.8, 1.2],
+        ) as uniform_mock,
+    ):
+        await hub._async_reconnect_loop()
+    uniform_mock.assert_any_call(0.8, 1.2)
+    sleep_mock.assert_any_await(2 * 0.8)
+    sleep_mock.assert_any_await(4 * 1.2)
+
+
 async def test_reconnect_transport_failure_retries_with_backoff(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
