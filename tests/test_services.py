@@ -151,6 +151,11 @@ def _alarm_runtime(snapshot: Any) -> Any:
         return snap, area_is_armed(snap, area_id)
 
     hub.async_poll_until_area_armed = AsyncMock(side_effect=_poll)
+
+    async def _refresh_arm(_area_id: int) -> Any:
+        return hub.get_snapshot()
+
+    hub.async_refresh_area_arm_status = AsyncMock(side_effect=_refresh_arm)
     runtime.coordinator = MagicMock()
     runtime.coordinator.data = None
     return runtime
@@ -993,10 +998,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub = runtime.hub
         # The refresh before acting still returns the stale state; the re-read
         # after the 11028 shows the area armed.
-        hub.async_refresh_area_state = AsyncMock(side_effect=[stale, fresh])
-        hub.async_poll_until_area_armed = AsyncMock(
-            side_effect=[(stale, False), (fresh, True)]
-        )
+        hub.async_refresh_area_state = AsyncMock(return_value=stale)
+        hub.async_refresh_area_arm_status = AsyncMock(return_value=fresh)
         refusal = HomeAssistantError("not allowed when armed (error 11028)")
         refusal.__cause__ = Elke27PanelError(11028, "not allowed when armed")
         hub.async_set_zone_bypass = AsyncMock(side_effect=refusal)
@@ -1015,7 +1018,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         note.assert_not_called()
         hass.bus.async_fire.assert_not_called()
         assert any("already armed" in line for line in logs.output)
-        assert hub.async_poll_until_area_armed.await_count == 2
+        hub.async_poll_until_area_armed.assert_not_called()
+        hub.async_refresh_area_arm_status.assert_awaited_once()
 
     async def test_bypass_11028_when_not_armed_is_uncertain(self) -> None:
         """11028 at the bypass stage with the area not armed: uncertain, no rollback."""
@@ -1032,7 +1036,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
 
         hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
         stale = _two_area_snapshot()
-        hub.async_poll_until_area_armed = AsyncMock(return_value=(stale, False))
+        hub.async_refresh_area_arm_status = AsyncMock(return_value=stale)
         entities = {
             "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
         }
@@ -1042,7 +1046,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         assert "arm result is unknown" in str(ctx.exception)
-        assert hub.async_poll_until_area_armed.await_count == 2
+        hub.async_poll_until_area_armed.assert_not_called()
+        hub.async_refresh_area_arm_status.assert_awaited_once()
         assert hub.async_set_zone_bypass.await_count == 2  # no un-bypass
         data = hass.bus.async_fire.call_args.args[1]
         assert data["stage"] == "arm_uncertain"
@@ -1286,6 +1291,46 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
                 "still_bypassed_zone_ids": [],
             },
         )
+
+    async def test_uncontended_automatic_arm_does_not_poll_or_sleep(self) -> None:
+        """Uncontended automatic arming reads panel status once and does not wait."""
+        hass = MagicMock()
+        before = _two_area_snapshot()
+        hub = _hub()
+        area_reads = {"count": 0}
+
+        async def _execute(command_key: str, **_params: Any) -> Any:
+            if command_key == "area_get_status":
+                area_reads["count"] += 1
+                payload: Any = {"area_id": 1, "arm_state": "DISARMED"}
+            elif command_key == "zone_get_all_zones_status":
+                payload = {"status": "99"}
+            else:
+                payload = {}
+            return MagicMock(ok=True, data=payload, error=None)
+
+        client = MagicMock()
+        client.async_execute = AsyncMock(side_effect=_execute)
+        client.get_snapshot = MagicMock(return_value=before)
+        client.async_arm_area = AsyncMock(return_value=None)
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+
+        async def _forbidden_sleep(*_args: Any, **_kwargs: Any) -> None:
+            msg = "automatic arming must not sleep when the area lock was uncontended"
+            raise AssertionError(msg)
+
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            patch.object(asyncio, "sleep", _forbidden_sleep),
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert area_reads["count"] == 1
+        client.async_arm_area.assert_awaited_once()
 
     async def test_keypad_disarm_after_ha_arm_then_automatic_arms(self) -> None:
         """Keypad disarm after an HA arm is not mistaken for still armed."""

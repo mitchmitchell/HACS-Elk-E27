@@ -51,6 +51,8 @@ from .models import Elke27RuntimeData
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from elke27_lib import PanelSnapshot
+
     from homeassistant.core import HomeAssistant, ServiceCall
     from homeassistant.helpers.typing import ConfigType
 
@@ -296,7 +298,9 @@ async def _async_arm_automatic_entity(
     async def _run() -> None:
         # Serialize the whole bypass, arm and rollback sequence for this area so
         # a concurrent call cannot roll back bypasses another call relies on.
-        async with hub.area_arm_lock(area_id):
+        area_lock = hub.area_arm_lock(area_id)
+        lock_was_contended = area_lock.locked()
+        async with area_lock:
             await _async_arm_automatic_locked(
                 hass,
                 entity_entry,
@@ -307,6 +311,7 @@ async def _async_arm_automatic_entity(
                 code,
                 attempted=attempted,
                 arm_sent=arm_sent,
+                lock_was_contended=lock_was_contended,
             )
 
     # Run each area in its own task, tracked on the hub (from before the lock
@@ -352,6 +357,7 @@ async def _async_arm_automatic_locked(
     *,
     attempted: list[ZoneState],
     arm_sent: list[bool],
+    lock_was_contended: bool,
 ) -> None:
     """Bypass, arm and (on a definitive refusal) roll back one area."""
     hub = runtime_data.hub
@@ -415,12 +421,21 @@ async def _async_arm_automatic_locked(
 
     # Read the live client snapshot inside the lock, not the debounced
     # coordinator copy, so an earlier call's bypasses and arming are seen.
+    async def _panel_reports_armed() -> tuple[PanelSnapshot | None, bool]:
+        if lock_was_contended:
+            return await hub.async_poll_until_area_armed(area_id, gate=_gate)
+        snapshot = await hub.async_refresh_area_state(area_id)
+        return snapshot, area_is_armed(snapshot, area_id)
+
     async def _already_armed(
         reason: str, bypassed: Sequence[ZoneState], cause: Exception
     ) -> None:
-        # Poll the area arm state: armed means the goal is met (a no-op success);
-        # otherwise the result is uncertain. No rollback either way.
-        _fresh, armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
+        # Re-read arm state from the panel: armed is a no-op success; else uncertain.
+        if lock_was_contended:
+            _fresh, armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
+        else:
+            _fresh = await hub.async_refresh_area_arm_status(area_id)
+            armed = area_is_armed(_fresh, area_id)
         if armed:
             _LOGGER.info(
                 "Area %s is already armed (panel said: %s); automatic arming skipped",
@@ -430,18 +445,16 @@ async def _async_arm_automatic_locked(
             return
         _uncertain(reason, bypassed, cause)
 
-    # area_get_status can lag after a prior arm on this area, so poll before
-    # deciding the area is disarmed; then read zone status for bypass decisions.
-    _polled, already_armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
+    # area_get_status can lag after a queued call armed this area; poll only then.
+    snapshot, already_armed = await _panel_reports_armed()
     if already_armed:
         _LOGGER.debug("Area %s is already armed; automatic arming skipped", area_id)
         return
-    snapshot = await hub.async_refresh_area_state(area_id)
+    if lock_was_contended:
+        snapshot = await hub.async_refresh_area_state(area_id)
     if snapshot is None:
         await _fail("arm", ARM_NOT_SENT_REASON, cause=None)
     if area_is_armed(snapshot, area_id):
-        # Already armed (for example by a call queued just before this one):
-        # nothing to do, and nothing is bypassed, armed or rolled back.
         _LOGGER.debug("Area %s is already armed; automatic arming skipped", area_id)
         return
     try:
