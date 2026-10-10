@@ -858,6 +858,9 @@ whole °F, so setpoints you set in °C are rounded.
 - On first load after upgrade, entries that were created with **`unique_id` unset** (common on
   panels with no MAC) are updated automatically during setup. Reauth and re-add flows use the
   same rule, so reauth completes and a duplicate manual add is rejected as *already configured*.
+- If you upgraded from **0.1.7** and your panel **reports a MAC**, delete the existing Elk E27
+  entry and add it again. Older entries may have stored the MAC in raw form while 0.1.8 uses the
+  formatted value (`aa:bb:cc:dd:ee:ff`) as the config entry `unique_id`.
 - Entity unique IDs and entity IDs are unchanged; only the config entry registry field is
   backfilled.
 

@@ -26,6 +26,7 @@ import voluptuous as vol
 from custom_components.elke27.config_flow import (
     CONF_ACCESS_CODE,
     CONF_PANEL,
+    CONF_PANEL_INFO,
     CONF_PASSPHRASE,
     CONF_RESCAN,
     CONF_SETUP_METHOD,
@@ -180,6 +181,87 @@ async def test_reauth_succeeds_when_entry_unique_id_is_none_no_mac_panel(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert mock_config_entry.unique_id == INTEGRATION_SERIAL
+
+
+async def test_reauth_legacy_none_matches_stored_panel_info(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Legacy reauth succeeds when live panel identity matches stored panel_info."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = snapshot
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+        options={CONF_PANEL_INFO: dataclasses.asdict(snapshot.panel)},
+    )
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.unique_id == PANEL_MAC
+
+
+async def test_reauth_legacy_none_rejects_mismatched_stored_panel_info(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Legacy reauth aborts when live panel identity differs from stored panel_info."""
+    snapshot = panel_snapshot()
+    other = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac="66:77:88:99:aa:bb"),
+    )
+    flow_client.get_snapshot.return_value = other
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+        options={CONF_PANEL_INFO: dataclasses.asdict(snapshot.panel)},
+    )
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "wrong_panel"
+    assert mock_config_entry.unique_id is None
+
+
+async def test_manual_aborts_same_mac_at_different_host(
+    hass: HomeAssistant,
+    flow_client: Any,  # noqa: ARG001
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Re-adding the same MAC panel at a new address aborts already_configured."""
+    mock_config_entry.add_to_hass(hass)
+    other_host = "192.0.2.99"
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_HOST: other_host,
+            CONF_ACCESS_CODE: ACCESS_CODE,
+            CONF_PASSPHRASE: PASSPHRASE,
+        },
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
 
 
 async def test_manual_aborts_already_configured_legacy_none_unique_id_no_mac(

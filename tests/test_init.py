@@ -29,14 +29,54 @@ from custom_components.elke27.const import (
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from tests.conftest import (
     HOST,
     INTEGRATION_SERIAL,
     LINK_KEYS_JSON,
+    PANEL_MAC,
     PORT,
     ClientHarness,
     panel_snapshot,
 )
+
+
+async def test_setup_skips_unique_id_backfill_and_raises_repair_on_collision(
+    hass: HomeAssistant, mock_client: ClientHarness
+) -> None:
+    """Skip unique_id backfill and open a repair if another entry owns the identity."""
+    owner = MockConfigEntry(
+        domain=DOMAIN,
+        title="Primary Panel",
+        unique_id=PANEL_MAC,
+        data={
+            "host": "192.0.2.11",
+            "port": PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    legacy = MockConfigEntry(
+        domain=DOMAIN,
+        title="Legacy Duplicate",
+        unique_id=None,
+        data={
+            "host": HOST,
+            "port": PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    owner.add_to_hass(hass)
+    legacy.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(legacy.entry_id)
+    await hass.async_block_till_done()
+    assert legacy.unique_id is None
+    issue = ir.async_get(hass).async_get_issue(
+        DOMAIN, f"duplicate_unique_id_{legacy.entry_id}"
+    )
+    assert issue is not None
+    assert issue.translation_key == "duplicate_unique_id"
 
 
 async def test_setup_sets_unique_id_for_legacy_no_mac_entry(

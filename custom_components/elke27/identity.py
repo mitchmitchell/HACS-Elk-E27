@@ -31,6 +31,19 @@ def config_entry_unique_id(panel_info: dict[str, Any], integration_serial: str) 
     return integration_serial
 
 
+def panel_identity_matches(
+    live_panel_info: dict[str, Any],
+    stored_panel_info: dict[str, Any],
+    *,
+    live_integration_serial: str,
+    stored_integration_serial: str,
+) -> bool:
+    """Return True when live and stored snapshots describe the same panel identity."""
+    return config_entry_unique_id(
+        live_panel_info, live_integration_serial
+    ) == config_entry_unique_id(stored_panel_info, stored_integration_serial)
+
+
 async def async_get_integration_serial(
     hass: HomeAssistant, host: str, existing: str | None = None
 ) -> str:

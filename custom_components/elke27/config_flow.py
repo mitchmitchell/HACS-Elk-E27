@@ -38,6 +38,7 @@ from .identity import (
     async_get_integration_serial,
     build_client_identity,
     config_entry_unique_id,
+    panel_identity_matches,
 )
 
 if TYPE_CHECKING:
@@ -359,7 +360,19 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 if (
                     entry.data.get(CONF_HOST) != host
                     or entry.data.get(CONF_PORT, DEFAULT_PORT) != port
-                    or entry.data.get(CONF_INTEGRATION_SERIAL) != integration_serial
+                ):
+                    return self.async_abort(reason="wrong_panel")
+                stored_panel = entry.options.get(CONF_PANEL_INFO)
+                stored_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
+                if (
+                    stored_panel
+                    and stored_serial
+                    and not panel_identity_matches(
+                        panel_info,
+                        stored_panel,
+                        live_integration_serial=integration_serial,
+                        stored_integration_serial=stored_serial,
+                    )
                 ):
                     return self.async_abort(reason="wrong_panel")
                 self.hass.config_entries.async_update_entry(
@@ -380,7 +393,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         unique_id = config_entry_unique_id(panel_info, integration_serial)
         await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
-        if self._legacy_unidentified_entry_exists(host, port, integration_serial):
+        if self._duplicate_panel_entry_exists(
+            host, port, panel_info, integration_serial
+        ):
             return self.async_abort(reason="already_configured")
 
         title = _panel_name(panel_info) or host
@@ -454,10 +469,22 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 return True
         return False
 
-    def _legacy_unidentified_entry_exists(
-        self, host: str, port: int, integration_serial: str
+    def _duplicate_panel_entry_exists(
+        self,
+        host: str,
+        port: int,
+        panel_info: dict[str, Any],
+        integration_serial: str,
     ) -> bool:
-        """Return True when a legacy entry without unique_id already owns this panel."""
+        """Return True when another entry already represents this panel."""
+        identity = config_entry_unique_id(panel_info, integration_serial)
+        if (
+            self.hass.config_entries.async_entry_for_domain_unique_id(
+                DOMAIN, identity
+            )
+            is not None
+        ):
+            return True
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             if entry.unique_id is not None:
                 continue
@@ -466,7 +493,13 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 and entry.data.get(CONF_PORT, DEFAULT_PORT) == port
             ):
                 return True
-            if entry.data.get(CONF_INTEGRATION_SERIAL) == integration_serial:
+            stored_panel = entry.options.get(CONF_PANEL_INFO)
+            stored_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
+            if (
+                stored_panel
+                and stored_serial
+                and config_entry_unique_id(stored_panel, stored_serial) == identity
+            ):
                 return True
         return False
 
@@ -514,7 +547,12 @@ def _normalize_panel_keys(panel: dict[str, Any]) -> dict[str, Any]:
 def _reauth_candidate_unique_ids(
     panel_info: dict[str, Any], integration_serial: str
 ) -> set[str]:
-    """Return identity keys that may match an existing entry during reauth."""
+    """
+    Return config-entry unique_id values that may match during reauth.
+
+    Includes the formatted MAC (when reported) or integration serial for the
+    linked panel, plus the integration serial alone for legacy serial-keyed entries.
+    """
     return {config_entry_unique_id(panel_info, integration_serial), integration_serial}
 
 

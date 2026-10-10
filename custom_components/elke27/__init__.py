@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 from dataclasses import asdict
 import logging
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from elke27_lib import ArmMode, PanelSnapshot, ZoneState
 from elke27_lib.errors import E27Error, Elke27Error, Elke27PinRequiredError
@@ -22,7 +22,11 @@ from homeassistant.exceptions import (
     HomeAssistantError,
     ServiceValidationError,
 )
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.helpers.target import (
     TargetSelection,
     async_extract_referenced_entity_ids,
@@ -198,15 +202,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
         ) from err
 
     coordinator.async_set_updated_data(hub.get_snapshot())
-    if entry.unique_id is None:
-        snapshot = hub.get_snapshot()
-        if snapshot is not None:
-            hass.config_entries.async_update_entry(
-                entry,
-                unique_id=config_entry_unique_id(
-                    asdict(snapshot.panel), integration_serial
-                ),
-            )
+    snapshot = hub.get_snapshot()
+    if snapshot is not None:
+        _async_backfill_config_entry_unique_id(
+            hass, entry, asdict(snapshot.panel), integration_serial
+        )
     await _async_migrate_unique_ids(hass, entry, unique_base(hub, coordinator, entry))
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -224,6 +224,47 @@ def _panel_name_from_entry(panel: object | None) -> str | None:
     if isinstance(panel, dict):
         return panel.get("panel_name") or panel.get("name")
     return None
+
+
+def _duplicate_unique_id_issue_id(entry_id: str) -> str:
+    return f"duplicate_unique_id_{entry_id}"
+
+
+@callback
+def _async_backfill_config_entry_unique_id(
+    hass: HomeAssistant,
+    entry: Elke27ConfigEntry,
+    panel_info: dict[str, Any],
+    integration_serial: str,
+) -> None:
+    """Assign unique_id on first setup when missing, unless another entry owns it."""
+    if entry.unique_id is not None:
+        return
+    candidate = config_entry_unique_id(panel_info, integration_serial)
+    existing = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, candidate)
+    issue_id = _duplicate_unique_id_issue_id(entry.entry_id)
+    if existing is not None and existing.entry_id != entry.entry_id:
+        _LOGGER.warning(
+            "Cannot assign unique_id %s to Elke27 entry %s: already used by %s",
+            candidate,
+            entry.entry_id,
+            existing.entry_id,
+        )
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="duplicate_unique_id",
+            translation_placeholders={
+                "candidate": candidate,
+                "other_entry": existing.title or existing.entry_id,
+            },
+        )
+        return
+    hass.config_entries.async_update_entry(entry, unique_id=candidate)
+    ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 async def _async_migrate_unique_ids(

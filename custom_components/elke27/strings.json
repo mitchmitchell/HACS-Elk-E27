@@ -117,6 +117,12 @@
       }
     }
   },
+  "issues": {
+    "duplicate_unique_id": {
+      "title": "Duplicate panel configuration",
+      "description": "This entry could not be assigned identity {candidate} because another entry ({other_entry}) already uses it. Remove one of the duplicate Elk E27 entries under Settings → Devices & services."
+    }
+  },
   "exceptions": {
     "auth_failed": {
       "message": "The panel no longer accepts the stored link. Relink the panel."
