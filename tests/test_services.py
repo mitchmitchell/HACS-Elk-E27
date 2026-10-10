@@ -40,6 +40,7 @@ if _HAS_DEPS:
     from custom_components import elke27 as integration
     from custom_components.elke27 import hub as elke27_hub
     from custom_components.elke27.hub import ZoneBypassFailedError
+    from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 
@@ -57,14 +58,28 @@ def _area_status_client(
     snapshot: Any,
     *,
     arm_state: Any = "DISARMED",
+    area_status_extra: Any = None,
 ) -> Any:
     """Build a mock elke27 client driven by area_get_status replies."""
+
+    def _status_payload() -> dict[str, Any]:
+        state = arm_state() if callable(arm_state) else arm_state
+        payload: dict[str, Any] = {"area_id": 1, "arm_state": state}
+        if area_status_extra is not None:
+            extra = (
+                area_status_extra()
+                if callable(area_status_extra)
+                else area_status_extra
+            )
+            if isinstance(extra, dict):
+                payload.update(extra)
+        return payload
+
     client = MagicMock()
 
     async def _execute(command_key: str, **_params: Any) -> Any:
         if command_key == "area_get_status":
-            state = arm_state() if callable(arm_state) else arm_state
-            payload: Any = {"area_id": 1, "arm_state": state}
+            payload = _status_payload()
         elif command_key == "zone_get_all_zones_status":
             payload = {"status": "99"}
         else:
@@ -745,6 +760,277 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         # The second call saw the area armed: no bypass, arm or rollback.
         assert order == ["bypass1:True", "bypass2:True", "arm"]
         hass.bus.async_fire.assert_not_called()
+
+    async def test_concurrent_second_call_skips_during_exit_delay(
+        self,
+    ) -> None:
+        """Queued call skips when the first arm is in exit delay (#43 follow-up)."""
+        hass = MagicMock()
+        before = _two_area_snapshot()
+        in_exit_delay = {"value": False}
+
+        def _arm_state() -> str:
+            return "DISARMED"
+
+        def _exit_delay_fields() -> dict[str, Any]:
+            if not in_exit_delay["value"]:
+                return {}
+            return {
+                "arm_cmd_state": "ARMED_AWAY",
+                "ee_timer": 45,
+                "alarm_zone": "",
+            }
+
+        hub = _hub()
+        client = _area_status_client(
+            before,
+            arm_state=_arm_state,
+            area_status_extra=_exit_delay_fields,
+        )
+        order: list[str] = []
+        first_arm_started = asyncio.Event()
+        release_first_arm = asyncio.Event()
+
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+            order.append("arm")
+            first_arm_started.set()
+            await release_first_arm.wait()
+            in_exit_delay["value"] = True
+
+        client.async_arm_area = AsyncMock(side_effect=_panel_arm)
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with (
+            _fast_arm_status_poll(),
+            patch.object(integration.persistent_notification, "async_create"),
+        ):
+            first = asyncio.create_task(
+                self._run(hass, {"mode": "away", "code": "1234"}, entities)
+            )
+            await first_arm_started.wait()
+            in_exit_delay["value"] = True
+            second = asyncio.create_task(
+                self._run(hass, {"mode": "away", "code": "1234"}, entities)
+            )
+            for _ in range(5):
+                await asyncio.sleep(0)
+            assert order == ["arm"]
+            release_first_arm.set()
+            await asyncio.gather(first, second)
+        assert order == ["arm"]
+        assert client.async_arm_area.await_count == 1
+        assert hub.async_set_zone_bypass.await_count == 2
+        hass.bus.async_fire.assert_not_called()
+
+    async def test_exit_delay_missing_alarm_zone_still_arms_second_call(
+        self,
+    ) -> None:
+        """Incomplete exit-delay fields do not skip automatic arming."""
+        hass = MagicMock()
+        before = _two_area_snapshot()
+        hub = _hub()
+        client = _area_status_client(
+            before,
+            arm_state="DISARMED",
+            area_status_extra={
+                "arm_cmd_state": "ARMED_AWAY",
+                "ee_timer": 45,
+            },
+        )
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        lock = hub.area_arm_lock(1)
+        await lock.acquire()
+        try:
+            with (
+                _fast_arm_status_poll(),
+                patch.object(integration.persistent_notification, "async_create"),
+            ):
+                second = asyncio.create_task(
+                    self._run(hass, {"mode": "away", "code": "1234"}, entities)
+                )
+                for _ in range(5):
+                    await asyncio.sleep(0)
+                lock.release()
+                await second
+        finally:
+            if lock.locked():
+                lock.release()
+        client.async_arm_area.assert_awaited_once()
+
+    async def _first_arm_into_exit_delay(
+        self, hass: Any, entities: dict[str, Any], in_exit_delay: dict[str, bool]
+    ) -> Any:
+        """Run one automatic arm and leave the panel reporting exit delay."""
+        before = _two_area_snapshot()
+
+        def _exit_delay_fields() -> dict[str, Any]:
+            if not in_exit_delay["value"]:
+                return {}
+            return {
+                "arm_cmd_state": "ARMED_AWAY",
+                "ee_timer": 45,
+                "alarm_zone": "",
+            }
+
+        hub = _hub()
+        client = _area_status_client(
+            before,
+            arm_state="DISARMED",
+            area_status_extra=_exit_delay_fields,
+        )
+
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+            in_exit_delay["value"] = True
+
+        client.async_arm_area = AsyncMock(side_effect=_panel_arm)
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        entities.clear()
+        entities["alarm_control_panel.house"] = (
+            _entry("aa:bb:cc:dd:ee:ff:area:1"),
+            runtime,
+        )
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        return client
+
+    async def test_second_automatic_call_after_195s_during_exit_delay_skips(
+        self,
+    ) -> None:
+        """Hardware replay: +1.95 s after the first arm, the second call skips."""
+        hass = MagicMock()
+        entities: dict[str, Any] = {}
+        in_exit_delay = {"value": False}
+        client = await self._first_arm_into_exit_delay(hass, entities, in_exit_delay)
+        assert in_exit_delay["value"]
+        await asyncio.sleep(1.95)
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert client.async_arm_area.await_count == 1
+        hass.bus.async_fire.assert_not_called()
+
+    async def test_second_automatic_call_after_200s_during_exit_delay_skips(
+        self,
+    ) -> None:
+        """Hardware replay: +2.0 s after the first arm, the second call skips."""
+        hass = MagicMock()
+        entities: dict[str, Any] = {}
+        in_exit_delay = {"value": False}
+        client = await self._first_arm_into_exit_delay(hass, entities, in_exit_delay)
+        assert in_exit_delay["value"]
+        await asyncio.sleep(2.0)
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert client.async_arm_area.await_count == 1
+
+    async def test_disarm_during_exit_delay_clears_entity_and_next_arm_arms(
+        self,
+    ) -> None:
+        """After disarm, a plain DISARMED reply clears ARMING and arming resumes."""
+        hass = MagicMock()
+        before = _two_area_snapshot()
+        panel = {"exit_delay": True}
+
+        def _exit_delay_fields() -> dict[str, Any]:
+            if not panel["exit_delay"]:
+                return {}
+            return {
+                "arm_cmd_state": "ARMED_AWAY",
+                "ee_timer": 20,
+                "alarm_zone": "",
+            }
+
+        hub = _hub()
+        client = _area_status_client(
+            before,
+            arm_state="DISARMED",
+            area_status_extra=_exit_delay_fields,
+        )
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        hub.async_disarm_area = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        coordinator = runtime.coordinator
+        fresh, _ = await hub.async_refresh_area_state(1)
+        coordinator.data = fresh
+        entity = _area_entity(fresh, hub)
+        entity.coordinator = coordinator
+        assert entity.alarm_state is AlarmControlPanelState.ARMING
+
+        panel["exit_delay"] = False
+        await entity.async_alarm_disarm("1234")
+        fresh, _ = await hub.async_refresh_area_state(1)
+        coordinator.data = fresh
+        assert entity.alarm_state is AlarmControlPanelState.DISARMED
+
+        entities = {
+            "alarm_control_panel.house": (
+                _entry("aa:bb:cc:dd:ee:ff:area:1"),
+                runtime,
+            )
+        }
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert client.async_arm_area.await_count == 1
+
+    async def test_failed_status_read_during_exit_delay_does_not_skip(
+        self,
+    ) -> None:
+        """A failed area_get_status must not skip even if the cache looks arming."""
+        hass = MagicMock()
+        before = _two_area_snapshot()
+        stale = dataclasses.replace(
+            before,
+            areas=MappingProxyType(
+                {
+                    **before.areas,
+                    1: AreaState(
+                        area_id=1,
+                        name="House",
+                        arm_mode=ArmMode.DISARMED,
+                        arm_cmd_mode=ArmMode.ARMED_AWAY,
+                        ee_timer=30,
+                        alarm_zone="",
+                    ),
+                }
+            ),
+        )
+        hub = _hub()
+        client = MagicMock()
+        client.get_snapshot = MagicMock(return_value=stale)
+        client.async_arm_area = AsyncMock(return_value=None)
+
+        def _execute(command_key: str, **_params: Any) -> Any:
+            if command_key == "area_get_status":
+                quiet = TimeoutError("no reply")
+                raise quiet
+            if command_key == "zone_get_all_zones_status":
+                return MagicMock(ok=True, data={"status": "99"}, error=None)
+            return MagicMock(ok=True, data={}, error=None)
+
+        client.async_execute = AsyncMock(side_effect=_execute)
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        entities = {
+            "alarm_control_panel.house": (
+                _entry("aa:bb:cc:dd:ee:ff:area:1"),
+                runtime,
+            )
+        }
+        with patch.object(integration.persistent_notification, "async_create"):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        client.async_arm_area.assert_awaited_once()
 
     async def test_concurrent_second_call_no_ops_when_status_refresh_lags(
         self,

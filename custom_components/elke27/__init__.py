@@ -307,6 +307,7 @@ async def _async_arm_automatic_entity(
         # a concurrent call cannot roll back bypasses another call relies on.
         area_lock = hub.area_arm_lock(area_id)
         lock_was_contended = area_lock.locked()
+        # No await may be added between locked() and async with below.
         async with area_lock:
             await _async_arm_automatic_locked(
                 hass,
@@ -451,9 +452,11 @@ async def _async_arm_automatic_locked(
         _uncertain(reason, bypassed, cause)
 
     # area_get_status can lag after a queued call armed this area; poll only then.
-    snapshot, armed_reply = await _panel_reports_armed()
-    if armed_reply is True:
-        _LOGGER.debug("Area %s is already armed; automatic arming skipped", area_id)
+    snapshot, skip_reply = await _panel_reports_armed()
+    if skip_reply is True:
+        _LOGGER.debug(
+            "Area %s is already armed or arming; automatic arming skipped", area_id
+        )
         return
     if snapshot is None:
         await _fail("arm", ARM_NOT_SENT_REASON, cause=None)

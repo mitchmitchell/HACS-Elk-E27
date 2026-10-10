@@ -260,8 +260,8 @@ class Elke27Hub:
         command replies at all. Each request is sent once; if one fails, that
         part falls back to the client snapshot for zone data only.
 
-        The second value is whether area_get_status reported armed (True/False),
-        or None when that request failed.
+        The second value is whether the area_get_status reply reported armed or
+        exit-delay arming (True/False), or None when that request failed.
         """
         return await self._async_area_state_snapshot(area_id, include_zones=True)
 
@@ -288,7 +288,7 @@ class Elke27Hub:
         snapshot = snapshot_with_status(
             client.get_snapshot(), area_id, area_payload, zones_payload
         )
-        return snapshot, area_armed_from_status_reply(area_payload)
+        return snapshot, area_skip_automatic_arm_from_status_reply(area_payload)
 
     async def async_poll_until_area_armed(
         self,
@@ -297,10 +297,10 @@ class Elke27Hub:
         gate: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[PanelSnapshot | None, bool]:
         """
-        Poll area_get_status until the panel reports armed or the timeout elapses.
+        Poll area_get_status until the panel reports armed or exit delay arming.
 
-        A failed read is not armed and polling continues. Return the last snapshot
-        and whether a reply showed armed before the timeout.
+        A failed read does not skip and polling continues. Return the last snapshot
+        and whether a reply showed armed or arming before the timeout.
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + ARM_STATUS_POLL_TIMEOUT
@@ -308,8 +308,8 @@ class Elke27Hub:
         while True:
             if gate is not None:
                 await gate()
-            last, armed = await self.async_refresh_area_arm_status(area_id)
-            if armed is True:
+            last, skip = await self.async_refresh_area_arm_status(area_id)
+            if skip is True:
                 return last, True
             if loop.time() >= deadline:
                 return last, False
@@ -984,6 +984,11 @@ _ZONE_STATUS_VIOLATED = frozenset("9AB")
 _ZONE_STATUS_KNOWN = frozenset("0123456789ABCDEF")
 
 
+def _strict_int(value: object) -> int | None:
+    """Return the value only when it is a true int (bool excluded)."""
+    return value if type(value) is int else None
+
+
 def _arm_mode_from_text(value: Any) -> ArmMode | None:
     """Map a panel arm_state string to an ArmMode (as elke27 does)."""
     if not isinstance(value, str):
@@ -1021,11 +1026,40 @@ def snapshot_with_status(
     areas = dict(snapshot.areas)
     zones = dict(snapshot.zones)
     if area_payload is not None and area_id in areas:
+        area = areas[area_id]
+        updates: dict[str, Any] = {}
         mode = _arm_mode_from_text(
             area_payload.get("arm_state") or area_payload.get("armed_state")
         )
         if mode is not None:
-            areas[area_id] = dataclasses.replace(areas[area_id], arm_mode=mode)
+            updates["arm_mode"] = mode
+        has_exit_delay_fields = any(
+            key in area_payload for key in ("arm_cmd_state", "ee_timer", "alarm_zone")
+        )
+        if not has_exit_delay_fields:
+            updates["arm_cmd_mode"] = None
+            updates["ee_timer"] = None
+            updates["alarm_zone"] = None
+        else:
+            if "arm_cmd_state" in area_payload:
+                cmd_raw = area_payload.get("arm_cmd_state")
+                updates["arm_cmd_mode"] = (
+                    _arm_mode_from_text(cmd_raw) if isinstance(cmd_raw, str) else None
+                )
+            else:
+                updates["arm_cmd_mode"] = None
+            if "ee_timer" in area_payload:
+                updates["ee_timer"] = _strict_int(area_payload["ee_timer"])
+            else:
+                updates["ee_timer"] = None
+            if "alarm_zone" in area_payload:
+                alarm_zone = area_payload.get("alarm_zone")
+                updates["alarm_zone"] = (
+                    alarm_zone if isinstance(alarm_zone, str) else None
+                )
+            else:
+                updates["alarm_zone"] = None
+        areas[area_id] = dataclasses.replace(area, **updates)
     status = zones_payload.get("status") if zones_payload is not None else None
     if isinstance(status, str):
         for index, ch in enumerate("".join(status.split()).upper()):
@@ -1056,6 +1090,48 @@ def area_armed_from_status_reply(
     if mode is None:
         return False
     return mode in _ARMED_MODES
+
+
+def area_arming_from_status_reply(area_payload: Mapping[str, Any]) -> bool:
+    """
+    Return True when the reply explicitly shows exit-delay arming.
+
+    Unknown or missing fields never count as arming (returns False).
+    """
+    arm_state_raw = area_payload.get("arm_state") or area_payload.get("armed_state")
+    if not isinstance(arm_state_raw, str):
+        return False
+    if _arm_mode_from_text(arm_state_raw) is not ArmMode.DISARMED:
+        return False
+    cmd_raw = area_payload.get("arm_cmd_state")
+    if not isinstance(cmd_raw, str):
+        return False
+    cmd_mode = _arm_mode_from_text(cmd_raw)
+    if cmd_mode not in (ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY):
+        return False
+    ee_timer = area_payload.get("ee_timer")
+    if type(ee_timer) is not int or ee_timer <= 0:
+        return False
+    if "alarm_zone" not in area_payload:
+        return False
+    alarm_zone = area_payload.get("alarm_zone")
+    return isinstance(alarm_zone, str) and alarm_zone == ""
+
+
+def area_skip_automatic_arm_from_status_reply(
+    area_payload: Mapping[str, Any] | None,
+) -> bool | None:
+    """
+    Return whether automatic arming should skip from a fresh area_get_status reply.
+
+    True when the area is armed or in exit-delay arming; False when it is not.
+    None when the request failed.
+    """
+    if area_payload is None:
+        return None
+    if area_armed_from_status_reply(area_payload):
+        return True
+    return area_arming_from_status_reply(area_payload)
 
 
 def area_is_armed(snapshot: PanelSnapshot | None, area_id: int) -> bool:

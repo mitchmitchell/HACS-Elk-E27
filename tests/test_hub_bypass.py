@@ -28,8 +28,10 @@ if _HAS_DEPS:
         Elke27Hub,
         ZoneBypassFailedError,
         area_armed_from_status_reply,
+        area_arming_from_status_reply,
         area_faulted_zones,
         area_is_armed,
+        area_skip_automatic_arm_from_status_reply,
         zone_bypass_label,
     )
     from homeassistant.exceptions import HomeAssistantError
@@ -314,6 +316,38 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
         assert not area_is_armed(fresh, 1)
         assert [zone.zone_id for zone in area_faulted_zones(fresh, 1)] == [1, 2]
 
+    async def test_disarmed_reply_clears_stale_exit_delay_on_snapshot(self) -> None:
+        """A DISARMED reply without exit-delay fields drops stale pending-arm data."""
+        hub = _hub()
+        stale = dataclasses.replace(
+            _two_area_snapshot(),
+            areas=MappingProxyType(
+                {
+                    1: AreaState(
+                        area_id=1,
+                        name="House",
+                        arm_mode=ArmMode.DISARMED,
+                        arm_cmd_mode=ArmMode.ARMED_AWAY,
+                        ee_timer=30,
+                        alarm_zone="",
+                    )
+                }
+            ),
+        )
+        client = self._client(
+            area={"area_id": 1, "arm_state": "DISARMED"},
+            zones={"status": "99"},
+        )
+        client.get_snapshot = MagicMock(return_value=stale)
+        hub._client = client  # noqa: SLF001
+        fresh, skip = await hub.async_refresh_area_state(1)
+        assert skip is False
+        area = fresh.areas[1]
+        assert area.arm_cmd_mode is None
+        assert area.ee_timer is None
+        assert area.alarm_zone is None
+        assert not area.arming
+
     async def test_failed_refresh_falls_back_to_snapshot(self) -> None:
         """A failed status request is not retried; that part uses the snapshot."""
         from elke27_lib.errors import Elke27TimeoutError  # noqa: PLC0415
@@ -389,3 +423,54 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
             _fresh, armed = await hub.async_poll_until_area_armed(1)
         assert not armed
         assert client.async_execute.await_count >= 2
+
+
+@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
+class AreaStatusReplyTest(unittest.TestCase):
+    """Test area_get_status skip logic for automatic arming."""
+
+    def test_exit_delay_reply_counts_as_arming(self) -> None:
+        """Disarmed with pending arm and ee_timer is exit-delay arming."""
+        payload = {
+            "arm_state": "DISARMED",
+            "arm_cmd_state": "ARMED_AWAY",
+            "ee_timer": 30,
+            "alarm_zone": "",
+        }
+        assert area_arming_from_status_reply(payload)
+        assert area_skip_automatic_arm_from_status_reply(payload)
+
+    def test_missing_alarm_zone_is_not_arming(self) -> None:
+        """alarm_zone must be present and empty to skip."""
+        payload = {
+            "arm_state": "DISARMED",
+            "arm_cmd_state": "ARMED_AWAY",
+            "ee_timer": 30,
+        }
+        assert not area_arming_from_status_reply(payload)
+        assert not area_skip_automatic_arm_from_status_reply(payload)
+
+    def test_ee_timer_zero_is_not_arming(self) -> None:
+        """ee_timer must be greater than zero to skip."""
+        payload = {
+            "arm_state": "DISARMED",
+            "arm_cmd_state": "ARMED_AWAY",
+            "ee_timer": 0,
+            "alarm_zone": "",
+        }
+        assert not area_arming_from_status_reply(payload)
+
+    def test_armed_reply_still_skips(self) -> None:
+        """Fully armed areas skip without exit-delay fields."""
+        assert area_skip_automatic_arm_from_status_reply({"arm_state": "ARMED_AWAY"})
+
+    def test_bool_ee_timer_is_not_arming(self) -> None:
+        """A bool ee_timer must not count as exit-delay arming (bool is not int)."""
+        payload = {
+            "arm_state": "DISARMED",
+            "arm_cmd_state": "ARMED_AWAY",
+            "ee_timer": True,
+            "alarm_zone": "",
+        }
+        assert not area_arming_from_status_reply(payload)
+        assert not area_skip_automatic_arm_from_status_reply(payload)
