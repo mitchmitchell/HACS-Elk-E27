@@ -12,7 +12,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import build_unique_id, device_info_for_entry, sanitize_name, unique_base
+from .entity import build_unique_id, device_info_for_entry, unique_base
 
 if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot, ZoneDefinition, ZoneState
@@ -74,9 +74,6 @@ async def async_setup_entry(
 
     def _async_add_zones() -> None:
         snapshot = coordinator.data
-        if snapshot is None:
-            _LOGGER.debug("Zone entities skipped because snapshot is unavailable")
-            return
         entities: list[Elke27ZoneBinarySensor] = []
         if not snapshot.zones:
             _LOGGER.debug("No zones available for entity creation")
@@ -158,7 +155,7 @@ class Elke27ZoneBinarySensor(
         if zone is None:
             self._log_missing()
             return None
-        return zone.open
+        return bool(zone.open)
 
     @property
     def icon(self) -> str | None:
@@ -208,17 +205,13 @@ class Elke27ZoneBinarySensor(
         _LOGGER.debug("Zone %s missing from snapshot", self._zone_id)
 
 
-def _get_zone(snapshot: PanelSnapshot | None, zone_id: int) -> ZoneState | None:
-    if snapshot is None:
-        return None
+def _get_zone(snapshot: PanelSnapshot, zone_id: int) -> ZoneState | None:
     return snapshot.zones.get(zone_id)
 
 
 def _zone_definition_entry(
-    snapshot: PanelSnapshot | None, zone_id: int
+    snapshot: PanelSnapshot, zone_id: int
 ) -> ZoneDefinition | None:
-    if snapshot is None:
-        return None
     return snapshot.zone_definitions.get(zone_id)
 
 
@@ -230,8 +223,10 @@ def _zone_definition_value(zone_definition: ZoneDefinition | None) -> str | None
 
 def _zone_name(zone: ZoneState, zone_definition: ZoneDefinition | None) -> str | None:
     if zone_definition is not None and zone_definition.name:
-        return sanitize_name(zone_definition.name)
-    return sanitize_name(zone.name)
+        return str(zone_definition.name)
+    if zone.name:
+        return str(zone.name)
+    return None
 
 
 def _zone_device_class(

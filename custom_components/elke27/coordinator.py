@@ -30,8 +30,13 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+REFRESH_AFTER_CONNECT_ERRORS: tuple[type[Exception], ...] = (
+    *COMMAND_ERRORS,
+    HomeAssistantError,
+)
 
-class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
+
+class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     """Coordinate Elke27 snapshot updates and CSM refreshes."""
 
     def __init__(
@@ -52,6 +57,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         self._refresh_task: asyncio.Task[None] | None = None
         self._unsubscribe: Callable[[], None] | None = None
         self._unsubscribe_reconnect: Callable[[], None] | None = None
+        self.async_set_updated_data(PanelSnapshot.empty())
 
     async def async_start(self) -> None:
         """Subscribe to hub events and seed snapshot data."""
@@ -176,15 +182,17 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         Unload cancels it, and it does not hold up startup or
         async_block_till_done.
         """
-        return self.config_entry.async_create_background_task(
-            self.hass, coro, f"{DOMAIN} {name}"
-        )
+        entry = self.config_entry
+        if entry is None:
+            msg = "Coordinator is not bound to a config entry"
+            raise RuntimeError(msg)
+        return entry.async_create_background_task(self.hass, coro, f"{DOMAIN} {name}")
 
     async def _async_refresh_after_connect(self) -> None:
         """Refresh after a reconnect; a failure is logged, the reconnect stands."""
         try:
             await self.async_refresh_now()
-        except (*COMMAND_ERRORS, HomeAssistantError) as err:
+        except REFRESH_AFTER_CONNECT_ERRORS as err:
             _LOGGER.debug("Refresh after reconnect failed: %s", err)
 
     async def _async_debounced_refresh(self) -> None:
@@ -206,7 +214,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
 
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:
         """Update coordinator data and track snapshot version."""
-        self.async_set_updated_data(snapshot)
+        self.async_set_updated_data(snapshot or PanelSnapshot.empty())
 
 
 def _normalize_domains(domains: Iterable[str] | str | None) -> set[str]:

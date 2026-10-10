@@ -3,3 +3,4 @@
 -r requirements.txt
 pytest-homeassistant-custom-component==0.13.308
 elke27==0.3.11
+mypy>=1.14.0

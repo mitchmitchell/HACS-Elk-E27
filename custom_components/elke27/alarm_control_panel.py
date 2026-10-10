@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 from elke27_lib import AreaState, ArmMode, PanelSnapshot, ZoneState
 from elke27_lib.errors import Elke27PinRequiredError
 
-from homeassistant.components.alarm_control_panel import (
-    AlarmControlPanelEntity,
+from homeassistant.components.alarm_control_panel import AlarmControlPanelEntity
+from homeassistant.components.alarm_control_panel.const import (
     AlarmControlPanelEntityFeature,
     AlarmControlPanelState,
     CodeFormat,
@@ -24,7 +24,6 @@ from .entity import (
     build_unique_id,
     device_info_for_entry,
     raise_if_not_sent,
-    sanitize_name,
     unique_base,
 )
 from .hub import ZoneBypassFailedError, area_faulted_zones, is_definitive_refusal
@@ -56,9 +55,6 @@ async def async_setup_entry(
 
     def _async_add_areas() -> None:
         snapshot = coordinator.data
-        if snapshot is None:
-            _LOGGER.debug("Area entities skipped because snapshot is unavailable")
-            return
         entities: list[Elke27AreaAlarmControlPanel] = []
         if not snapshot.areas:
             _LOGGER.debug("No areas available for entity creation")
@@ -105,7 +101,7 @@ class Elke27AreaAlarmControlPanel(
         self._hub = hub
         self._entry = entry
         self._area_id = area_id
-        self._attr_name = sanitize_name(area.name) or f"Area {area_id}"
+        self._attr_name = area.name or f"Area {area_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "area",
@@ -138,9 +134,7 @@ class Elke27AreaAlarmControlPanel(
         definitions = self.coordinator.data.zone_definitions
         return {
             "ready": area.ready,
-            # AreaState.ready_status is new in elke27 0.3.10 (RDY_AWAY, RDY_STAY,
-            # RDY_NOT); older versions do not have it.
-            "ready_status": getattr(area, "ready_status", None),
+            "ready_status": area.ready_status,
             "faulted_zone_ids": [zone.zone_id for zone in faulted_zones],
             "faulted_zones": [
                 _zone_display_name(zone, definitions) for zone in faulted_zones
@@ -238,9 +232,7 @@ class Elke27AreaAlarmControlPanel(
         _LOGGER.debug("Area %s missing from snapshot", self._area_id)
 
 
-def _get_area(snapshot: PanelSnapshot | None, area_id: int) -> AreaState | None:
-    if snapshot is None:
-        return None
+def _get_area(snapshot: PanelSnapshot, area_id: int) -> AreaState | None:
     return snapshot.areas.get(area_id)
 
 
@@ -261,8 +253,8 @@ def _area_state_to_ha(area: AreaState) -> AlarmControlPanelState | None:
 def _zone_display_name(zone: ZoneState, definitions: Mapping[int, Any]) -> str:
     definition = definitions.get(zone.zone_id)
     if definition is not None and definition.name:
-        return sanitize_name(definition.name) or f"Zone {zone.zone_id}"
-    return sanitize_name(zone.name) or f"Zone {zone.zone_id}"
+        return definition.name or f"Zone {zone.zone_id}"
+    return zone.name or f"Zone {zone.zone_id}"
 
 
 def _normalize_code(code: str | None) -> str | None:
