@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 import dataclasses
 import logging
+import random
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -43,8 +44,14 @@ from homeassistant.exceptions import (
     HomeAssistantError,
     ServiceValidationError,
 )
+from homeassistant.helpers import issue_registry as ir
 
-from .const import DOMAIN, READY_TIMEOUT
+from .const import (
+    DOMAIN,
+    ISSUE_RECONNECT_FAILED,
+    READY_TIMEOUT,
+    RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
+)
 from .identity import build_client_identity
 
 if TYPE_CHECKING:
@@ -119,6 +126,7 @@ class Elke27Hub:
         self._disarm_clear: dict[int, asyncio.Event] = {}
         self._reconnect_task: asyncio.Task[None] | None = None
         self._reconnect_attempts = 0
+        self._reconnect_non_transport_streak = 0
         self._stopping = False
         self._unavailable_logged = False
         self._reconnect_listeners: list[Callable[[], None]] = []
@@ -204,6 +212,7 @@ class Elke27Hub:
             # Wait for the loop to finish without swallowing a cancellation
             # of this call itself.
             await asyncio.wait([task])
+        self._clear_reconnect_repair_issue()
         await self._async_disconnect()
 
     async def _async_disconnect(self) -> None:
@@ -849,6 +858,53 @@ class Elke27Hub:
         self._reauth_requested = True
         self._entry.async_start_reauth(self._hass)
 
+    @callback
+    def _reconnect_repair_issue_id(self) -> str | None:
+        """Return the repairs issue id for this entry's reconnect failures."""
+        if self._entry is None:
+            return None
+        return f"{ISSUE_RECONNECT_FAILED}_{self._entry.entry_id}"
+
+    @callback
+    def _clear_reconnect_repair_issue(self) -> None:
+        """Remove the reconnect repair issue when the link is healthy or unloading."""
+        issue_id = self._reconnect_repair_issue_id()
+        if issue_id is None:
+            return
+        ir.async_delete_issue(self._hass, DOMAIN, issue_id)
+
+    @callback
+    def _ensure_reconnect_repair_issue(self) -> None:
+        """Raise a repair issue after repeated non-transport reconnect failures."""
+        if self._entry is None:
+            return
+        issue_id = self._reconnect_repair_issue_id()
+        if issue_id is None:
+            return
+        ir.async_create_issue(
+            self._hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=ISSUE_RECONNECT_FAILED,
+            translation_placeholders={"name": self._entry.title},
+        )
+
+    def _log_reconnect_failure(self, err: Exception, *, transport: bool) -> None:
+        """Log a reconnect failure; non-transport streaks warn once per streak."""
+        if transport:
+            _LOGGER.debug("Reconnect attempt failed: %s", err)
+            return
+        first_in_streak = self._reconnect_non_transport_streak == 1
+        if first_in_streak:
+            if isinstance(err, Elke27Error):
+                _LOGGER.warning("Reconnect attempt failed: %s", err)
+            else:
+                _LOGGER.warning("Reconnect attempt failed: %s", err, exc_info=err)
+            return
+        _LOGGER.debug("Reconnect attempt failed: %s", err)
+
     async def _async_reconnect_loop(self) -> None:
         """Reconnect with exponential backoff until successful or stopped."""
         while not self._stopping:
@@ -859,22 +915,34 @@ class Elke27Hub:
                 # The panel no longer accepts the link: retrying cannot help.
                 _LOGGER.warning("Reconnect stopped; relink required: %s", err)
                 self._reconnect_attempts = 0
+                self._reconnect_non_transport_streak = 0
+                self._clear_reconnect_repair_issue()
                 self.start_reauth_once()
                 return
-            except (*COMMAND_ERRORS, ConfigEntryNotReady) as err:
-                _LOGGER.debug("Reconnect attempt failed: %s", err)
             except Exception as err:  # noqa: BLE001
-                _LOGGER.warning("Unexpected reconnect failure: %s", err)
+                transport = is_reconnect_retryable(err)
+                if not transport:
+                    self._reconnect_non_transport_streak += 1
+                    if (
+                        self._reconnect_non_transport_streak
+                        >= RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD
+                    ):
+                        self._ensure_reconnect_repair_issue()
+                self._log_reconnect_failure(err, transport=transport)
             else:
                 self._reconnect_attempts = 0
+                self._reconnect_non_transport_streak = 0
+                self._clear_reconnect_repair_issue()
                 self._notify_reconnected()
                 return
             self._reconnect_attempts += 1
-            delay = min(300, 2**self._reconnect_attempts)
+            # Cap the base delay at 300 s before jitter (max sleep is about 360 s).
+            base_delay = min(300, 2**self._reconnect_attempts)
+            delay = base_delay * random.uniform(0.8, 1.2)  # noqa: S311
             _LOGGER.debug(
                 "Reconnect attempt %s sleeping for %s seconds",
                 self._reconnect_attempts,
-                delay,
+                round(delay, 2),
             )
             await asyncio.sleep(delay)
 
@@ -1103,6 +1171,13 @@ def _log_command_failure(
         )
     else:
         _LOGGER.warning("%s %s %s failed: %s", kind, target_id, action, err)
+
+
+def is_reconnect_retryable(err: BaseException) -> bool:
+    """Return True when a failed reconnect should be retried with backoff."""
+    if isinstance(err, ConfigEntryNotReady):
+        return True
+    return is_connection_error(err) or is_timeout_error(err)
 
 
 def is_timeout_error(err: BaseException) -> bool:

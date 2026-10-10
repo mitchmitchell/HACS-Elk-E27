@@ -31,7 +31,13 @@ from homeassistant.helpers.target import (
     async_extract_referenced_entity_ids,
 )
 
-from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, CONF_PANEL, DOMAIN
+from .const import (
+    CONF_INTEGRATION_SERIAL,
+    CONF_LINK_KEYS_JSON,
+    CONF_PANEL,
+    DOMAIN,
+    ISSUE_RECONNECT_FAILED,
+)
 from .coordinator import Elke27DataUpdateCoordinator
 from .hub import (
     AUTH_ERRORS,
@@ -227,11 +233,15 @@ def _duplicate_unique_id_issue_id(entry_id: str) -> str:
     return f"duplicate_unique_id_{entry_id}"
 
 
+def _reconnect_failed_issue_id(entry_id: str) -> str:
+    return f"{ISSUE_RECONNECT_FAILED}_{entry_id}"
+
+
 @callback
 def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
     """Remove repairs issues scoped to one config entry."""
     ir.async_delete_issue(hass, DOMAIN, _duplicate_unique_id_issue_id(entry.entry_id))
-    # Additional entry-scoped issues (for example reconnect_failed from PR #53) go here.
+    ir.async_delete_issue(hass, DOMAIN, _reconnect_failed_issue_id(entry.entry_id))
 
 
 async def _async_handle_alarm_arm_automatic(
