@@ -13,6 +13,7 @@ from elke27_lib.errors import (
     E27Error,
     Elke27AuthError,
     Elke27ConnectionError,
+    Elke27CryptoError,
     Elke27DisconnectedError,
     Elke27Error,
     Elke27LinkRequiredError,
@@ -312,7 +313,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             snapshot = client.get_snapshot()
             panel_info = asdict(snapshot.panel)
             table_info = asdict(snapshot.table_info)
-        except (InvalidCredentials, Elke27AuthError):
+        except (InvalidCredentials, Elke27AuthError, Elke27CryptoError):
             errors["base"] = "invalid_auth"
         except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError):
             errors["base"] = "cannot_connect"

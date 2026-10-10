@@ -15,6 +15,7 @@ from elke27_lib.errors import (
     E27Timeout,
     Elke27AuthError,
     Elke27ConnectionError,
+    Elke27CryptoError,
     Elke27LinkRequiredError,
     Elke27ProtocolError,
     InvalidCredentials,
@@ -149,6 +150,7 @@ async def test_manual_creates_entry_without_storing_codes(
     ("error", "reason"),
     [
         (InvalidCredentials("bad"), "invalid_auth"),
+        (Elke27CryptoError("bad crypto"), "invalid_auth"),
         (Elke27ConnectionError("down"), "cannot_connect"),
         (Elke27LinkRequiredError("relink"), "link_required"),
         (Elke27ProtocolError("other"), "unknown"),
@@ -235,6 +237,21 @@ async def test_manual_auth_error_is_invalid_auth(
         result["flow_id"],
         {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
     )
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_reauth_crypto_error_is_invalid_auth(
+    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+) -> None:
+    """Elke27CryptoError during reauth shows invalid_auth, not unknown."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    flow_client.async_link.side_effect = Elke27CryptoError("link invalid")
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "invalid_auth"}
 
 
