@@ -8,10 +8,11 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ### Changed
 - The integration always starts from an empty panel snapshot, never `None` (#50).
 - A zone with no reported open/closed state shows unknown with the default icon (#50).
-- Strict mypy runs in CI. Unused helpers and an old library fallback were removed (#50).
+- Strict mypy runs in CI. Unused snapshot helpers were removed; link-check probing still
+  uses `request_link_check` when the client supports it (#50).
 
 ### Breaking
-- None found compared with 0.1.8 (checked at #50 500e00d). The legacy `pin` cleanup is
+- None found compared with 0.1.8 (checked at #50 416257f). The legacy `pin` cleanup is
   kept, and the unique-ID migration was already removed in 0.1.8. Upgrading from 0.1.7?
   Follow the 0.1.8 delete-and-re-add steps.
 
