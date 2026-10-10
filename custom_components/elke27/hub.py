@@ -617,6 +617,10 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Zone", zone_id, "bypass", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
@@ -632,6 +636,10 @@ class Elke27Hub:
             result = await client.async_execute(command_key, **params)
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _LOGGER.warning("Command %s failed: %s", command_key, err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _LOGGER.warning("Command %s failed: %s", command_key, err)
             self._note_command_error(err)
@@ -640,8 +648,11 @@ class Elke27Hub:
             if isinstance(result.error, Elke27PinRequiredError):
                 raise result.error
             if result.error is not None:
+                if isinstance(result.error, AUTH_ERRORS):
+                    self.start_reauth_once()
+                else:
+                    self._note_command_error(result.error)
                 _LOGGER.warning("Command %s failed: %s", command_key, result.error)
-                self._note_command_error(result.error)
                 raise HomeAssistantError(_error_message(result.error)) from (
                     result.error
                 )
@@ -703,6 +714,10 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Area", area_id, "arming", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
@@ -752,6 +767,10 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Area", area_id, "disarm", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
@@ -829,6 +848,13 @@ class Elke27Hub:
         _LOGGER.info("Panel connection lost")
         self._unavailable_logged = True
 
+    def start_reauth_once(self) -> None:
+        """Start a reauth flow at most once until the entry reloads."""
+        if self._entry is None or self._reauth_requested:
+            return
+        self._reauth_requested = True
+        self._entry.async_start_reauth(self._hass)
+
     async def _async_reconnect_loop(self) -> None:
         """Reconnect with exponential backoff until successful or stopped."""
         while not self._stopping:
@@ -839,9 +865,7 @@ class Elke27Hub:
                 # The panel no longer accepts the link: retrying cannot help.
                 _LOGGER.warning("Reconnect stopped; relink required: %s", err)
                 self._reconnect_attempts = 0
-                if self._entry is not None and not self._reauth_requested:
-                    self._reauth_requested = True
-                    self._entry.async_start_reauth(self._hass)
+                self.start_reauth_once()
                 return
             except RECONNECT_RETRY_ERRORS as err:
                 _LOGGER.debug("Reconnect attempt failed: %s", err)

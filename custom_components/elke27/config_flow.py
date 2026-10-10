@@ -23,7 +23,8 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, translation
+from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.selector import selector
 
 from .const import (
@@ -43,7 +44,7 @@ CONF_ACCESS_CODE = "access_code"
 CONF_PASSPHRASE = "passphrase"
 CONF_PANEL_INFO = "panel_info"
 CONF_TABLE_INFO = "table_info"
-CONF_RESCAN = "__rescan__"
+CONF_RESCAN = "rescan"
 CONF_SETUP_METHOD = "setup_method"
 SETUP_METHOD_DISCOVER = "discover"
 SETUP_METHOD_MANUAL = "manual"
@@ -139,7 +140,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle discovery-based setup."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            data_schema = self._discovery_schema()
+            data_schema = await self._async_discovery_schema()
             if CONF_PANEL in user_input:
                 panel_idx_raw = user_input[CONF_PANEL]
                 if panel_idx_raw == CONF_RESCAN:
@@ -152,7 +153,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "no_panels_found"
                     return self.async_show_form(
                         step_id="discover",
-                        data_schema=self._discovery_schema(),
+                        data_schema=await self._async_discovery_schema(),
                         errors=errors,
                     )
                 panel = self._discovered_panels[panel_idx]
@@ -164,7 +165,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "no_panels_found"
                     return self.async_show_form(
                         step_id="discover",
-                        data_schema=self._discovery_schema(),
+                        data_schema=await self._async_discovery_schema(),
                         errors=errors,
                     )
                 self._selected_host = host
@@ -209,9 +210,25 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="discover",
-            data_schema=self._discovery_schema(),
+            data_schema=await self._async_discovery_schema(),
             errors=errors,
         )
+
+    async def _async_rescan_option_label(self) -> str:
+        """Return the translated label for the rescan select option."""
+        translations = await translation.async_get_translations(
+            self.hass,
+            self.hass.config.language,
+            "selector",
+            integrations=[DOMAIN],
+        )
+        key = f"component.{DOMAIN}.selector.panel.options.{CONF_RESCAN}"
+        fallback = "Rescan for panels"
+        return translations.get(key, fallback)
+
+    async def _async_discovery_schema(self) -> vol.Schema:
+        """Build the discover-step schema with a translated rescan option."""
+        return self._discovery_schema(await self._async_rescan_option_label())
 
     async def async_step_reauth(
         self, _entry_data: Mapping[str, Any]
@@ -333,16 +350,18 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_TABLE_INFO: table_info,
         }
 
-        unique_id = _panel_mac(panel_info) or integration_serial
-        await self.async_set_unique_id(unique_id)
         if entry is not None:
-            # Reauth must relink the same panel, never re-bind the entry.
-            self._abort_if_unique_id_mismatch(reason="wrong_panel")
+            candidates = _reauth_candidate_unique_ids(panel_info, integration_serial)
+            if entry.unique_id not in candidates:
+                return self.async_abort(reason="wrong_panel")
             return self.async_update_reload_and_abort(
                 entry,
                 data_updates=data,
                 options={**entry.options, **options},
             )
+
+        unique_id = _config_entry_unique_id(panel_info, integration_serial)
+        await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
 
         title = _panel_name(panel_info) or host
@@ -352,7 +371,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             result["title"] = title
         return result
 
-    def _discovery_schema(self) -> vol.Schema:
+    def _discovery_schema(self, rescan_label: str) -> vol.Schema:
         options = [
             {
                 "value": str(idx),
@@ -363,9 +382,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             for idx, panel in enumerate(self._discovered_panels or [])
         ]
         if options:
-            options.insert(0, {"value": CONF_RESCAN, "label": "rescan"})
+            options.insert(0, {"value": CONF_RESCAN, "label": rescan_label})
         else:
-            options = [{"value": CONF_RESCAN, "label": "rescan"}]
+            options = [{"value": CONF_RESCAN, "label": rescan_label}]
         return vol.Schema(
             {
                 vol.Required(CONF_PANEL): selector(
@@ -373,7 +392,6 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                         "select": {
                             "options": options,
                             "mode": "list",
-                            "translation_key": "panel",
                         }
                     }
                 ),
@@ -460,6 +478,21 @@ def _normalize_panel_keys(panel: dict[str, Any]) -> dict[str, Any]:
 
 def _panel_mac(panel_info: dict[str, Any]) -> str | None:
     return panel_info.get("mac") or panel_info.get("panel_mac")
+
+
+def _config_entry_unique_id(panel_info: dict[str, Any], integration_serial: str) -> str:
+    """Return the config entry unique_id (formatted MAC or integration serial)."""
+    mac = _panel_mac(panel_info)
+    if mac:
+        return format_mac(str(mac))
+    return integration_serial
+
+
+def _reauth_candidate_unique_ids(
+    panel_info: dict[str, Any], integration_serial: str
+) -> set[str]:
+    """Return identity keys that may match an existing entry during reauth."""
+    return {_config_entry_unique_id(panel_info, integration_serial), integration_serial}
 
 
 def _panel_name(panel_info: dict[str, Any]) -> str | None:

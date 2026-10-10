@@ -157,10 +157,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
             translation_domain=DOMAIN, translation_key="auth_failed"
         )
     integration_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
+    entry_data = dict(entry.data)
+    pin_removed = entry_data.pop("pin", None)
     if not integration_serial:
         integration_serial = await async_get_integration_serial(hass, host)
-        entry_data = dict(entry.data)
         entry_data[CONF_INTEGRATION_SERIAL] = integration_serial
+        hass.config_entries.async_update_entry(entry, data=entry_data)
+    elif pin_removed is not None:
         hass.config_entries.async_update_entry(entry, data=entry_data)
     hub = Elke27Hub(
         hass,

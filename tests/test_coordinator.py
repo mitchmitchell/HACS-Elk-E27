@@ -6,10 +6,16 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock
 
-from elke27_lib.errors import Elke27ConnectionError, Elke27ProtocolError
+from elke27_lib.errors import (
+    Elke27AuthError,
+    Elke27ConnectionError,
+    Elke27ProtocolError,
+)
 from elke27_lib.events import ConnectionStateChanged, DomainCsmChanged
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.elke27.const import DOMAIN
+from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from tests.conftest import ClientHarness
@@ -177,6 +183,70 @@ async def test_debounced_refresh_stops_when_client_disconnects(
     await task
     refresh.assert_not_awaited()
     assert coordinator._pending_domains == set()
+
+
+def _reauth_flows(hass: HomeAssistant) -> list[dict]:
+    return [
+        flow
+        for flow in hass.config_entries.flow.async_progress()
+        if flow["handler"] == DOMAIN and flow["context"]["source"] == SOURCE_REAUTH
+    ]
+
+
+async def test_refresh_after_connect_auth_error_starts_reauth_once(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """An auth failure after reconnect starts reauth once, not a dead-link retry."""
+    await _setup(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    hub = mock_config_entry.runtime_data.hub
+    mock_client.client.async_refresh_csm.side_effect = Elke27AuthError("bad")
+
+    coordinator._handle_reconnected()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    task = coordinator._refresh_task
+    assert task is not None
+    await task
+    await hass.async_block_till_done()
+    assert len(_reauth_flows(hass)) == 1
+    assert hub._reauth_requested is True
+
+    await coordinator._async_refresh_after_connect()
+    await hass.async_block_till_done()
+    assert len(_reauth_flows(hass)) == 1
+
+
+async def test_debounced_refresh_auth_error_starts_reauth_once(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """An auth failure during debounced refresh starts reauth only once."""
+    await _setup(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    coordinator._debounce_seconds = 0
+    mock_client.client.async_refresh_domain_config = AsyncMock(
+        side_effect=Elke27AuthError("bad")
+    )
+
+    mock_client.emit(_domain_event("light"))
+    mock_client.emit(_domain_event("zone"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    task = coordinator._debounce_task
+    assert task is not None
+    await task
+    await hass.async_block_till_done()
+    assert len(_reauth_flows(hass)) == 1
+    assert mock_config_entry.runtime_data.hub._reauth_requested is True
+
+    mock_client.emit(_domain_event("lock"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    second = coordinator._debounce_task
+    assert second is not None
+    await second
+    await hass.async_block_till_done()
+    assert len(_reauth_flows(hass)) == 1
 
 
 async def test_debounced_refresh_stops_on_connection_error(

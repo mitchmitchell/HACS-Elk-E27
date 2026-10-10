@@ -853,10 +853,10 @@ whole °F, so setpoints you set in °C are rounded.
 Mostly internal cleanup (typed snapshots, strict typing). No production installs are
 expected yet, but older dev/test setups have two breaking changes:
 
-- **A legacy stored `pin` is no longer used or removed.** Very early builds saved a `pin` in
-  the config entry. 0.1.9 ignores it and no longer deletes it, so it stays in HA's config
-  store. What to do: to remove it, delete the integration entry and add it again. Entity IDs
-  may change. Otherwise it's harmless.
+- **Legacy stored `pin` is removed on setup.** Very early builds saved a `pin` in the config
+  entry. 0.1.9 does not use it and **deletes it** from the config entry the next time the
+  integration loads (one-time cleanup). Your alarm user code is not stored in the config
+  entry; enter it when arming or bypassing.
 - **Old unique IDs are not migrated.** `<base>_<domain>_<id>` entities aren't renamed to
   `<base>:<domain>:<id>`, so you may see duplicates. What to do: (1) before upgrading,
   restart once on 0.1.8 so its migration runs; (2) after upgrading, delete the unavailable
