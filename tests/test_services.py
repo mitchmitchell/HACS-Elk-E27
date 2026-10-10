@@ -676,6 +676,64 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         assert order == ["bypass1:True", "bypass2:True", "arm"]
         hass.bus.async_fire.assert_not_called()
 
+    async def test_concurrent_second_call_no_ops_when_status_refresh_lags(
+        self,
+    ) -> None:
+        """Queued call must no-op when area_get_status still shows disarmed."""
+        hass = MagicMock()
+        before = _two_area_snapshot()
+        hub = _hub()
+        client = MagicMock()
+
+        async def _execute(command_key: str, **_params: Any) -> Any:
+            if command_key == "area_get_status":
+                payload: Any = {"area_id": 1, "arm_state": "DISARMED"}
+            elif command_key == "zone_get_all_zones_status":
+                payload = {"status": "99"}
+            else:
+                payload = {}
+            return MagicMock(ok=True, data=payload, error=None)
+
+        client.async_execute = AsyncMock(side_effect=_execute)
+        client.get_snapshot = MagicMock(return_value=before)
+        order: list[str] = []
+        first_arm_started = asyncio.Event()
+        release_first_arm = asyncio.Event()
+
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+            order.append("arm")
+            first_arm_started.set()
+            await release_first_arm.wait()
+
+        client.async_arm_area = AsyncMock(side_effect=_panel_arm)
+        hub._client = client  # noqa: SLF001
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        runtime = MagicMock()
+        runtime.hub = hub
+        runtime.coordinator = MagicMock()
+        runtime.coordinator.data = None
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        with patch.object(integration.persistent_notification, "async_create"):
+            first = asyncio.create_task(
+                self._run(hass, {"mode": "away", "code": "1234"}, entities)
+            )
+            await first_arm_started.wait()
+            second = asyncio.create_task(
+                self._run(hass, {"mode": "away", "code": "1234"}, entities)
+            )
+            for _ in range(5):
+                await asyncio.sleep(0)
+            # The second call waits on the area lock while the first is at arm.
+            assert order == ["arm"]
+            release_first_arm.set()
+            await asyncio.gather(first, second)
+        assert order == ["arm"]
+        assert client.async_arm_area.await_count == 1
+        assert hub.async_set_zone_bypass.await_count == 2
+        hass.bus.async_fire.assert_not_called()
+
     async def test_second_call_skips_zones_already_bypassed(self) -> None:
         """Live zones already bypassed are not re-bypassed or rolled back."""
         hass = MagicMock()

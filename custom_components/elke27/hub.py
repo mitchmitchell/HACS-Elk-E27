@@ -98,6 +98,9 @@ class Elke27Hub:
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._connect_lock = asyncio.Lock()
         self._area_arm_locks: dict[int, asyncio.Lock] = {}
+        # Panel status and the client snapshot can lag after a successful arm;
+        # remember modes this hub applied so a queued automatic arm can no-op.
+        self._confirmed_arm_modes: dict[int, ArmMode] = {}
         self._arm_automatic_tasks: dict[int, set[asyncio.Task[Any]]] = {}
         self._disarm_cancelled: set[asyncio.Task[Any]] = set()
         self._disarm_pending: dict[int, int] = {}
@@ -204,7 +207,9 @@ class Elke27Hub:
         client snapshot afterwards is not enough: elke27 resolves the request
         before its handlers apply the reply, and it does not apply arm or bypass
         command replies at all. Each request is sent once; if one fails, that
-        part falls back to the client snapshot.
+        part falls back to the client snapshot. A successful arm through this
+        hub is also remembered briefly so a lagging area_get_status does not
+        look disarmed to a queued automatic arm.
         """
         client = self._client
         if client is None:
@@ -215,9 +220,10 @@ class Elke27Hub:
         zones_payload = await self._async_status_request(
             client, "zone_get_all_zones_status"
         )
-        return snapshot_with_status(
+        snapshot = snapshot_with_status(
             client.get_snapshot(), area_id, area_payload, zones_payload
         )
+        return self._snapshot_with_confirmed_arm_mode(snapshot, area_id)
 
     async def _async_status_request(
         self, client: Elke27Client, command_key: str, **params: Any
@@ -614,6 +620,8 @@ class Elke27Hub:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
+        if arm_mode in _ARMED_MODES:
+            self._confirmed_arm_modes[area_id] = arm_mode
         return True
 
     def _resubscribe_typed_callbacks(self) -> None:
@@ -660,7 +668,28 @@ class Elke27Hub:
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
+        self._confirmed_arm_modes.pop(area_id, None)
         return True
+
+    def _snapshot_with_confirmed_arm_mode(
+        self, snapshot: PanelSnapshot | None, area_id: int
+    ) -> PanelSnapshot | None:
+        """
+        Treat a recently successful arm as armed when status refresh still lags.
+
+        Only fills in a disarmed snapshot; an armed reply from the panel wins.
+        """
+        if snapshot is None:
+            return None
+        confirmed = self._confirmed_arm_modes.get(area_id)
+        if confirmed is None or confirmed not in _ARMED_MODES:
+            return snapshot
+        area = snapshot.areas.get(area_id)
+        if area is None or area.arm_mode in _ARMED_MODES:
+            return snapshot
+        areas = dict(snapshot.areas)
+        areas[area_id] = dataclasses.replace(area, arm_mode=confirmed)
+        return dataclasses.replace(snapshot, areas=MappingProxyType(areas))
 
     def _handle_connection_event(self, event: Elke27Event) -> None:
         """Handle connection lifecycle events from the client."""

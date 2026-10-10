@@ -20,7 +20,7 @@ _HAS_DEPS = all(
 if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parents[1]))
 
-    from elke27_lib import AreaState, PanelInfo, PanelSnapshot, ZoneState
+    from elke27_lib import AreaState, ArmMode, PanelInfo, PanelSnapshot, ZoneState
     from elke27_lib.errors import Elke27PinRequiredError
 
     from custom_components.elke27.hub import (
@@ -326,3 +326,30 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
     async def test_no_client_returns_none(self) -> None:
         """Without a client there is nothing to refresh."""
         assert await _hub().async_refresh_area_state(1) is None
+
+    async def test_confirmed_arm_covers_lagging_status_refresh(self) -> None:
+        """A successful arm is treated as armed when area_get_status still lags."""
+        hub = _hub()
+        client = self._client(
+            area={"area_id": 1, "arm_state": "DISARMED"}, zones={"status": "99"}
+        )
+        client.async_arm_area = AsyncMock(return_value=None)
+        hub._client = client  # noqa: SLF001
+        await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
+        fresh = await hub.async_refresh_area_state(1)
+        assert area_is_armed(fresh, 1)
+        assert fresh.areas[1].arm_mode is ArmMode.ARMED_AWAY
+
+    async def test_disarm_clears_confirmed_arm_mode(self) -> None:
+        """Disarming drops the lagging-arm hint for the area."""
+        hub = _hub()
+        client = self._client(
+            area={"area_id": 1, "arm_state": "DISARMED"}, zones={"status": "99"}
+        )
+        client.async_arm_area = AsyncMock(return_value=None)
+        client.async_disarm_area = AsyncMock(return_value=None)
+        hub._client = client  # noqa: SLF001
+        await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
+        await hub.async_disarm_area(1, "1234")
+        fresh = await hub.async_refresh_area_state(1)
+        assert not area_is_armed(fresh, 1)
