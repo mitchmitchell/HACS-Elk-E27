@@ -10,7 +10,7 @@ import sys
 from types import MappingProxyType
 from typing import Any
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 _HAS_DEPS = all(
     importlib.util.find_spec(name) is not None
@@ -20,9 +20,10 @@ _HAS_DEPS = all(
 if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parents[1]))
 
-    from elke27_lib import AreaState, ArmMode, PanelInfo, PanelSnapshot, ZoneState
+    from elke27_lib import AreaState, PanelInfo, PanelSnapshot, ZoneState
     from elke27_lib.errors import Elke27PinRequiredError
 
+    from custom_components.elke27 import hub as elke27_hub
     from custom_components.elke27.hub import (
         Elke27Hub,
         ZoneBypassFailedError,
@@ -327,29 +328,30 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
         """Without a client there is nothing to refresh."""
         assert await _hub().async_refresh_area_state(1) is None
 
-    async def test_confirmed_arm_covers_lagging_status_refresh(self) -> None:
-        """A successful arm is treated as armed when area_get_status still lags."""
+    async def test_poll_until_area_armed_waits_for_lagging_status(self) -> None:
+        """Polling keeps reading area_get_status until the panel reports armed."""
         hub = _hub()
-        client = self._client(
-            area={"area_id": 1, "arm_state": "DISARMED"}, zones={"status": "99"}
-        )
-        client.async_arm_area = AsyncMock(return_value=None)
-        hub._client = client  # noqa: SLF001
-        await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
-        fresh = await hub.async_refresh_area_state(1)
-        assert area_is_armed(fresh, 1)
-        assert fresh.areas[1].arm_mode is ArmMode.ARMED_AWAY
+        reads = {"count": 0}
 
-    async def test_disarm_clears_confirmed_arm_mode(self) -> None:
-        """Disarming drops the lagging-arm hint for the area."""
-        hub = _hub()
-        client = self._client(
-            area={"area_id": 1, "arm_state": "DISARMED"}, zones={"status": "99"}
-        )
-        client.async_arm_area = AsyncMock(return_value=None)
-        client.async_disarm_area = AsyncMock(return_value=None)
+        async def _execute(command_key: str, **_params: Any) -> Any:
+            if command_key != "area_get_status":
+                msg = command_key
+                raise AssertionError(msg)
+            reads["count"] += 1
+            arm_state = "DISARMED" if reads["count"] < 3 else "ARMED_AWAY"
+            return MagicMock(
+                ok=True, data={"area_id": 1, "arm_state": arm_state}, error=None
+            )
+
+        client = MagicMock()
+        client.async_execute = AsyncMock(side_effect=_execute)
+        client.get_snapshot = MagicMock(return_value=_two_area_snapshot())
         hub._client = client  # noqa: SLF001
-        await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
-        await hub.async_disarm_area(1, "1234")
-        fresh = await hub.async_refresh_area_state(1)
-        assert not area_is_armed(fresh, 1)
+        with (
+            patch.object(elke27_hub, "ARM_STATUS_POLL_INTERVAL", 0.01),
+            patch.object(elke27_hub, "ARM_STATUS_POLL_TIMEOUT", 1.0),
+        ):
+            fresh, armed = await hub.async_poll_until_area_armed(1)
+        assert armed
+        assert area_is_armed(fresh, 1)
+        assert reads["count"] == 3

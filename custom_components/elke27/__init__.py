@@ -418,10 +418,10 @@ async def _async_arm_automatic_locked(
     async def _already_armed(
         reason: str, bypassed: Sequence[ZoneState], cause: Exception
     ) -> None:
-        # Re-read the area: armed means the goal is met (a no-op success);
+        # Poll the area arm state: armed means the goal is met (a no-op success);
         # otherwise the result is uncertain. No rollback either way.
-        fresh = await hub.async_refresh_area_state(area_id)
-        if area_is_armed(fresh, area_id):
+        _fresh, armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
+        if armed:
             _LOGGER.info(
                 "Area %s is already armed (panel said: %s); automatic arming skipped",
                 area_id,
@@ -430,8 +430,12 @@ async def _async_arm_automatic_locked(
             return
         _uncertain(reason, bypassed, cause)
 
-    # The client snapshot can lag the panel, so ask the panel for the area and
-    # zone status first; fall back to the snapshot if that fails.
+    # area_get_status can lag after a prior arm on this area, so poll before
+    # deciding the area is disarmed; then read zone status for bypass decisions.
+    _polled, already_armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
+    if already_armed:
+        _LOGGER.debug("Area %s is already armed; automatic arming skipped", area_id)
+        return
     snapshot = await hub.async_refresh_area_state(area_id)
     if snapshot is None:
         await _fail("arm", ARM_NOT_SENT_REASON, cause=None)
