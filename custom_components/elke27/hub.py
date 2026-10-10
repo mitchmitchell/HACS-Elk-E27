@@ -861,10 +861,12 @@ class Elke27Hub:
                 self._reconnect_attempts = 0
                 self.start_reauth_once()
                 return
-            except (*COMMAND_ERRORS, ConfigEntryNotReady) as err:
-                _LOGGER.debug("Reconnect attempt failed: %s", err)
             except Exception as err:  # noqa: BLE001
-                _LOGGER.warning("Unexpected reconnect failure: %s", err)
+                if not is_reconnect_retryable(err):
+                    _LOGGER.warning("Reconnect stopped: %s", err)
+                    self._reconnect_attempts = 0
+                    return
+                _LOGGER.debug("Reconnect attempt failed: %s", err)
             else:
                 self._reconnect_attempts = 0
                 self._notify_reconnected()
@@ -1103,6 +1105,13 @@ def _log_command_failure(
         )
     else:
         _LOGGER.warning("%s %s %s failed: %s", kind, target_id, action, err)
+
+
+def is_reconnect_retryable(err: BaseException) -> bool:
+    """Return True when a failed reconnect should be retried with backoff."""
+    if isinstance(err, ConfigEntryNotReady):
+        return True
+    return is_connection_error(err) or is_timeout_error(err)
 
 
 def is_timeout_error(err: BaseException) -> bool:

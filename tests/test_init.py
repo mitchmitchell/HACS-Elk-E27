@@ -236,10 +236,12 @@ async def test_reconnect_auth_failure_starts_reauth(
     await hass.async_block_till_done()
     hub = mock_config_entry.runtime_data.hub
 
+    connects_before = mock_client.client.async_connect.await_count
     mock_client.client.async_connect.side_effect = Elke27LinkRequiredError("relink")
     hub._reconnect_attempts = 3
     await hub._async_reconnect_loop()
     await hass.async_block_till_done()
+    assert mock_client.client.async_connect.await_count == connects_before + 1
     assert hub._reconnect_attempts == 0
     assert len(_reauth_flows(hass)) == 1
 
@@ -260,10 +262,10 @@ async def test_reconnect_auth_failure_starts_reauth_once(
     assert len(_reauth_flows(hass)) == 1
 
 
-async def test_reconnect_unexpected_error_retries(
+async def test_reconnect_transport_failure_retries_with_backoff(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
-    """An unexpected reconnect failure is logged and the loop keeps retrying."""
+    """Transport failures retry with exponential backoff until connect succeeds."""
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
@@ -272,13 +274,39 @@ async def test_reconnect_unexpected_error_retries(
 
     connects_before = mock_client.client.async_connect.await_count
     mock_client.client.async_connect.side_effect = [
-        RuntimeError("unexpected"),
+        Elke27ConnectionError("down"),
+        Elke27TimeoutError("slow"),
         None,
     ]
     mock_client.client.wait_ready.return_value = True
-    with patch("custom_components.elke27.hub.asyncio.sleep", AsyncMock()):
+    sleep_mock = AsyncMock()
+    with patch("custom_components.elke27.hub.asyncio.sleep", sleep_mock):
         await hub._async_reconnect_loop()
-    assert mock_client.client.async_connect.await_count == connects_before + 2
+    transport_failures = 2
+    assert (
+        mock_client.client.async_connect.await_count
+        == connects_before + transport_failures + 1
+    )
+    assert sleep_mock.await_count == transport_failures
+    sleep_mock.assert_any_await(2)
+    sleep_mock.assert_any_await(4)
+
+
+async def test_reconnect_non_transport_failure_stops(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """Non-transport reconnect failures stop without reauth or further retries."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hub = mock_config_entry.runtime_data.hub
+
+    connects_before = mock_client.client.async_connect.await_count
+    mock_client.client.async_connect.side_effect = Elke27ProtocolError("protocol")
+    await hub._async_reconnect_loop()
+    await hass.async_block_till_done()
+    assert mock_client.client.async_connect.await_count == connects_before + 1
+    assert len(_reauth_flows(hass)) == 0
 
 
 async def test_connect_cancellation_disconnects_client(
