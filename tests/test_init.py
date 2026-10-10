@@ -20,6 +20,7 @@ from elke27_lib.errors import (
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.elke27 import async_remove_entry
 from custom_components.elke27.alarm_control_panel import _normalize_code
 from custom_components.elke27.const import (
     CONF_INTEGRATION_SERIAL,
@@ -35,6 +36,7 @@ from tests.conftest import (
     INTEGRATION_SERIAL,
     LINK_KEYS_JSON,
     PANEL_MAC,
+    PANEL_SERIAL,
     PORT,
     ClientHarness,
     panel_snapshot,
@@ -79,14 +81,34 @@ async def test_setup_skips_unique_id_backfill_and_raises_repair_on_collision(
     assert issue.translation_key == "duplicate_unique_id"
 
 
+async def test_remove_entry_deletes_duplicate_unique_id_repair(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """Removing an entry clears its duplicate unique_id repair issue."""
+    mock_config_entry.add_to_hass(hass)
+    issue_id = f"duplicate_unique_id_{mock_config_entry.entry_id}"
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="duplicate_unique_id",
+    )
+    await async_remove_entry(hass, mock_config_entry)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
 async def test_setup_sets_unique_id_for_legacy_no_mac_entry(
     hass: HomeAssistant, mock_client: ClientHarness
 ) -> None:
-    """Setup assigns unique_id from integration serial when the panel reports no MAC."""
+    """Setup assigns unique_id from panel serial when the panel reports no MAC."""
     snapshot = panel_snapshot()
     mock_client.snapshot = dataclasses.replace(
         snapshot,
-        panel=dataclasses.replace(snapshot.panel, mac=None),
+        panel=dataclasses.replace(
+            snapshot.panel, mac=None, serial=PANEL_SERIAL
+        ),
     )
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -102,7 +124,7 @@ async def test_setup_sets_unique_id_for_legacy_no_mac_entry(
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert entry.unique_id == INTEGRATION_SERIAL
+    assert entry.unique_id == PANEL_SERIAL
 
 
 async def test_setup_and_unload(

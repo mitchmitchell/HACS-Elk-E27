@@ -23,25 +23,46 @@ def panel_mac_from_info(panel_info: dict[str, Any]) -> str | None:
     return panel_info.get("mac") or panel_info.get("panel_mac")
 
 
-def config_entry_unique_id(panel_info: dict[str, Any], integration_serial: str) -> str:
-    """Return the config entry unique_id (formatted MAC or integration serial)."""
+def panel_serial_from_info(panel_info: dict[str, Any]) -> str | None:
+    """Return the panel hardware serial from panel_info dict keys."""
+    serial = panel_info.get("serial") or panel_info.get("panel_serial")
+    if serial is None:
+        return None
+    value = str(serial).strip()
+    return value or None
+
+
+def config_entry_unique_id(panel_info: dict[str, Any]) -> str | None:
+    """Return config entry unique_id: formatted MAC, panel serial, or None."""
     mac = panel_mac_from_info(panel_info)
     if mac:
         return format_mac(str(mac))
-    return integration_serial
+    return panel_serial_from_info(panel_info)
 
 
 def panel_identity_matches(
     live_panel_info: dict[str, Any],
     stored_panel_info: dict[str, Any],
-    *,
-    live_integration_serial: str,
-    stored_integration_serial: str,
 ) -> bool:
-    """Return True when live and stored snapshots describe the same panel identity."""
-    return config_entry_unique_id(
-        live_panel_info, live_integration_serial
-    ) == config_entry_unique_id(stored_panel_info, stored_integration_serial)
+    """
+    Return True when comparable panel identity fields agree.
+
+    Only fields present on both snapshots are compared (for example, stored
+    panel_info without a MAC does not fail when the live panel reports one).
+    """
+    live_mac = panel_mac_from_info(live_panel_info)
+    stored_mac = panel_mac_from_info(stored_panel_info)
+    if (
+        live_mac
+        and stored_mac
+        and format_mac(str(live_mac)) != format_mac(str(stored_mac))
+    ):
+        return False
+    live_serial = panel_serial_from_info(live_panel_info)
+    stored_serial = panel_serial_from_info(stored_panel_info)
+    return not (
+        live_serial and stored_serial and live_serial != stored_serial
+    )
 
 
 async def async_get_integration_serial(

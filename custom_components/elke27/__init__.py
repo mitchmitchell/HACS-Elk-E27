@@ -204,9 +204,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
     coordinator.async_set_updated_data(hub.get_snapshot())
     snapshot = hub.get_snapshot()
     if snapshot is not None:
-        _async_backfill_config_entry_unique_id(
-            hass, entry, asdict(snapshot.panel), integration_serial
-        )
+        _async_backfill_config_entry_unique_id(hass, entry, asdict(snapshot.panel))
     await _async_migrate_unique_ids(hass, entry, unique_base(hub, coordinator, entry))
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -220,6 +218,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> b
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
+    """Clean up integration state when a config entry is removed."""
+    _async_delete_entry_issues(hass, entry)
+
+
 def _panel_name_from_entry(panel: object | None) -> str | None:
     if isinstance(panel, dict):
         return panel.get("panel_name") or panel.get("name")
@@ -231,16 +234,24 @@ def _duplicate_unique_id_issue_id(entry_id: str) -> str:
 
 
 @callback
+def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
+    """Remove repairs issues scoped to one config entry."""
+    ir.async_delete_issue(hass, DOMAIN, _duplicate_unique_id_issue_id(entry.entry_id))
+    # Additional entry-scoped issues (for example reconnect_failed from PR #53) go here.
+
+
+@callback
 def _async_backfill_config_entry_unique_id(
     hass: HomeAssistant,
     entry: Elke27ConfigEntry,
     panel_info: dict[str, Any],
-    integration_serial: str,
 ) -> None:
     """Assign unique_id on first setup when missing, unless another entry owns it."""
     if entry.unique_id is not None:
         return
-    candidate = config_entry_unique_id(panel_info, integration_serial)
+    candidate = config_entry_unique_id(panel_info)
+    if candidate is None:
+        return
     existing = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, candidate)
     issue_id = _duplicate_unique_id_issue_id(entry.entry_id)
     if existing is not None and existing.entry_id != entry.entry_id:

@@ -853,15 +853,19 @@ whole °F, so setpoints you set in °C are rounded.
 
 **Breaking changes (config entry identity only):**
 
-- Config entries now always have a stable **`unique_id`**: formatted panel MAC when the panel
-  reports one, otherwise the stored **integration serial** (same rule entities already used).
-- On first load after upgrade, entries that were created with **`unique_id` unset** (common on
-  panels with no MAC) are updated automatically during setup. Reauth and re-add flows use the
-  same rule, so reauth completes and a duplicate manual add is rejected as *already configured*.
+- Config entries use a stable **`unique_id`** when the panel exposes one: **formatted MAC** when
+  the panel reports it, otherwise the panel’s own **hardware serial** from the snapshot. The
+  integration serial (used only for E27 linking) identifies Home Assistant, not the panel, and is
+  never used as the config entry `unique_id`.
+- Panels with **no MAC and no serial** keep **`unique_id` unset**; those entries are deduplicated
+  by **host and port** only, so multiple MAC-less panels on one Home Assistant host remain distinct.
+- On first load after upgrade, legacy entries with **`unique_id` unset** may be backfilled from
+  the live snapshot when MAC or panel serial is available. Reauth and re-add flows follow the same
+  rules.
 - If you upgraded from **0.1.7** and your panel **reports a MAC**, delete the existing Elk E27
   entry and add it again. Older entries may have stored the MAC in raw form while 0.1.8 uses the
   formatted value (`aa:bb:cc:dd:ee:ff`) as the config entry `unique_id`.
-- Entity unique IDs and entity IDs are unchanged; only the config entry registry field is
+- Entity unique IDs and entity IDs are unchanged; only the config entry registry field may be
   backfilled.
 
 ### To 0.1.7
