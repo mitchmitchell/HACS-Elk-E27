@@ -75,7 +75,8 @@ def _numeric_service_code(value: str) -> str:
     """Validate a service user code is numeric."""
     code = cv.string(value).strip()
     if not code.isdigit():
-        raise vol.Invalid("Code must be numeric")
+        msg = "Code must be numeric"
+        raise vol.Invalid(msg)
     return code
 
 
