@@ -197,6 +197,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
         """Refresh after a reconnect; a failure is logged, the reconnect stands."""
         try:
             await self.async_refresh_now()
+        except AUTH_ERRORS as err:
+            _LOGGER.warning("Refresh after reconnect auth failure: %s", err)
+            self._hub.start_reauth_once()
         except (*COMMAND_ERRORS, HomeAssistantError) as err:
             _LOGGER.debug("Refresh after reconnect failed: %s", err)
 
@@ -209,6 +212,11 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot | None]):
                 self._pending_domains.clear()
                 try:
                     await self._async_refresh_domains_locked(domains)
+                except AUTH_ERRORS as err:
+                    self._pending_domains.clear()
+                    _LOGGER.warning("Domain refresh auth failure: %s", err)
+                    self._hub.start_reauth_once()
+                    break
                 except (*COMMAND_ERRORS, HomeAssistantError) as err:
                     # The link is down: drop the queue; the reconnect refresh
                     # reloads everything.

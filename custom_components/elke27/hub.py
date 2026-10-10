@@ -775,6 +775,13 @@ class Elke27Hub:
         _LOGGER.info("Panel connection lost")
         self._unavailable_logged = True
 
+    def start_reauth_once(self) -> None:
+        """Start a reauth flow at most once until the entry reloads."""
+        if self._entry is None or self._reauth_requested:
+            return
+        self._reauth_requested = True
+        self._entry.async_start_reauth(self._hass)
+
     async def _async_reconnect_loop(self) -> None:
         """Reconnect with exponential backoff until successful or stopped."""
         while not self._stopping:
@@ -785,9 +792,7 @@ class Elke27Hub:
                 # The panel no longer accepts the link: retrying cannot help.
                 _LOGGER.warning("Reconnect stopped; relink required: %s", err)
                 self._reconnect_attempts = 0
-                if self._entry is not None and not self._reauth_requested:
-                    self._reauth_requested = True
-                    self._entry.async_start_reauth(self._hass)
+                self.start_reauth_once()
                 return
             except (*COMMAND_ERRORS, ConfigEntryNotReady) as err:
                 _LOGGER.debug("Reconnect attempt failed: %s", err)

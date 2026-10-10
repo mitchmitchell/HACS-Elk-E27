@@ -24,6 +24,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers import config_validation as cv, translation
+from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.selector import selector
 
 from .const import (
@@ -349,16 +350,18 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_TABLE_INFO: table_info,
         }
 
-        unique_id = _panel_mac(panel_info) or integration_serial
-        await self.async_set_unique_id(unique_id)
         if entry is not None:
-            # Reauth must relink the same panel, never re-bind the entry.
-            self._abort_if_unique_id_mismatch(reason="wrong_panel")
+            candidates = _reauth_candidate_unique_ids(panel_info, integration_serial)
+            if entry.unique_id not in candidates:
+                return self.async_abort(reason="wrong_panel")
             return self.async_update_reload_and_abort(
                 entry,
                 data_updates=data,
                 options={**entry.options, **options},
             )
+
+        unique_id = _panel_mac(panel_info) or integration_serial
+        await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
 
         title = _panel_name(panel_info) or host
@@ -475,6 +478,17 @@ def _normalize_panel_keys(panel: dict[str, Any]) -> dict[str, Any]:
 
 def _panel_mac(panel_info: dict[str, Any]) -> str | None:
     return panel_info.get("mac") or panel_info.get("panel_mac")
+
+
+def _reauth_candidate_unique_ids(
+    panel_info: dict[str, Any], integration_serial: str
+) -> set[str]:
+    """Return identity keys that may match an existing entry during reauth."""
+    candidates = {integration_serial}
+    mac = _panel_mac(panel_info)
+    if mac:
+        candidates.add(format_mac(str(mac)))
+    return candidates
 
 
 def _panel_name(panel_info: dict[str, Any]) -> str | None:

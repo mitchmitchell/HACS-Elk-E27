@@ -230,6 +230,22 @@ async def test_reauth_relinks_same_panel(
     assert link_kwargs["host"] == HOST
 
 
+async def test_reauth_succeeds_when_entry_unique_id_is_serial(
+    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+) -> None:
+    """Reauth accepts the panel when the entry was keyed by integration serial."""
+    mock_config_entry.unique_id = INTEGRATION_SERIAL
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.unique_id == INTEGRATION_SERIAL
+    flow_client.async_link.assert_awaited_once()
+
+
 async def test_reauth_rejects_different_panel(
     hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
 ) -> None:
