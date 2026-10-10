@@ -3,7 +3,7 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
-## [Unreleased] - 0.1.8 (draft; unreleased until the FAIL 2 fix lands)
+## [Unreleased] - 0.1.8 (draft; unreleased until the exit-delay double-arm fix (#54) lands)
 
 0.1.8 bundles **#48** (merged `2e589767`), **#53** (reconnect policy, merged `bac4c1ac`), and **#54**
 (exit-delay / `elke27` 0.3.12). **Batch C (#50)** is planned for **0.1.9**.
@@ -38,15 +38,18 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   updating. Steps: note the entity IDs you use, delete the entry, upgrade in HACS and restart,
   add the integration, then rename the new entities or update references (#48).
 - Entity unique IDs and device identifiers: panel MAC (standard format), else panel hardware
-  serial, else config entry ID. Never the integration serial (0.1.7 used it when there was no
-  MAC) (#48).
+  serial, else config entry ID (#48). In 0.1.7, device identifiers were always
+  `<manufacturer number>-<integration serial>` (config entry ID fallback), never MAC-first;
+  entity unique IDs used MAC, then integration serial, then the config entry unique ID (#48).
 - Config entry unique ID: was the MAC as reported or the integration serial. Now the MAC in
   standard format, else the panel hardware serial, else unset (#48).
 - Duplicate detection: by unique ID when the panel reports a MAC or serial (host and port are
   then updated in place); otherwise by host:port only. Without a MAC or serial, an IP change
-  counts as a new panel: re-link stops with "wrong panel", so delete and re-add (#48).
-- Re-linking a 0.1.7 entry stops with "wrong panel" because its stored unique ID isn't
-  accepted. Delete and re-add instead (#48).
+  counts as a new panel: re-link can't change the address (stored host and port), so delete
+  and re-add at the new address (#48).
+- Re-linking a 0.1.7 entry usually stops with "wrong panel" because its stored unique ID
+  (often the integration serial) isn't accepted; a lower-case colon MAC may still work. Delete
+  and re-add instead (#48).
 - Rolling back to 0.1.7 also requires delete and re-add after redownloading in HACS.
 - `elke27.alarm_arm_automatic` and `elke27.zone_bypass` reject a non-numeric `code`. Use
   digits only (#48).
