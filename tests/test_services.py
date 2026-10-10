@@ -137,11 +137,6 @@ def _alarm_runtime(snapshot: Any) -> Any:
     # coordinator copy is deliberately stale here to prove it is not used.
     hub.get_snapshot = MagicMock(return_value=snapshot)
 
-    async def _refresh(_area_id: int) -> Any:
-        return hub.get_snapshot()
-
-    hub.async_refresh_area_state = AsyncMock(side_effect=_refresh)
-
     async def _arm_reply(_area_id: int, **_kwargs: Any) -> tuple[Any, bool | None]:
         snap = hub.get_snapshot()
         if snap is None:
@@ -150,6 +145,11 @@ def _alarm_runtime(snapshot: Any) -> Any:
 
         return snap, area_is_armed(snap, _area_id)
 
+    async def _refresh(_area_id: int) -> tuple[Any, bool | None]:
+        return await _arm_reply(_area_id)
+
+    hub.async_refresh_area_state = AsyncMock(side_effect=_refresh)
+
     async def _poll(area_id: int, *, gate: Any = None) -> tuple[Any, bool]:
         if gate is not None:
             await gate()
@@ -157,7 +157,6 @@ def _alarm_runtime(snapshot: Any) -> Any:
         return snap, armed is True
 
     hub.async_poll_until_area_armed = AsyncMock(side_effect=_poll)
-    hub.async_refresh_area_state_for_arm_check = AsyncMock(side_effect=_arm_reply)
     hub.async_refresh_area_arm_status = AsyncMock(side_effect=_arm_reply)
     runtime.coordinator = MagicMock()
     runtime.coordinator.data = None
@@ -1001,9 +1000,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub = runtime.hub
         # The refresh before acting still returns the stale state; the re-read
         # after the 11028 shows the area armed.
-        hub.async_refresh_area_state_for_arm_check = AsyncMock(
-            return_value=(stale, False)
-        )
+        hub.async_refresh_area_state = AsyncMock(return_value=(stale, False))
         hub.async_poll_until_area_armed = AsyncMock(return_value=(fresh, True))
         refusal = HomeAssistantError("not allowed when armed (error 11028)")
         refusal.__cause__ = Elke27PanelError(11028, "not allowed when armed")
@@ -1068,7 +1065,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             snap = _two_area_snapshot()
             return snap, False
 
-        hub.async_refresh_area_state_for_arm_check = AsyncMock(side_effect=_arm_check)
+        hub.async_refresh_area_state = AsyncMock(side_effect=_arm_check)
         entities = {
             "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
         }
@@ -1442,6 +1439,32 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         client.async_arm_area.assert_awaited_once()
+        hass.bus.async_fire.assert_not_called()
+
+    async def test_follow_up_refresh_armed_after_poll_timeout_skips(self) -> None:
+        """After poll timeout, a follow-up status read that says armed is a no-op."""
+        hass = MagicMock()
+        stale = _two_area_snapshot()
+        armed = _armed_after_first_call(stale)
+        hub = _hub()
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        hub.async_arm_area = AsyncMock(return_value=True)
+        runtime = _runtime_for_hub(hub)
+        hub.async_poll_until_area_armed = AsyncMock(return_value=(stale, False))
+        hub.async_refresh_area_state = AsyncMock(return_value=(armed, True))
+        entities = {
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+        }
+        area_lock = hub.area_arm_lock(1)
+        with (
+            patch.object(area_lock, "locked", return_value=True),
+            patch.object(integration.persistent_notification, "async_create"),
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        hub.async_poll_until_area_armed.assert_awaited_once()
+        hub.async_refresh_area_state.assert_awaited_once()
+        hub.async_set_zone_bypass.assert_not_called()
+        hub.async_arm_area.assert_not_called()
         hass.bus.async_fire.assert_not_called()
 
     async def test_11028_path_polls_even_when_lock_uncontended(self) -> None:

@@ -287,11 +287,12 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
             zones={"status": "DD19"},
         )
         hub._client = client  # noqa: SLF001
-        fresh = await hub.async_refresh_area_state(1)
+        fresh, armed_reply = await hub.async_refresh_area_state(1)
         assert client.async_execute.await_args_list == [
             unittest.mock.call("area_get_status", area_id=1),
             unittest.mock.call("zone_get_all_zones_status"),
         ]
+        assert armed_reply is True
         assert area_is_armed(fresh, 1)
         assert fresh.zones[1].bypassed is True
         assert fresh.zones[2].bypassed is True
@@ -308,7 +309,8 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
         hub._client = self._client(  # noqa: SLF001
             area={"area_id": 1, "arm_state": "DISARMED"}, zones={"status": "99"}
         )
-        fresh = await hub.async_refresh_area_state(1)
+        fresh, armed_reply = await hub.async_refresh_area_state(1)
+        assert armed_reply is False
         assert not area_is_armed(fresh, 1)
         assert [zone.zone_id for zone in area_faulted_zones(fresh, 1)] == [1, 2]
 
@@ -321,13 +323,14 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
             area=Elke27TimeoutError("timeout"), zones=Elke27TimeoutError("timeout")
         )
         hub._client = client  # noqa: SLF001
-        fresh = await hub.async_refresh_area_state(1)
+        fresh, armed_reply = await hub.async_refresh_area_state(1)
+        assert armed_reply is None
         assert fresh == _two_area_snapshot()
         assert client.async_execute.await_count == 2
 
     async def test_no_client_returns_none(self) -> None:
         """Without a client there is nothing to refresh."""
-        assert await _hub().async_refresh_area_state(1) is None
+        assert await _hub().async_refresh_area_state(1) == (None, None)
 
     async def test_poll_until_area_armed_waits_for_lagging_status(self) -> None:
         """Polling keeps reading area_get_status until the panel reports armed."""

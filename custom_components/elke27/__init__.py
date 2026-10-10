@@ -418,13 +418,13 @@ async def _async_arm_automatic_locked(
 
     # Read the live client snapshot inside the lock, not the debounced
     # coordinator copy, so an earlier call's bypasses and arming are seen.
-    async def _panel_reports_armed() -> tuple[PanelSnapshot | None, bool]:
+    async def _panel_reports_armed() -> tuple[PanelSnapshot | None, bool | None]:
         if lock_was_contended:
-            return await hub.async_poll_until_area_armed(area_id, gate=_gate)
-        snapshot, armed_reply = await hub.async_refresh_area_state_for_arm_check(
-            area_id
-        )
-        return snapshot, armed_reply is True
+            _snap, armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
+            if armed:
+                return _snap, True
+            return await hub.async_refresh_area_state(area_id)
+        return await hub.async_refresh_area_state(area_id)
 
     async def _already_armed(
         reason: str, bypassed: Sequence[ZoneState], cause: Exception
@@ -441,12 +441,10 @@ async def _async_arm_automatic_locked(
         _uncertain(reason, bypassed, cause)
 
     # area_get_status can lag after a queued call armed this area; poll only then.
-    snapshot, already_armed = await _panel_reports_armed()
-    if already_armed:
+    snapshot, armed_reply = await _panel_reports_armed()
+    if armed_reply is True:
         _LOGGER.debug("Area %s is already armed; automatic arming skipped", area_id)
         return
-    if lock_was_contended:
-        snapshot = await hub.async_refresh_area_state(area_id)
     if snapshot is None:
         await _fail("arm", ARM_NOT_SENT_REASON, cause=None)
     try:

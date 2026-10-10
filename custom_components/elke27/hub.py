@@ -200,7 +200,9 @@ class Elke27Hub:
             return None
         return client.get_snapshot()
 
-    async def async_refresh_area_state(self, area_id: int) -> PanelSnapshot | None:
+    async def async_refresh_area_state(
+        self, area_id: int
+    ) -> tuple[PanelSnapshot | None, bool | None]:
         """
         Ask the panel for the area's arm state and all zone statuses.
 
@@ -208,19 +210,10 @@ class Elke27Hub:
         client snapshot afterwards is not enough: elke27 resolves the request
         before its handlers apply the reply, and it does not apply arm or bypass
         command replies at all. Each request is sent once; if one fails, that
-        part falls back to the client snapshot.
-        """
-        snapshot, _ = await self._async_area_state_snapshot(area_id, include_zones=True)
-        return snapshot
+        part falls back to the client snapshot for zone data only.
 
-    async def async_refresh_area_state_for_arm_check(
-        self, area_id: int
-    ) -> tuple[PanelSnapshot | None, bool | None]:
-        """
-        Refresh area and zone status and return whether the panel reported armed.
-
-        The armed flag comes only from the area_get_status reply. When that
-        request fails, the returned flag is None (never the cached snapshot).
+        The second value is whether area_get_status reported armed (True/False),
+        or None when that request failed.
         """
         return await self._async_area_state_snapshot(area_id, include_zones=True)
 
