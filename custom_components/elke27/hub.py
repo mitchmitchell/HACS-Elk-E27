@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-import contextlib
 import dataclasses
 import logging
+import random
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +27,7 @@ from elke27_lib.errors import (
     E27TransportError,
     Elke27AuthError,
     Elke27ConnectionError,
+    Elke27CryptoError,
     Elke27DisconnectedError,
     Elke27Error,
     Elke27InvalidArgument,
@@ -38,15 +39,26 @@ from elke27_lib.errors import (
 )
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+)
+from homeassistant.helpers import issue_registry as ir
 
-from .const import READY_TIMEOUT
+from .const import (
+    DOMAIN,
+    ISSUE_RECONNECT_FAILED,
+    READY_TIMEOUT,
+    RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
+)
 from .identity import build_client_identity
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
 
-    from homeassistant.config_entries import ConfigEntry
+    from .models import Elke27ConfigEntry
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +77,11 @@ COMMAND_ERRORS: tuple[type[Exception], ...] = (
     E27Error,
     TimeoutError,
     OSError,
+)
+AUTH_ERRORS: tuple[type[Exception], ...] = (
+    Elke27LinkRequiredError,
+    Elke27AuthError,
+    Elke27CryptoError,
 )
 
 # Seconds to wait before re-reading a light's status after a set_status.
@@ -87,7 +104,7 @@ class Elke27Hub:
         integration_serial: str,
         panel_name: str | None,
         *,
-        entry: ConfigEntry | None = None,
+        entry: Elke27ConfigEntry | None = None,
     ) -> None:
         """Initialize the hub wrapper."""
         self._hass = hass
@@ -101,6 +118,7 @@ class Elke27Hub:
         self._client: Elke27Client | None = None
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._connect_lock = asyncio.Lock()
+        self._reauth_requested = False
         self._area_arm_locks: dict[int, asyncio.Lock] = {}
         self._arm_automatic_tasks: dict[int, set[asyncio.Task[Any]]] = {}
         self._disarm_cancelled: set[asyncio.Task[Any]] = set()
@@ -108,6 +126,7 @@ class Elke27Hub:
         self._disarm_clear: dict[int, asyncio.Event] = {}
         self._reconnect_task: asyncio.Task[None] | None = None
         self._reconnect_attempts = 0
+        self._reconnect_non_transport_streak = 0
         self._stopping = False
         self._unavailable_logged = False
         self._reconnect_listeners: list[Callable[[], None]] = []
@@ -142,14 +161,21 @@ class Elke27Hub:
         """Connect the client, then await readiness."""
         async with self._connect_lock:
             await self._async_disconnect()
-            link_keys = LinkKeys.from_json(self._link_keys_json)
+            try:
+                link_keys = LinkKeys.from_json(self._link_keys_json)
+            except (AttributeError, TypeError, ValueError) as err:
+                # Stored link keys that cannot be read need a relink, not retries.
+                msg = "Stored link keys are invalid; relink required"
+                raise Elke27LinkRequiredError(msg) from err
             client = Elke27Client(ClientConfig())
             client.set_client_identity(build_client_identity(self._integration_serial))
             self._client = client
 
             def _raise_not_ready() -> None:
-                msg = "The client did not become ready before timeout"
-                raise ConfigEntryNotReady(msg)
+                raise ConfigEntryNotReady(
+                    translation_domain=DOMAIN,
+                    translation_key="panel_not_ready",
+                )
 
             try:
                 await client.async_connect(self._host, self._port, link_keys)
@@ -163,35 +189,57 @@ class Elke27Hub:
                 if self._unavailable_logged:
                     _LOGGER.info("Panel connection restored")
                     self._unavailable_logged = False
-            except Exception:
-                with contextlib.suppress(Exception):
-                    await client.async_disconnect()
+            except BaseException:
+                # Includes cancellation: tear the half-open client down, then
+                # re-raise unchanged.
                 self._client = None
+                if self._connection_unsubscribe is not None:
+                    try:
+                        self._connection_unsubscribe()
+                    except Exception as err:  # noqa: BLE001
+                        _LOGGER.debug("Connection unsubscribe failed: %s", err)
+                    self._connection_unsubscribe = None
+                await self._async_disconnect_client(client)
                 raise
 
     async def async_disconnect(self) -> None:
         """Disconnect the client and unregister event handlers."""
         self._stopping = True
-        if self._reconnect_task is not None:
-            self._reconnect_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._reconnect_task
-            self._reconnect_task = None
+        task = self._reconnect_task
+        self._reconnect_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            # Wait for the loop to finish without swallowing a cancellation
+            # of this call itself.
+            await asyncio.wait([task])
+        self._clear_reconnect_repair_issue()
         await self._async_disconnect()
 
     async def _async_disconnect(self) -> None:
         """Disconnect the client and unregister event handlers."""
         was_connected = self._client is not None
         if self._connection_unsubscribe is not None:
-            self._connection_unsubscribe()
+            try:
+                self._connection_unsubscribe()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("Connection unsubscribe failed: %s", err)
             self._connection_unsubscribe = None
-        if self._client is not None:
-            await self._client.async_disconnect()
+        client = self._client
         self._client = None
+        if client is not None:
+            await self._async_disconnect_client(client)
         self._clear_typed_subscriptions()
         # An intentional disconnect (unload or shutdown) is not a lost connection.
         if was_connected and not self._stopping:
             self._log_unavailable()
+
+    @staticmethod
+    async def _async_disconnect_client(client: Elke27Client) -> None:
+        """Disconnect a client; a library or network error is logged, not raised."""
+        try:
+            await client.async_disconnect()
+        except COMMAND_ERRORS as err:
+            _LOGGER.debug("Client disconnect failed: %s", err)
 
     def get_snapshot(self) -> PanelSnapshot | None:
         """Return the latest client snapshot."""
@@ -362,7 +410,7 @@ class Elke27Hub:
         """Request a light's status; failures are logged, not raised."""
         try:
             await self._async_execute("light_get_status", light_id=light_id)
-        except Exception as err:  # noqa: BLE001
+        except (Elke27PinRequiredError, HomeAssistantError) as err:
             _LOGGER.debug("Light %s status refresh failed: %s", light_id, err)
 
     async def _async_refresh_light_later(self, light_id: int) -> None:
@@ -569,6 +617,10 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Zone", zone_id, "bypass", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
@@ -584,6 +636,10 @@ class Elke27Hub:
             result = await client.async_execute(command_key, **params)
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _LOGGER.warning("Command %s failed: %s", command_key, err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _LOGGER.warning("Command %s failed: %s", command_key, err)
             self._note_command_error(err)
@@ -592,8 +648,11 @@ class Elke27Hub:
             if isinstance(result.error, Elke27PinRequiredError):
                 raise result.error
             if result.error is not None:
+                if isinstance(result.error, AUTH_ERRORS):
+                    self.start_reauth_once()
+                else:
+                    self._note_command_error(result.error)
                 _LOGGER.warning("Command %s failed: %s", command_key, result.error)
-                self._note_command_error(result.error)
                 raise HomeAssistantError(_error_message(result.error)) from (
                     result.error
                 )
@@ -619,7 +678,7 @@ class Elke27Hub:
             return
         try:
             check()
-        except Exception as check_err:  # noqa: BLE001
+        except COMMAND_ERRORS as check_err:
             _LOGGER.debug("Link check request failed: %s", check_err)
 
     def _require_client(self) -> Elke27Client:
@@ -658,6 +717,10 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Area", area_id, "arming", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
@@ -676,7 +739,10 @@ class Elke27Hub:
         """Clear typed subscriptions when the client disconnects."""
         for cb, unsubscribe in list(self._typed_callbacks.items()):
             if unsubscribe is not None:
-                unsubscribe()
+                try:
+                    unsubscribe()
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("Typed callback unsubscribe failed: %s", err)
             self._typed_callbacks[cb] = None
 
     async def async_disarm_area(
@@ -704,6 +770,10 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Area", area_id, "disarm", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
@@ -781,27 +851,98 @@ class Elke27Hub:
         _LOGGER.info("Panel connection lost")
         self._unavailable_logged = True
 
+    def start_reauth_once(self) -> None:
+        """Start a reauth flow at most once until the entry reloads."""
+        if self._entry is None or self._reauth_requested:
+            return
+        self._reauth_requested = True
+        self._entry.async_start_reauth(self._hass)
+
+    @callback
+    def _reconnect_repair_issue_id(self) -> str | None:
+        """Return the repairs issue id for this entry's reconnect failures."""
+        if self._entry is None:
+            return None
+        return f"{ISSUE_RECONNECT_FAILED}_{self._entry.entry_id}"
+
+    @callback
+    def _clear_reconnect_repair_issue(self) -> None:
+        """Remove the reconnect repair issue when the link is healthy or unloading."""
+        issue_id = self._reconnect_repair_issue_id()
+        if issue_id is None:
+            return
+        ir.async_delete_issue(self._hass, DOMAIN, issue_id)
+
+    @callback
+    def _ensure_reconnect_repair_issue(self) -> None:
+        """Raise a repair issue after repeated non-transport reconnect failures."""
+        if self._entry is None:
+            return
+        issue_id = self._reconnect_repair_issue_id()
+        if issue_id is None:
+            return
+        ir.async_create_issue(
+            self._hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=ISSUE_RECONNECT_FAILED,
+            translation_placeholders={"name": self._entry.title},
+        )
+
+    def _log_reconnect_failure(self, err: Exception, *, transport: bool) -> None:
+        """Log a reconnect failure; non-transport streaks warn once per streak."""
+        if transport:
+            _LOGGER.debug("Reconnect attempt failed: %s", err)
+            return
+        first_in_streak = self._reconnect_non_transport_streak == 1
+        if first_in_streak:
+            if isinstance(err, Elke27Error):
+                _LOGGER.warning("Reconnect attempt failed: %s", err)
+            else:
+                _LOGGER.warning("Reconnect attempt failed: %s", err, exc_info=err)
+            return
+        _LOGGER.debug("Reconnect attempt failed: %s", err)
+
     async def _async_reconnect_loop(self) -> None:
         """Reconnect with exponential backoff until successful or stopped."""
         while not self._stopping:
             _LOGGER.debug("Reconnect attempt %s starting", self._reconnect_attempts + 1)
             try:
                 await self._async_connect()
-            except Elke27LinkRequiredError:
-                _LOGGER.exception("Reconnect aborted")
+            except AUTH_ERRORS as err:
+                # The panel no longer accepts the link: retrying cannot help.
+                _LOGGER.warning("Reconnect stopped; relink required: %s", err)
+                self._reconnect_attempts = 0
+                self._reconnect_non_transport_streak = 0
+                self._clear_reconnect_repair_issue()
+                self.start_reauth_once()
                 return
             except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("Reconnect attempt failed: %s", err)
+                transport = is_reconnect_retryable(err)
+                if not transport:
+                    self._reconnect_non_transport_streak += 1
+                    if (
+                        self._reconnect_non_transport_streak
+                        >= RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD
+                    ):
+                        self._ensure_reconnect_repair_issue()
+                self._log_reconnect_failure(err, transport=transport)
             else:
                 self._reconnect_attempts = 0
+                self._reconnect_non_transport_streak = 0
+                self._clear_reconnect_repair_issue()
                 self._notify_reconnected()
                 return
             self._reconnect_attempts += 1
-            delay = min(300, 2**self._reconnect_attempts)
+            # Cap the base delay at 300 s before jitter (max sleep is about 360 s).
+            base_delay = min(300, 2**self._reconnect_attempts)
+            delay = base_delay * random.uniform(0.8, 1.2)  # noqa: S311
             _LOGGER.debug(
                 "Reconnect attempt %s sleeping for %s seconds",
                 self._reconnect_attempts,
-                delay,
+                round(delay, 2),
             )
             await asyncio.sleep(delay)
 
@@ -1072,8 +1213,9 @@ def _validated_pin(pin: str) -> str:
     """Return the user code as a digit string, or raise if it is not numeric."""
     value = str(pin).strip()
     if not value.isdigit():
-        msg = "Code must be numeric."
-        raise HomeAssistantError(msg)
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="code_not_numeric"
+        )
     return value
 
 
@@ -1105,6 +1247,13 @@ def _log_command_failure(
         )
     else:
         _LOGGER.warning("%s %s %s failed: %s", kind, target_id, action, err)
+
+
+def is_reconnect_retryable(err: BaseException) -> bool:
+    """Return True when a failed reconnect should be retried with backoff."""
+    if isinstance(err, ConfigEntryNotReady):
+        return True
+    return is_connection_error(err) or is_timeout_error(err)
 
 
 def is_timeout_error(err: BaseException) -> bool:

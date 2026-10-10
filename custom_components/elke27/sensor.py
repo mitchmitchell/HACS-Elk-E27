@@ -19,13 +19,12 @@ from .entity import build_unique_id, device_info_for_entry, get_panel_field, uni
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
     from homeassistant.helpers.typing import StateType
 
     from .hub import Elke27Hub
-    from .models import Elke27RuntimeData
+    from .models import Elke27ConfigEntry
 
 PARALLEL_UPDATES = 0
 
@@ -61,13 +60,11 @@ SENSORS: tuple[Elke27SensorDescription, ...] = (
 
 async def async_setup_entry(
     _hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Elke27 sensors from a config entry."""
-    data: Elke27RuntimeData | None = entry.runtime_data
-    if data is None:
-        return
+    data = entry.runtime_data
     hub = data.hub
     coordinator = data.coordinator
     async_add_entities(
@@ -86,7 +83,7 @@ class Elke27Sensor(CoordinatorEntity[Elke27DataUpdateCoordinator], SensorEntity)
         self,
         coordinator: Elke27DataUpdateCoordinator,
         hub: Elke27Hub,
-        entry: ConfigEntry,
+        entry: Elke27ConfigEntry,
         description: Elke27SensorDescription,
     ) -> None:
         """Initialize the sensor."""

@@ -15,9 +15,10 @@ from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelState,
     CodeFormat,
 )
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .const import DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import (
     build_unique_id,
@@ -31,12 +32,11 @@ from .hub import ZoneBypassFailedError, area_faulted_zones, is_definitive_refusa
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
     from .hub import Elke27Hub
-    from .models import Elke27RuntimeData
+    from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,16 +45,11 @@ PARALLEL_UPDATES = 0
 
 async def async_setup_entry(
     _hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Elke27 area alarm control panels from a config entry."""
-    data: Elke27RuntimeData | None = entry.runtime_data
-    if data is None:
-        _LOGGER.debug(
-            "Skipping alarm control panel setup because runtime data is missing"
-        )
-        return
+    data = entry.runtime_data
     hub = data.hub
     coordinator = data.coordinator
     known_ids: set[int] = set()
@@ -101,7 +96,7 @@ class Elke27AreaAlarmControlPanel(
         self,
         coordinator: Elke27DataUpdateCoordinator,
         hub: Elke27Hub,
-        entry: ConfigEntry,
+        entry: Elke27ConfigEntry,
         area_id: int,
         area: AreaState,
     ) -> None:
@@ -277,6 +272,7 @@ def _normalize_code(code: str | None) -> str | None:
         return None
     normalized = code.strip()
     if not normalized.isdigit():
-        msg = "Code must be numeric."
-        raise HomeAssistantError(msg)
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="code_not_numeric"
+        )
     return normalized
