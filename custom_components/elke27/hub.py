@@ -903,9 +903,7 @@ def snapshot_with_status(
             if "arm_cmd_state" in area_payload:
                 cmd_raw = area_payload.get("arm_cmd_state")
                 updates["arm_cmd_mode"] = (
-                    _arm_mode_from_text(cmd_raw)
-                    if isinstance(cmd_raw, str)
-                    else None
+                    _arm_mode_from_text(cmd_raw) if isinstance(cmd_raw, str) else None
                 )
             else:
                 updates["arm_cmd_mode"] = None
