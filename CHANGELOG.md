@@ -6,7 +6,9 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ## [Unreleased] - 0.1.8 (draft)
 
 ### Fixed
-- No duplicate arm when two `elke27.alarm_arm_automatic` calls for the same area overlap
+- No duplicate arm when two `elke27.alarm_arm_automatic` calls for the same area overlap:
+  only a call queued behind another call on that area polls for the armed state. There is no
+  remembered-arm marker; a call made after the first has finished does one live status read
   (#49, fixes #43).
 
 ### Changed (pending #48, not merged yet)
