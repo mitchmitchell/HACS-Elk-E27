@@ -868,9 +868,9 @@ whole °F, so setpoints you set in °C are rounded.
 ### To 0.1.9
 
 Mostly internal cleanup (typed snapshots, strict typing). **No breaking changes compared with
-0.1.8** (legacy `pin` cleanup and unique-ID rules are unchanged from 0.1.8). Upgrading from
-**0.1.7** straight to 0.1.9: follow **To 0.1.8** (delete the entry, upgrade, add it again,
-then update automations and dashboards).
+0.1.8** (same legacy `pin` cleanup on setup as 0.1.8). Upgrading from **0.1.7** straight to
+0.1.9: follow **To 0.1.8** below (delete and re-add; config entry, device, and entity identity
+change — see 0.1.8 breaking changes).
 
 ### To 0.1.8
 
@@ -895,21 +895,6 @@ again with the same linking credentials.
   referenced the old IDs or the integration serial as an entity base will need updating).
 - Dashboards, automations, and scripts that target Elk E27 entities should be reviewed after
   re-adding.
-
-Behavior changes that may affect you:
-
-- **Re-link prompt instead of endless retries.** If the panel rejects the link or
-  credentials during setup, reconnect, refresh or a command, HA shows a re-link prompt (once
-  per load). Temporary connection problems still retry. What to do: open the prompt and enter
-  the access code and passphrase.
-- **Service user codes must be numeric** (digits only) for `elke27.alarm_arm_automatic` and
-  `elke27.zone_bypass`. What to do: use digits only for `code` in automations and scripts
-  (e.g. `!secret`). Non-numeric codes now fail validation before anything is sent.
-- **Re-link step renamed (relink → reauth_confirm).** What to do: if a re-link prompt was open
-  during the upgrade, dismiss it, reload, and open the new one.
-- **Re-link checks it's the same panel** (MAC or panel serial) and stops with 'wrong panel'
-  otherwise. What to do: check the host; if the panel was replaced, delete and re-add the
-  entry.
 
 ### To 0.1.7
 
