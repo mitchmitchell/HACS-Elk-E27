@@ -17,12 +17,11 @@ from .entity import build_unique_id, device_info_for_entry, sanitize_name, uniqu
 if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot, ZoneDefinition, ZoneState
 
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
     from .hub import Elke27Hub
-    from .models import Elke27RuntimeData
+    from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,14 +62,11 @@ _ZONE_OPEN_ICON_BY_DEFINITION = {
 
 async def async_setup_entry(
     _hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Elke27 zone binary sensors from a config entry."""
-    data: Elke27RuntimeData | None = entry.runtime_data
-    if data is None:
-        _LOGGER.debug("Skipping zone setup because runtime data is missing")
-        return
+    data = entry.runtime_data
     hub = data.hub
     coordinator = data.coordinator
     known_ids: set[int] = set()
@@ -135,7 +131,7 @@ class Elke27ZoneBinarySensor(
         self,
         coordinator: Elke27DataUpdateCoordinator,
         hub: Elke27Hub,
-        entry: ConfigEntry,
+        entry: Elke27ConfigEntry,
         zone_id: int,
         zone: ZoneState,
         zone_definition: ZoneDefinition | None,

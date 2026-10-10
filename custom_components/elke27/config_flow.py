@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import asdict, is_dataclass
+import logging
 from typing import TYPE_CHECKING, Any
 
 from elke27_lib import ClientConfig, LinkKeys
 from elke27_lib.client import Elke27Client
 from elke27_lib.discovery import AIOELKDiscovery
 from elke27_lib.errors import (
+    E27Error,
     Elke27AuthError,
     Elke27ConnectionError,
     Elke27DisconnectedError,
@@ -19,9 +22,15 @@ from elke27_lib.errors import (
 )
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.helpers import config_validation as cv
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import (
+    config_validation as cv,
+    issue_registry as ir,
+    translation,
+)
+from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.selector import selector
 
 from .const import (
@@ -32,16 +41,25 @@ from .const import (
     DOMAIN,
     READY_TIMEOUT,
 )
-from .identity import async_get_integration_serial, build_client_identity
+from .identity import (
+    async_get_integration_serial,
+    build_client_identity,
+    config_entry_unique_id,
+    panel_identity_matches,
+    panel_mac_from_info,
+    panel_serial_tier,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+_LOGGER = logging.getLogger(__name__)
 
 CONF_ACCESS_CODE = "access_code"
 CONF_PASSPHRASE = "passphrase"
 CONF_PANEL_INFO = "panel_info"
 CONF_TABLE_INFO = "table_info"
-CONF_RESCAN = "__rescan__"
+CONF_RESCAN = "rescan"
 CONF_SETUP_METHOD = "setup_method"
 SETUP_METHOD_DISCOVER = "discover"
 SETUP_METHOD_MANUAL = "manual"
@@ -68,19 +86,51 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_SETUP_METHOD, default=SETUP_METHOD_DISCOVER): selector(
             {
                 "select": {
-                    "options": [
-                        {
-                            "value": SETUP_METHOD_DISCOVER,
-                            "label": "Discover panels",
-                        },
-                        {"value": SETUP_METHOD_MANUAL, "label": "Manual setup"},
-                    ],
+                    "options": [SETUP_METHOD_DISCOVER, SETUP_METHOD_MANUAL],
                     "mode": "list",
+                    "translation_key": CONF_SETUP_METHOD,
                 }
             }
         )
     }
 )
+
+
+def _duplicate_unique_id_issue_id(entry_id: str) -> str:
+    return f"duplicate_unique_id_{entry_id}"
+
+
+@callback
+def _async_try_backfill_config_entry_unique_id(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    candidate: str,
+) -> None:
+    """Assign unique_id when missing unless another entry already owns it."""
+    existing = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, candidate)
+    issue_id = _duplicate_unique_id_issue_id(entry.entry_id)
+    if existing is not None and existing.entry_id != entry.entry_id:
+        _LOGGER.warning(
+            "Cannot assign unique_id %s to Elke27 entry %s: already used by %s",
+            candidate,
+            entry.entry_id,
+            existing.entry_id,
+        )
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="duplicate_unique_id",
+            translation_placeholders={
+                "candidate": candidate,
+                "other_entry": existing.title or existing.entry_id,
+            },
+        )
+        return
+    hass.config_entries.async_update_entry(entry, unique_id=candidate)
+    ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -94,7 +144,6 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._selected_panel: Any | None = None
         self._selected_host: str | None = None
         self._selected_port: int | None = None
-        self._reauth_entry: Any | None = None
         self._discovered_panels: list[Any] | None = None
 
     async def async_step_user(
@@ -143,7 +192,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle discovery-based setup."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            data_schema = self._discovery_schema()
+            data_schema = await self._async_discovery_schema()
             if CONF_PANEL in user_input:
                 panel_idx_raw = user_input[CONF_PANEL]
                 if panel_idx_raw == CONF_RESCAN:
@@ -156,7 +205,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "no_panels_found"
                     return self.async_show_form(
                         step_id="discover",
-                        data_schema=self._discovery_schema(),
+                        data_schema=await self._async_discovery_schema(),
                         errors=errors,
                     )
                 panel = self._discovered_panels[panel_idx]
@@ -168,7 +217,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "no_panels_found"
                     return self.async_show_form(
                         step_id="discover",
-                        data_schema=self._discovery_schema(),
+                        data_schema=await self._async_discovery_schema(),
                         errors=errors,
                     )
                 self._selected_host = host
@@ -213,52 +262,53 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="discover",
-            data_schema=self._discovery_schema(),
+            data_schema=await self._async_discovery_schema(),
             errors=errors,
         )
+
+    async def _async_rescan_option_label(self) -> str:
+        """Return the translated label for the rescan select option."""
+        translations = await translation.async_get_translations(
+            self.hass,
+            self.hass.config.language,
+            "selector",
+            integrations=[DOMAIN],
+        )
+        key = f"component.{DOMAIN}.selector.panel.options.{CONF_RESCAN}"
+        fallback = "Rescan for panels"
+        return translations.get(key, fallback)
+
+    async def _async_discovery_schema(self) -> vol.Schema:
+        """Build the discover-step schema with a translated rescan option."""
+        return self._discovery_schema(await self._async_rescan_option_label())
 
     async def async_step_reauth(
         self, _entry_data: Mapping[str, Any]
     ) -> ConfigFlowResult:
-        """Handle reauth for missing or invalid link keys."""
-        entry_id = self.context.get("entry_id")
-        self._reauth_entry = (
-            self.hass.config_entries.async_get_entry(entry_id)
-            if entry_id is not None
-            else None
-        )
-        return await self.async_step_relink(None)
+        """Handle reauth when the stored link is missing or no longer accepted."""
+        return await self.async_step_reauth_confirm()
 
-    async def async_step_relink(
-        self, user_input: Mapping[str, Any] | None = None
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Relink using access code and passphrase."""
+        """Relink the same panel using the access code and passphrase."""
         errors: dict[str, str] = {}
-        if (
-            user_input is not None
-            and CONF_ACCESS_CODE in user_input
-            and CONF_PASSPHRASE in user_input
-        ):
-            entry = self._reauth_entry
-            if entry is None:
-                return self.async_abort(reason="missing_context")
-
-            access_code = user_input[CONF_ACCESS_CODE]
-            passphrase = user_input[CONF_PASSPHRASE]
-            self._selected_host = entry.data.get(CONF_HOST)
-            self._selected_port = entry.data.get(CONF_PORT)
+        if user_input is not None:
+            entry = self._get_reauth_entry()
+            self._selected_host = entry.data[CONF_HOST]
+            self._selected_port = entry.data[CONF_PORT]
             self._selected_panel = entry.data.get(CONF_PANEL)
             return await self._async_link_and_create_entry(
-                access_code=access_code,
-                passphrase=passphrase,
+                access_code=user_input[CONF_ACCESS_CODE],
+                passphrase=user_input[CONF_PASSPHRASE],
                 errors=errors,
-                step_id="relink",
+                step_id="reauth_confirm",
                 data_schema=STEP_REAUTH_DATA_SCHEMA,
                 entry=entry,
             )
 
         return self.async_show_form(
-            step_id="relink",
+            step_id="reauth_confirm",
             data_schema=STEP_REAUTH_DATA_SCHEMA,
             errors=errors,
         )
@@ -270,7 +320,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str],
         step_id: str,
         data_schema: vol.Schema,
-        entry: Any | None = None,
+        entry: ConfigEntry | None = None,
     ) -> ConfigFlowResult:
         """Link, connect, fetch snapshots, and create/update the entry."""
         host = self._selected_host
@@ -314,18 +364,19 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             snapshot = client.get_snapshot()
             panel_info = asdict(snapshot.panel)
             table_info = asdict(snapshot.table_info)
-        except InvalidCredentials:
+        except (InvalidCredentials, Elke27AuthError):
             errors["base"] = "invalid_auth"
-        except Elke27AuthError:
-            errors["base"] = "cannot_connect"
         except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError):
+            errors["base"] = "cannot_connect"
+        except (OSError, TimeoutError, E27Error):
             errors["base"] = "cannot_connect"
         except Elke27LinkRequiredError:
             errors["base"] = "link_required"
         except Elke27Error:
             errors["base"] = "unknown"
         finally:
-            await client.async_disconnect()
+            with contextlib.suppress(OSError, TimeoutError, E27Error, Elke27Error):
+                await client.async_disconnect()
 
         if errors or link_keys is None:
             return self.async_show_form(
@@ -351,30 +402,50 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_TABLE_INFO: table_info,
         }
 
-        unique_id = _panel_mac(panel_info) or integration_serial
-        if unique_id:
-            await self.async_set_unique_id(unique_id)
-            if entry is None:
-                self._abort_if_unique_id_configured(
-                    updates={CONF_HOST: host, CONF_PORT: port}
-                )
-
-        title = _panel_name(panel_info) or host
         if entry is not None:
-            self.hass.config_entries.async_update_entry(
+            panel_unique_id = config_entry_unique_id(panel_info)
+            if entry.unique_id is None:
+                if (
+                    entry.data.get(CONF_HOST) != host
+                    or entry.data.get(CONF_PORT, DEFAULT_PORT) != port
+                ):
+                    return self.async_abort(reason="wrong_panel")
+                stored_panel = entry.options.get(CONF_PANEL_INFO)
+                if stored_panel and not panel_identity_matches(
+                    panel_info, stored_panel
+                ):
+                    return self.async_abort(reason="wrong_panel")
+                if panel_unique_id is not None:
+                    _async_try_backfill_config_entry_unique_id(
+                        self.hass, entry, panel_unique_id
+                    )
+            else:
+                candidates = _reauth_candidate_unique_ids(panel_info)
+                if entry.unique_id not in candidates:
+                    return self.async_abort(reason="wrong_panel")
+            return self.async_update_reload_and_abort(
                 entry,
-                data={**entry.data, **data},
+                data_updates=data,
                 options={**entry.options, **options},
             )
-            await self.hass.config_entries.async_reload(entry.entry_id)
-            return self.async_abort(reason="reauth_successful")
+
+        unique_id = config_entry_unique_id(panel_info)
+        if unique_id is not None:
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured(
+                updates={CONF_HOST: host, CONF_PORT: port}
+            )
+        if self._duplicate_panel_entry_exists(host, port, panel_info):
+            return self.async_abort(reason="already_configured")
+
+        title = _panel_name(panel_info) or host
 
         result = self.async_create_entry(title=title, data=data, options=options)
         if "title" not in result:
             result["title"] = title
         return result
 
-    def _discovery_schema(self) -> vol.Schema:
+    def _discovery_schema(self, rescan_label: str) -> vol.Schema:
         options = [
             {
                 "value": str(idx),
@@ -385,13 +456,18 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             for idx, panel in enumerate(self._discovered_panels or [])
         ]
         if options:
-            options.insert(0, {"value": CONF_RESCAN, "label": "Rescan for panels"})
+            options.insert(0, {"value": CONF_RESCAN, "label": rescan_label})
         else:
-            options = [{"value": CONF_RESCAN, "label": "Rescan for panels"}]
+            options = [{"value": CONF_RESCAN, "label": rescan_label}]
         return vol.Schema(
             {
                 vol.Required(CONF_PANEL): selector(
-                    {"select": {"options": options, "mode": "list"}}
+                    {
+                        "select": {
+                            "options": options,
+                            "mode": "list",
+                        }
+                    }
                 ),
                 vol.Required(CONF_ACCESS_CODE): selector(
                     {"text": {"type": "password"}}
@@ -433,6 +509,33 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 return True
         return False
 
+    def _duplicate_panel_entry_exists(
+        self,
+        host: str,
+        port: int,
+        panel_info: dict[str, Any],
+    ) -> bool:
+        """Return True when another entry already represents this panel."""
+        identity = config_entry_unique_id(panel_info)
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if identity is not None and entry.unique_id == identity:
+                return True
+            if (
+                entry.data.get(CONF_HOST) == host
+                and entry.data.get(CONF_PORT, DEFAULT_PORT) == port
+            ):
+                return True
+            if entry.unique_id is not None:
+                continue
+            stored_panel = entry.options.get(CONF_PANEL_INFO)
+            if (
+                stored_panel
+                and identity is not None
+                and config_entry_unique_id(stored_panel) == identity
+            ):
+                return True
+        return False
+
 
 def _create_client() -> Elke27Client:
     """Create a configured client instance."""
@@ -469,13 +572,26 @@ def _normalize_panel_keys(panel: dict[str, Any]) -> dict[str, Any]:
         normalized["name"] = normalized.get("panel_name")
     if "mac" not in normalized and "panel_mac" in normalized:
         normalized["mac"] = normalized.get("panel_mac")
+    if "serial" not in normalized and "panel_serial" in normalized:
+        normalized["serial"] = normalized.get("panel_serial")
     if "model" not in normalized and "panel_model" in normalized:
         normalized["model"] = normalized.get("panel_model")
     return normalized
 
 
-def _panel_mac(panel_info: dict[str, Any]) -> str | None:
-    return panel_info.get("mac") or panel_info.get("panel_mac")
+def _reauth_candidate_unique_ids(panel_info: dict[str, Any]) -> set[str]:
+    """Return config-entry unique_id values that may match during reauth."""
+    candidates: set[str] = set()
+    unique_id = config_entry_unique_id(panel_info)
+    if unique_id:
+        candidates.add(unique_id)
+    serial = panel_serial_tier(panel_info)
+    if serial and serial != unique_id:
+        candidates.add(serial)
+    mac = panel_mac_from_info(panel_info)
+    if mac:
+        candidates.add(format_mac(str(mac)))
+    return candidates
 
 
 def _panel_name(panel_info: dict[str, Any]) -> str | None:

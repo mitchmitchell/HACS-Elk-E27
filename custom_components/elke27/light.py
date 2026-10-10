@@ -23,12 +23,11 @@ from .entity import (
 if TYPE_CHECKING:
     from elke27_lib import LightState, PanelSnapshot
 
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
     from .hub import Elke27Hub
-    from .models import Elke27RuntimeData
+    from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,14 +37,11 @@ _ELK_MAX_DIM_LEVEL = 99
 
 async def async_setup_entry(
     _hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: Elke27ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Elke27 lights from a config entry."""
-    data: Elke27RuntimeData | None = entry.runtime_data
-    if data is None:
-        _LOGGER.debug("Skipping light setup because runtime data is missing")
-        return
+    data = entry.runtime_data
     hub = data.hub
     coordinator = data.coordinator
     known_ids: set[int] = set()
@@ -83,7 +79,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         self,
         coordinator: Elke27DataUpdateCoordinator,
         hub: Elke27Hub,
-        entry: ConfigEntry,
+        entry: Elke27ConfigEntry,
         light_id: int,
         light: LightState,
     ) -> None:

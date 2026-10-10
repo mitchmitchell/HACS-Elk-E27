@@ -23,7 +23,10 @@ from custom_components.elke27.const import (
 from homeassistant.const import CONF_HOST, CONF_PORT
 
 PANEL_MAC = "00:11:22:33:44:55"
+PANEL_SERIAL = "elk-panel-serial-001"
+PANEL_SERIAL_2 = "elk-panel-serial-002"
 HOST = "192.0.2.10"
+HOST_2 = "192.0.2.20"
 PORT = 2101
 INTEGRATION_SERIAL = "123456789012"
 LINK_KEYS_JSON = LinkKeys(

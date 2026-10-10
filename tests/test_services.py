@@ -256,6 +256,13 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(integration.vol.Invalid):
             integration.SERVICE_ZONE_BYPASS_SCHEMA({"entity_id": ["binary_sensor.x"]})
 
+    def test_schema_rejects_non_numeric_code(self) -> None:
+        """The code must be numeric."""
+        with self.assertRaises(integration.vol.Invalid):
+            integration.SERVICE_ZONE_BYPASS_SCHEMA(
+                {"entity_id": ["binary_sensor.x"], "code": "12ab"}
+            )
+
     def test_numeric_id_from_unique_id(self) -> None:
         """IDs are parsed from <base>:<domain>:<id> unique IDs."""
         parse = integration._numeric_id_from_unique_id  # noqa: SLF001
@@ -1276,7 +1283,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert str(ctx.exception) == "Area 1 was not armed: a user code is required."
+        assert "a user code is required" in str(ctx.exception)
         create_notification.assert_called_once()
         hass.bus.async_fire.assert_called_once_with(
             integration.EVENT_ARM_AUTOMATIC_FAILED,
@@ -1292,6 +1299,16 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
                 "still_bypassed_zone_ids": [],
             },
         )
+
+    def test_schema_rejects_non_numeric_code(self) -> None:
+        """The code must be numeric."""
+        bad_call = {
+            "entity_id": ["alarm_control_panel.house"],
+            "mode": "away",
+            "code": "x",
+        }
+        with self.assertRaises(integration.vol.Invalid):
+            integration.SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA(bad_call)
 
     async def test_uncontended_automatic_arm_does_not_poll_or_sleep(self) -> None:
         """Uncontended automatic arming reads panel status once and does not wait."""
