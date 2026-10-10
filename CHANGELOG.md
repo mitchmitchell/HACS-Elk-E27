@@ -5,7 +5,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 
 ## [Unreleased] - 0.1.8 (draft)
 
-0.1.8 bundles **#48** (merged `2e589767`), **#53** (reconnect policy), and **#54**
+0.1.8 bundles **#48** (merged `2e589767`), **#53** (reconnect policy, merged `bac4c1ac`), and **#54**
 (exit-delay / `elke27` 0.3.12). **Batch C (#50)** is planned for **0.1.9**.
 
 ### Fixed
@@ -29,8 +29,8 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 - Refreshes are serialized and deduped; error handling is narrowed (#48).
 - After disconnect, reconnect retries transport, protocol and unknown errors with exponential
   backoff and jitter (about 300 s cap before jitter). Auth refusals start re-link once instead
-  of retrying (#53). Non-transport streaks log WARNING once then DEBUG; transport at DEBUG
-  (#53).
+  of retrying (#53). Non-transport failures log WARNING once per streak (until the next
+  successful connect), then DEBUG; transport at DEBUG (#53).
 
 ### Breaking
 - Upgrading from 0.1.7: delete the integration entry, upgrade, then re-add it. Entity unique
@@ -47,9 +47,10 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 - Auth or link failures at setup now give a setup error plus a re-link prompt (#48).
 - Rejected link keys or credentials during **automatic reconnect** stop retrying and start
   re-link once (#53).
-- After **three consecutive non-transport** reconnect failures, Repairs shows
-  **`reconnect_failed`** for the entry (cleared on connect, unload, or entry removal); entities
-  stay unavailable while disconnected (#53).
+- After **three non-transport** reconnect failures **since the last successful connect**
+  (transport failures in between do not reset the count), Repairs shows **`reconnect_failed`**
+  for the entry (cleared on connect, unload, or entry removal); entities stay unavailable
+  while disconnected (#53).
 
 ## [0.1.7]
 See the [v0.1.7 release](https://github.com/mitchmitchell/HACS-Elk-E27/releases/tag/v0.1.7).

@@ -887,8 +887,8 @@ again with the same linking credentials.
 - **Entity unique IDs and entity IDs may change**; review dashboards, automations, and scripts
   after re-adding.
 - **Requires `elke27` 0.3.12** when 0.1.8 ships (#54). Reconnect policy (#53): auth failures
-  during automatic reconnect start re-link once; repeated non-transport failures can raise a
-  **`reconnect_failed`** Repairs issue while retry continues.
+  during automatic reconnect start re-link once; three non-transport failures since the last
+  successful connect can raise a **`reconnect_failed`** Repairs issue while retry continues.
 
 ### To 0.1.7
 
