@@ -878,10 +878,10 @@ again with the same linking credentials.
 
 - Entity unique IDs and device identifiers follow the panel **MAC address** when the panel
   reports one, otherwise the panel **hardware serial**, otherwise the **config entry ID**.
-  **Panels today report neither MAC nor hardware serial.** For those panels the config entry
-  **`unique_id` stays unset**, setup dedupes on **host:port**, and devices and entities are
-  keyed on the **config entry ID**. If the panel IP changes, delete the entry and add it again
-  at the new address (re-link alone is not enough).
+  If the panel reports neither, the config entry **`unique_id` stays unset**, setup dedupes
+  on **host:port**, and devices and entities are keyed on the **config entry ID**. Then an IP
+  change counts as a new panel: delete the entry and add it again at the new address (re-link
+  alone stops with "wrong panel").
 - The integration serial used for E27 linking identifies Home Assistant, not the panel, and is
   never used as config or entity identity.
 - **Entity unique IDs and entity IDs may change**; review dashboards, automations, and scripts

@@ -3,7 +3,7 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
-## [Unreleased] - 0.1.8 (draft)
+## [Unreleased] - 0.1.8 (draft; unreleased until the FAIL 2 fix lands)
 
 0.1.8 bundles **#48** (merged `2e589767`), **#53** (reconnect policy, merged `bac4c1ac`), and **#54**
 (exit-delay / `elke27` 0.3.12). **Batch C (#50)** is planned for **0.1.9**.
@@ -33,12 +33,20 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   successful connect), then DEBUG; transport at DEBUG (#53).
 
 ### Breaking
-- Upgrading from 0.1.7: delete the integration entry, upgrade, then re-add it. Entity unique
-  IDs and device identifiers use panel MAC, then panel hardware serial, then the config entry
-  ID. When the panel reports neither MAC nor serial, **unique_id stays unset**, dedupe uses
-  **host:port**, and devices and entities use the **config entry ID**; an IP change requires
-  delete and re-add. Automations, scripts, and dashboards may need updates (see release notes)
-  (#48).
+- **All 0.1.7 users must delete the integration entry and add it again when upgrading** (no
+  migration). Expect entity IDs to change, so automations, scripts and dashboards may need
+  updating. Steps: note the entity IDs you use, delete the entry, upgrade in HACS and restart,
+  add the integration, then rename the new entities or update references (#48).
+- Entity unique IDs and device identifiers: panel MAC (standard format), else panel hardware
+  serial, else config entry ID. Never the integration serial (0.1.7 used it when there was no
+  MAC) (#48).
+- Config entry unique ID: was the MAC as reported or the integration serial. Now the MAC in
+  standard format, else the panel hardware serial, else unset (#48).
+- Duplicate detection: by unique ID when the panel reports a MAC or serial (host and port are
+  then updated in place); otherwise by host:port only. Without a MAC or serial, an IP change
+  counts as a new panel: re-link stops with "wrong panel", so delete and re-add (#48).
+- Re-linking a 0.1.7 entry stops with "wrong panel" because its stored unique ID isn't
+  accepted. Delete and re-add instead (#48).
 - Rolling back to 0.1.7 also requires delete and re-add after redownloading in HACS.
 - `elke27.alarm_arm_automatic` and `elke27.zone_bypass` reject a non-numeric `code`. Use
   digits only (#48).
