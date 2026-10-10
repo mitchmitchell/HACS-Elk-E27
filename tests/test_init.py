@@ -44,7 +44,7 @@ async def test_setup_sets_unique_id_for_legacy_no_mac_entry(
 ) -> None:
     """Setup assigns unique_id from integration serial when the panel reports no MAC."""
     snapshot = panel_snapshot()
-    mock_client.client.get_snapshot.return_value = dataclasses.replace(
+    mock_client.snapshot = dataclasses.replace(
         snapshot,
         panel=dataclasses.replace(snapshot.panel, mac=None),
     )
