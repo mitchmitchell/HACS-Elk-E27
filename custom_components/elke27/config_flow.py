@@ -360,7 +360,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 options={**entry.options, **options},
             )
 
-        unique_id = _panel_mac(panel_info) or integration_serial
+        unique_id = _config_entry_unique_id(panel_info, integration_serial)
         await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
 
@@ -480,15 +480,19 @@ def _panel_mac(panel_info: dict[str, Any]) -> str | None:
     return panel_info.get("mac") or panel_info.get("panel_mac")
 
 
+def _config_entry_unique_id(panel_info: dict[str, Any], integration_serial: str) -> str:
+    """Return the config entry unique_id (formatted MAC or integration serial)."""
+    mac = _panel_mac(panel_info)
+    if mac:
+        return format_mac(str(mac))
+    return integration_serial
+
+
 def _reauth_candidate_unique_ids(
     panel_info: dict[str, Any], integration_serial: str
 ) -> set[str]:
     """Return identity keys that may match an existing entry during reauth."""
-    candidates = {integration_serial}
-    mac = _panel_mac(panel_info)
-    if mac:
-        candidates.add(format_mac(str(mac)))
-    return candidates
+    return {_config_entry_unique_id(panel_info, integration_serial), integration_serial}
 
 
 def _panel_name(panel_info: dict[str, Any]) -> str | None:

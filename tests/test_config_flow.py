@@ -83,6 +83,45 @@ async def _start_manual(hass: HomeAssistant) -> dict[str, Any]:
     return result
 
 
+RAW_MAC = "001122334455"
+
+
+async def test_manual_create_normalizes_mac_unique_id(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Create stores a formatted MAC unique_id even when the panel reports raw MAC."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=RAW_MAC),
+    )
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == PANEL_MAC
+
+
+async def test_reauth_accepts_formatted_mac_when_panel_reports_raw_mac(
+    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+) -> None:
+    """Reauth matches when the entry MAC is formatted and the panel returns raw MAC."""
+    mock_config_entry.add_to_hass(hass)
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=RAW_MAC.upper()),
+    )
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+
+
 async def test_manual_creates_entry_without_storing_codes(
     hass: HomeAssistant, flow_client: Any
 ) -> None:

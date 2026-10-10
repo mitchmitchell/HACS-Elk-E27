@@ -193,6 +193,30 @@ def _reauth_flows(hass: HomeAssistant) -> list[dict]:
     ]
 
 
+async def test_refresh_after_connect_auth_error_starts_reauth_once(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """An auth failure after reconnect starts reauth once, not a dead-link retry."""
+    await _setup(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    hub = mock_config_entry.runtime_data.hub
+    mock_client.client.async_refresh_csm.side_effect = Elke27AuthError("bad")
+
+    coordinator._handle_reconnected()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    task = coordinator._refresh_task
+    assert task is not None
+    await task
+    await hass.async_block_till_done()
+    assert len(_reauth_flows(hass)) == 1
+    assert hub._reauth_requested is True
+
+    await coordinator._async_refresh_after_connect()
+    await hass.async_block_till_done()
+    assert len(_reauth_flows(hass)) == 1
+
+
 async def test_debounced_refresh_auth_error_starts_reauth_once(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+from elke27_lib import ArmMode
 from elke27_lib.errors import (
     E27Timeout,
     Elke27AuthError,
@@ -22,7 +23,7 @@ from custom_components.elke27.alarm_control_panel import _normalize_code
 from custom_components.elke27.const import CONF_LINK_KEYS_JSON, DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from tests.conftest import ClientHarness
 
 
@@ -203,6 +204,27 @@ async def test_setup_domain_refresh_rejection_is_tolerated(
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     assert mock_config_entry.state is ConfigEntryState.LOADED
+
+
+async def test_command_auth_error_starts_reauth_once(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """An auth failure from a panel command starts reauth only once."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hub = mock_config_entry.runtime_data.hub
+    mock_client.client.async_arm_area.side_effect = Elke27AuthError("bad")
+
+    with pytest.raises(HomeAssistantError):
+        await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
+    await hass.async_block_till_done()
+    assert len(_reauth_flows(hass)) == 1
+
+    with pytest.raises(HomeAssistantError):
+        await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
+    await hass.async_block_till_done()
+    assert len(_reauth_flows(hass)) == 1
 
 
 async def test_reconnect_auth_failure_starts_reauth(

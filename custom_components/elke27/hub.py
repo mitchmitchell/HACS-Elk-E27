@@ -560,6 +560,10 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Zone", zone_id, "bypass", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
@@ -575,6 +579,10 @@ class Elke27Hub:
             result = await client.async_execute(command_key, **params)
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _LOGGER.warning("Command %s failed: %s", command_key, err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _LOGGER.warning("Command %s failed: %s", command_key, err)
             self._note_command_error(err)
@@ -583,8 +591,11 @@ class Elke27Hub:
             if isinstance(result.error, Elke27PinRequiredError):
                 raise result.error
             if result.error is not None:
+                if isinstance(result.error, AUTH_ERRORS):
+                    self.start_reauth_once()
+                else:
+                    self._note_command_error(result.error)
                 _LOGGER.warning("Command %s failed: %s", command_key, result.error)
-                self._note_command_error(result.error)
                 raise HomeAssistantError(_error_message(result.error)) from (
                     result.error
                 )
@@ -649,6 +660,10 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Area", area_id, "arming", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
@@ -698,6 +713,10 @@ class Elke27Hub:
             )
         except Elke27PinRequiredError:
             raise
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Area", area_id, "disarm", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
