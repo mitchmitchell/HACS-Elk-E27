@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import asdict, is_dataclass
+import logging
 from typing import TYPE_CHECKING, Any
 
 from elke27_lib import ClientConfig, LinkKeys
@@ -23,7 +24,12 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.helpers import config_validation as cv, translation
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import (
+    config_validation as cv,
+    issue_registry as ir,
+    translation,
+)
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.selector import selector
 
@@ -35,10 +41,19 @@ from .const import (
     DOMAIN,
     READY_TIMEOUT,
 )
-from .identity import async_get_integration_serial, build_client_identity
+from .identity import (
+    async_get_integration_serial,
+    build_client_identity,
+    config_entry_unique_id,
+    panel_identity_matches,
+    panel_mac_from_info,
+    panel_serial_tier,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+_LOGGER = logging.getLogger(__name__)
 
 CONF_ACCESS_CODE = "access_code"
 CONF_PASSPHRASE = "passphrase"
@@ -79,6 +94,43 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         )
     }
 )
+
+
+def _duplicate_unique_id_issue_id(entry_id: str) -> str:
+    return f"duplicate_unique_id_{entry_id}"
+
+
+@callback
+def _async_try_backfill_config_entry_unique_id(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    candidate: str,
+) -> None:
+    """Assign unique_id when missing unless another entry already owns it."""
+    existing = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, candidate)
+    issue_id = _duplicate_unique_id_issue_id(entry.entry_id)
+    if existing is not None and existing.entry_id != entry.entry_id:
+        _LOGGER.warning(
+            "Cannot assign unique_id %s to Elke27 entry %s: already used by %s",
+            candidate,
+            entry.entry_id,
+            existing.entry_id,
+        )
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="duplicate_unique_id",
+            translation_placeholders={
+                "candidate": candidate,
+                "other_entry": existing.title or existing.entry_id,
+            },
+        )
+        return
+    hass.config_entries.async_update_entry(entry, unique_id=candidate)
+    ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -351,18 +403,40 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         }
 
         if entry is not None:
-            candidates = _reauth_candidate_unique_ids(panel_info, integration_serial)
-            if entry.unique_id not in candidates:
-                return self.async_abort(reason="wrong_panel")
+            panel_unique_id = config_entry_unique_id(panel_info)
+            if entry.unique_id is None:
+                if (
+                    entry.data.get(CONF_HOST) != host
+                    or entry.data.get(CONF_PORT, DEFAULT_PORT) != port
+                ):
+                    return self.async_abort(reason="wrong_panel")
+                stored_panel = entry.options.get(CONF_PANEL_INFO)
+                if stored_panel and not panel_identity_matches(
+                    panel_info, stored_panel
+                ):
+                    return self.async_abort(reason="wrong_panel")
+                if panel_unique_id is not None:
+                    _async_try_backfill_config_entry_unique_id(
+                        self.hass, entry, panel_unique_id
+                    )
+            else:
+                candidates = _reauth_candidate_unique_ids(panel_info)
+                if entry.unique_id not in candidates:
+                    return self.async_abort(reason="wrong_panel")
             return self.async_update_reload_and_abort(
                 entry,
                 data_updates=data,
                 options={**entry.options, **options},
             )
 
-        unique_id = _config_entry_unique_id(panel_info, integration_serial)
-        await self.async_set_unique_id(unique_id)
-        self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
+        unique_id = config_entry_unique_id(panel_info)
+        if unique_id is not None:
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured(
+                updates={CONF_HOST: host, CONF_PORT: port}
+            )
+        if self._duplicate_panel_entry_exists(host, port, panel_info):
+            return self.async_abort(reason="already_configured")
 
         title = _panel_name(panel_info) or host
 
@@ -435,6 +509,33 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 return True
         return False
 
+    def _duplicate_panel_entry_exists(
+        self,
+        host: str,
+        port: int,
+        panel_info: dict[str, Any],
+    ) -> bool:
+        """Return True when another entry already represents this panel."""
+        identity = config_entry_unique_id(panel_info)
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if identity is not None and entry.unique_id == identity:
+                return True
+            if (
+                entry.data.get(CONF_HOST) == host
+                and entry.data.get(CONF_PORT, DEFAULT_PORT) == port
+            ):
+                return True
+            if entry.unique_id is not None:
+                continue
+            stored_panel = entry.options.get(CONF_PANEL_INFO)
+            if (
+                stored_panel
+                and identity is not None
+                and config_entry_unique_id(stored_panel) == identity
+            ):
+                return True
+        return False
+
 
 def _create_client() -> Elke27Client:
     """Create a configured client instance."""
@@ -471,28 +572,26 @@ def _normalize_panel_keys(panel: dict[str, Any]) -> dict[str, Any]:
         normalized["name"] = normalized.get("panel_name")
     if "mac" not in normalized and "panel_mac" in normalized:
         normalized["mac"] = normalized.get("panel_mac")
+    if "serial" not in normalized and "panel_serial" in normalized:
+        normalized["serial"] = normalized.get("panel_serial")
     if "model" not in normalized and "panel_model" in normalized:
         normalized["model"] = normalized.get("panel_model")
     return normalized
 
 
-def _panel_mac(panel_info: dict[str, Any]) -> str | None:
-    return panel_info.get("mac") or panel_info.get("panel_mac")
-
-
-def _config_entry_unique_id(panel_info: dict[str, Any], integration_serial: str) -> str:
-    """Return the config entry unique_id (formatted MAC or integration serial)."""
-    mac = _panel_mac(panel_info)
+def _reauth_candidate_unique_ids(panel_info: dict[str, Any]) -> set[str]:
+    """Return config-entry unique_id values that may match during reauth."""
+    candidates: set[str] = set()
+    unique_id = config_entry_unique_id(panel_info)
+    if unique_id:
+        candidates.add(unique_id)
+    serial = panel_serial_tier(panel_info)
+    if serial and serial != unique_id:
+        candidates.add(serial)
+    mac = panel_mac_from_info(panel_info)
     if mac:
-        return format_mac(str(mac))
-    return integration_serial
-
-
-def _reauth_candidate_unique_ids(
-    panel_info: dict[str, Any], integration_serial: str
-) -> set[str]:
-    """Return identity keys that may match an existing entry during reauth."""
-    return {_config_entry_unique_id(panel_info, integration_serial), integration_serial}
+        candidates.add(format_mac(str(mac)))
+    return candidates
 
 
 def _panel_name(panel_info: dict[str, Any]) -> str | None:

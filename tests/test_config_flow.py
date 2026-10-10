@@ -26,6 +26,7 @@ import voluptuous as vol
 from custom_components.elke27.config_flow import (
     CONF_ACCESS_CODE,
     CONF_PANEL,
+    CONF_PANEL_INFO,
     CONF_PASSPHRASE,
     CONF_RESCAN,
     CONF_SETUP_METHOD,
@@ -41,8 +42,18 @@ from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.selector import SelectSelector
-from tests.conftest import HOST, INTEGRATION_SERIAL, PANEL_MAC, PORT, panel_snapshot
+from tests.conftest import (
+    HOST,
+    HOST_2,
+    INTEGRATION_SERIAL,
+    PANEL_MAC,
+    PANEL_SERIAL,
+    PANEL_SERIAL_2,
+    PORT,
+    panel_snapshot,
+)
 
 ACCESS_CODE = "908172"
 PASSPHRASE = "secret-passphrase"
@@ -83,7 +94,8 @@ async def _start_manual(hass: HomeAssistant) -> dict[str, Any]:
     return result
 
 
-RAW_MAC = "001122334455"
+RAW_MAC = "AABBCC112233"
+FORMATTED_RAW_MAC = "aa:bb:cc:11:22:33"
 
 
 async def test_manual_create_normalizes_mac_unique_id(
@@ -101,13 +113,24 @@ async def test_manual_create_normalizes_mac_unique_id(
         {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["result"].unique_id == PANEL_MAC
+    assert result["result"].unique_id == FORMATTED_RAW_MAC
 
 
 async def test_reauth_accepts_formatted_mac_when_panel_reports_raw_mac(
-    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+    hass: HomeAssistant, flow_client: Any
 ) -> None:
     """Reauth matches when the entry MAC is formatted and the panel returns raw MAC."""
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=FORMATTED_RAW_MAC,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
     mock_config_entry.add_to_hass(hass)
     snapshot = panel_snapshot()
     flow_client.get_snapshot.return_value = dataclasses.replace(
@@ -120,6 +143,367 @@ async def test_reauth_accepts_formatted_mac_when_panel_reports_raw_mac(
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
+
+
+async def test_manual_create_uses_panel_serial_unique_id_when_no_mac(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """No-MAC panels use panel hardware serial as the config entry unique_id."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
+    )
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == PANEL_SERIAL
+
+
+async def test_two_macless_panels_with_different_serials_can_be_added(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Two MAC-less panels with different panel serials are separate config entries."""
+    snapshot_a = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot_a,
+        panel=dataclasses.replace(snapshot_a.panel, mac=None, serial=PANEL_SERIAL),
+    )
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == PANEL_SERIAL
+
+    snapshot_b = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot_b,
+        panel=dataclasses.replace(snapshot_b.panel, mac=None, serial=PANEL_SERIAL_2),
+    )
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_HOST: HOST_2,
+            CONF_ACCESS_CODE: ACCESS_CODE,
+            CONF_PASSPHRASE: PASSPHRASE,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == PANEL_SERIAL_2
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 2  # noqa: PLR2004
+
+
+async def test_two_macless_panels_without_serial_at_different_hosts(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """MAC-less panels without serial dedupe on host:port only (both can be added)."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=None),
+    )
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
+
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_HOST: HOST_2,
+            CONF_ACCESS_CODE: ACCESS_CODE,
+            CONF_PASSPHRASE: PASSPHRASE,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 2  # noqa: PLR2004
+
+
+async def test_reauth_succeeds_when_entry_unique_id_is_none_no_mac_panel(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Legacy entries with unique_id unset reauth and receive the panel serial."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
+    )
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.unique_id == PANEL_SERIAL
+    issues = ir.async_get(hass).issues
+    assert not any(
+        issue.translation_key == "duplicate_unique_id"
+        for issue in issues.values()
+        if issue.domain == DOMAIN
+    )
+
+
+async def test_reauth_legacy_none_backfill_clears_duplicate_unique_id_repair(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Successful reauth backfill removes a stale duplicate_unique_id repair."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
+    )
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    mock_config_entry.add_to_hass(hass)
+    issue_id = f"duplicate_unique_id_{mock_config_entry.entry_id}"
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="duplicate_unique_id",
+    )
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.unique_id == PANEL_SERIAL
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_reauth_legacy_none_skips_unique_id_when_identity_is_taken(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Reauth still relinks but does not steal another entry's panel unique_id."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
+    )
+    owner = MockConfigEntry(
+        domain=DOMAIN,
+        title="Owner Panel",
+        unique_id=PANEL_SERIAL,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    owner.add_to_hass(hass)
+    legacy = MockConfigEntry(
+        domain=DOMAIN,
+        title="Legacy Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST_2,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+        options={
+            CONF_PANEL_INFO: dataclasses.asdict(
+                dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL)
+            )
+        },
+    )
+    legacy.add_to_hass(hass)
+    result = await legacy.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert legacy.unique_id is None
+    assert owner.unique_id == PANEL_SERIAL
+    issue_id = f"duplicate_unique_id_{legacy.entry_id}"
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_key == "duplicate_unique_id"
+
+
+async def test_reauth_legacy_none_accepts_live_mac_when_stored_panel_had_no_mac(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Reauth succeeds when stored panel_info had no MAC but live reports one."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = snapshot
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+        options={
+            CONF_PANEL_INFO: dataclasses.asdict(
+                dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL)
+            )
+        },
+    )
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.unique_id == PANEL_MAC
+
+
+async def test_reauth_legacy_none_matches_stored_panel_info(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Legacy reauth succeeds when live panel identity matches stored panel_info."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = snapshot
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+        options={CONF_PANEL_INFO: dataclasses.asdict(snapshot.panel)},
+    )
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.unique_id == PANEL_MAC
+
+
+async def test_reauth_legacy_none_rejects_mismatched_stored_panel_info(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Legacy reauth aborts when live panel identity differs from stored panel_info."""
+    snapshot = panel_snapshot()
+    other = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(
+            snapshot.panel,
+            mac="66:77:88:99:aa:bb",
+            serial="other-panel-serial",
+        ),
+    )
+    flow_client.get_snapshot.return_value = other
+    mock_config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+        options={CONF_PANEL_INFO: dataclasses.asdict(snapshot.panel)},
+    )
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "wrong_panel"
+    assert mock_config_entry.unique_id is None
+
+
+async def test_manual_aborts_same_mac_at_different_host(
+    hass: HomeAssistant,
+    flow_client: Any,  # noqa: ARG001
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Re-adding the same MAC panel at a new address aborts already_configured."""
+    mock_config_entry.add_to_hass(hass)
+    other_host = "192.0.2.99"
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_HOST: other_host,
+            CONF_ACCESS_CODE: ACCESS_CODE,
+            CONF_PASSPHRASE: PASSPHRASE,
+        },
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_manual_aborts_already_configured_legacy_none_unique_id_no_mac(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Re-adding a no-MAC panel with a legacy entry aborts already_configured."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
+    )
+    legacy = MockConfigEntry(
+        domain=DOMAIN,
+        title="Legacy Panel",
+        unique_id=None,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        },
+    )
+    legacy.add_to_hass(hass)
+    result = await _start_manual(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
 
 
 async def test_manual_creates_entry_without_storing_codes(
@@ -269,14 +653,19 @@ async def test_reauth_relinks_same_panel(
     assert link_kwargs["host"] == HOST
 
 
-async def test_reauth_succeeds_when_entry_unique_id_is_serial(
+async def test_reauth_succeeds_when_entry_unique_id_is_panel_serial(
     hass: HomeAssistant, flow_client: Any
 ) -> None:
-    """Reauth accepts the panel when the entry was keyed by integration serial."""
+    """Reauth accepts the panel when the entry was keyed by panel hardware serial."""
+    snapshot = panel_snapshot()
+    flow_client.get_snapshot.return_value = dataclasses.replace(
+        snapshot,
+        panel=dataclasses.replace(snapshot.panel, mac=None, serial=PANEL_SERIAL),
+    )
     mock_config_entry = MockConfigEntry(
         domain=DOMAIN,
         title="Test Panel",
-        unique_id=INTEGRATION_SERIAL,
+        unique_id=PANEL_SERIAL,
         data={
             CONF_HOST: HOST,
             CONF_PORT: PORT,
@@ -291,7 +680,7 @@ async def test_reauth_succeeds_when_entry_unique_id_is_serial(
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
-    assert mock_config_entry.unique_id == INTEGRATION_SERIAL
+    assert mock_config_entry.unique_id == PANEL_SERIAL
     flow_client.async_link.assert_awaited_once()
 
 

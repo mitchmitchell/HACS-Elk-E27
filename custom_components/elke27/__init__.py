@@ -12,7 +12,7 @@ from elke27_lib.errors import E27Error, Elke27Error, Elke27PinRequiredError
 import voluptuous as vol
 
 from homeassistant.components import persistent_notification
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import callback
 from homeassistant.exceptions import (
@@ -39,7 +39,6 @@ from .const import (
     ISSUE_RECONNECT_FAILED,
 )
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import unique_base
 from .hub import (
     AUTH_ERRORS,
     PIN_REQUIRED_REASON,
@@ -207,7 +206,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
         ) from err
 
     coordinator.async_set_updated_data(hub.get_snapshot())
-    await _async_migrate_unique_ids(hass, entry, unique_base(hub, coordinator, entry))
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -221,8 +219,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> b
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
-    """Remove a config entry and any integration state that unload may have skipped."""
-    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_RECONNECT_FAILED}_{entry.entry_id}")
+    """Clean up integration state when a config entry is removed."""
+    _async_delete_entry_issues(hass, entry)
 
 
 def _panel_name_from_entry(panel: object | None) -> str | None:
@@ -231,33 +229,19 @@ def _panel_name_from_entry(panel: object | None) -> str | None:
     return None
 
 
-async def _async_migrate_unique_ids(
-    hass: HomeAssistant, entry: ConfigEntry, base: str
-) -> None:
-    """Migrate legacy unique IDs to the <base>:<domain>:<id> format."""
-    registry = er.async_get(hass)
-    prefix = f"{base}_"
-    for entity in registry.entities.values():
-        if entity.platform != DOMAIN:
-            continue
-        if entity.config_entry_id != entry.entry_id:
-            continue
-        unique_id = entity.unique_id
-        if not unique_id.startswith(prefix):
-            continue
-        rest = unique_id[len(prefix) :]
-        if "_" not in rest:
-            continue
-        domain, numeric_id = rest.rsplit("_", 1)
-        new_unique_id = f"{base}:{domain}:{numeric_id}"
-        if registry.async_get_entity_id(entity.domain, DOMAIN, new_unique_id):
-            _LOGGER.debug(
-                "Unique ID migration skipped for %s; %s already exists",
-                entity.entity_id,
-                new_unique_id,
-            )
-            continue
-        registry.async_update_entity(entity.entity_id, new_unique_id=new_unique_id)
+def _duplicate_unique_id_issue_id(entry_id: str) -> str:
+    return f"duplicate_unique_id_{entry_id}"
+
+
+def _reconnect_failed_issue_id(entry_id: str) -> str:
+    return f"{ISSUE_RECONNECT_FAILED}_{entry_id}"
+
+
+@callback
+def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
+    """Remove repairs issues scoped to one config entry."""
+    ir.async_delete_issue(hass, DOMAIN, _duplicate_unique_id_issue_id(entry.entry_id))
+    ir.async_delete_issue(hass, DOMAIN, _reconnect_failed_issue_id(entry.entry_id))
 
 
 async def _async_handle_alarm_arm_automatic(
