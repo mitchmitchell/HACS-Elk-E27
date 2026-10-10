@@ -6,15 +6,17 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ## [Unreleased] - 0.1.8 (draft)
 
 ### Fixed
-- `elke27.alarm_arm_automatic` no longer sends a redundant second arm when two calls for the
-  same area run back to back and the panel status lags (#49, fixes #43).
+- No duplicate arm when two `elke27.alarm_arm_automatic` calls for the same area overlap
+  (#49, fixes #43).
 
 ### Changed (pending #48, not merged yet)
 - Setup: bad credentials or an invalid link show a re-link prompt. Temporary errors retry
   setup.
-- The reconnect loop starts a re-link prompt when the link keys are rejected.
+- A re-link prompt starts when the link is rejected while reconnecting, refreshing or running
+  a command.
 - The re-link flow uses the standard `reauth_confirm` step, keeps the panel identity and
-  refuses a different panel.
+  refuses a different panel (matched by MAC or integration serial).
+- New entries store the panel MAC in Home Assistant's standard format.
 - Non-numeric codes are rejected with a validation error.
 - Refreshes are serialized and deduped; error handling is narrowed.
 
