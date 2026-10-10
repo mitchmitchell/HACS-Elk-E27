@@ -479,9 +479,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         """Return True when another entry already represents this panel."""
         identity = config_entry_unique_id(panel_info, integration_serial)
         if (
-            self.hass.config_entries.async_entry_for_domain_unique_id(
-                DOMAIN, identity
-            )
+            self.hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, identity)
             is not None
         ):
             return True
