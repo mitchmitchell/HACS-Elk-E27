@@ -20,11 +20,21 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.elke27.alarm_control_panel import _normalize_code
-from custom_components.elke27.const import CONF_LINK_KEYS_JSON, DOMAIN
+from custom_components.elke27.const import (
+    CONF_LINK_KEYS_JSON,
+    DOMAIN,
+    ISSUE_RECONNECT_FAILED,
+    RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
+)
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from tests.conftest import ClientHarness
+
+
+def _reconnect_issue_id(entry_id: str) -> str:
+    return f"{ISSUE_RECONNECT_FAILED}_{entry_id}"
 
 
 async def test_setup_and_unload(
@@ -292,21 +302,106 @@ async def test_reconnect_transport_failure_retries_with_backoff(
     sleep_mock.assert_any_await(4)
 
 
-async def test_reconnect_non_transport_failure_stops(
+async def test_reconnect_protocol_error_retries(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
-    """Non-transport reconnect failures stop without reauth or further retries."""
+    """Protocol errors keep retrying with backoff and never start reauth."""
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     hub = mock_config_entry.runtime_data.hub
+    hub._stopping = False
 
     connects_before = mock_client.client.async_connect.await_count
-    mock_client.client.async_connect.side_effect = Elke27ProtocolError("protocol")
-    await hub._async_reconnect_loop()
+    mock_client.client.async_connect.side_effect = [
+        Elke27ProtocolError("protocol"),
+        None,
+    ]
+    mock_client.client.wait_ready.return_value = True
+    sleep_mock = AsyncMock()
+    with patch("custom_components.elke27.hub.asyncio.sleep", sleep_mock):
+        await hub._async_reconnect_loop()
     await hass.async_block_till_done()
-    assert mock_client.client.async_connect.await_count == connects_before + 1
+    assert mock_client.client.async_connect.await_count == connects_before + 2
+    sleep_mock.assert_awaited_once_with(2)
     assert len(_reauth_flows(hass)) == 0
+
+
+async def test_reconnect_repair_issue_after_non_transport_threshold(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    """Three consecutive non-transport failures create a repair issue."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hub = mock_config_entry.runtime_data.hub
+    hub._stopping = False
+
+    mock_client.client.async_connect.side_effect = Elke27ProtocolError("protocol")
+    sleep_calls = 0
+
+    async def _stop_after_third_sleep(_delay: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls >= RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD:
+            hub._stopping = True
+
+    with patch(
+        "custom_components.elke27.hub.asyncio.sleep",
+        side_effect=_stop_after_third_sleep,
+    ):
+        await hub._async_reconnect_loop()
+    issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
+
+
+async def test_reconnect_repair_issue_cleared_on_success(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    """A successful reconnect clears the repair issue."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hub = mock_config_entry.runtime_data.hub
+    hub._stopping = False
+
+    mock_client.client.async_connect.side_effect = [
+        Elke27ProtocolError("protocol"),
+        Elke27ProtocolError("protocol"),
+        Elke27ProtocolError("protocol"),
+        None,
+    ]
+    mock_client.client.wait_ready.return_value = True
+    with patch("custom_components.elke27.hub.asyncio.sleep", AsyncMock()):
+        await hub._async_reconnect_loop()
+    issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_reconnect_repair_issue_cleared_on_unload(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    """Unload removes the reconnect repair issue."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    hub = mock_config_entry.runtime_data.hub
+    hub._ensure_reconnect_repair_issue()
+    issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
 
 
 async def test_connect_cancellation_disconnects_client(
