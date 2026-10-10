@@ -194,7 +194,7 @@ or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
-| 0.1.8 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
+| 0.1.8 (draft) | 0.3.12 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 
@@ -876,18 +876,20 @@ whole °F, so setpoints you set in °C are rounded.
 Remove each Elk E27 config entry under **Settings → Devices & services**, then add the panel
 again with the same linking credentials.
 
-- **Config entry `unique_id`** uses **formatted panel MAC** when the panel reports one, otherwise
-  the panel’s own **hardware serial** (when present). If the panel reports **neither MAC nor
-  serial** (as on some hardware today), `unique_id` stays **unset**, the entry is deduplicated by
-  **host and port** only, and devices and entities use the **config entry id** as their identity
-  until a later release adds a stronger panel identifier. **Changing the panel’s IP address** in
-  that case is treated as a new panel: delete the entry and add it again at the new host.
+- Entity unique IDs and device identifiers follow the panel **MAC address** when the panel
+  reports one, otherwise the panel **hardware serial**, otherwise the **config entry ID**.
+  If the panel reports neither, the config entry **`unique_id` stays unset**, setup dedupes
+  on **host:port**, and devices and entities are keyed on the **config entry ID**. An IP change
+  counts as a new panel: **re-link can't change the address** (it reuses stored host and port),
+  so delete the entry and add it again at the new address.
 - The integration serial used for E27 linking identifies Home Assistant, not the panel, and is
   never used as config or entity identity.
-- **Entity unique IDs and entity IDs may change** (devices, entities, and automations that
-  referenced the old IDs or the integration serial as an entity base will need updating).
-- Dashboards, automations, and scripts that target Elk E27 entities should be reviewed after
-  re-adding.
+- **Entity unique IDs and entity IDs may change**; review dashboards, automations, and scripts
+  after re-adding.
+- **Requires `elke27` 0.3.12** when 0.1.8 ships (#54). Reconnect policy (#53): auth failures
+  during automatic reconnect start re-link once; three non-transport failures since the last
+  successful connect (transport failures in between do not reset the count) can raise a
+  **`reconnect_failed`** Repairs issue while retry continues.
 
 ### To 0.1.7
 
