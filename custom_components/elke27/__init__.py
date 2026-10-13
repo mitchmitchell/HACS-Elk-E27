@@ -28,6 +28,7 @@ from .errors import AUTH_ERRORS
 from .hub import Elke27Hub
 from .identity import async_get_integration_serial
 from .models import Elke27ConfigEntry, Elke27RuntimeData
+from .panel_mac import mismatch_issue_id
 from .services import (  # noqa: F401  # re-exported; tests and callers import these from the package
     ATTR_AREA_ID,
     EVENT_ARM_AUTOMATIC_FAILED,
@@ -187,3 +188,4 @@ def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) ->
     """Remove repairs issues scoped to one config entry."""
     ir.async_delete_issue(hass, DOMAIN, _duplicate_unique_id_issue_id(entry.entry_id))
     ir.async_delete_issue(hass, DOMAIN, _reconnect_failed_issue_id(entry.entry_id))
+    ir.async_delete_issue(hass, DOMAIN, mismatch_issue_id(entry.entry_id))

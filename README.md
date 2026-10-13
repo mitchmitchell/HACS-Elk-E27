@@ -93,9 +93,8 @@ or `Zone 12` is used.
   example *invalid parameter (check the user code) (error 11004)*. See
   [Panel error messages](#panel-error-messages). The reason and code are also logged as a
   warning.
-- States reported: `disarmed`, `armed_home`, `armed_away` and `triggered` (alarm active).
-  There is no `arming` or `pending` state: the area shows its armed state as soon as the panel
-  accepts the request, including during the exit delay.
+- States reported: `disarmed`, `arming` (during the exit delay), `armed_home`, `armed_away`
+  and `triggered` (alarm active). There is no `pending` state.
 - Extra attributes:
 
   | Attribute | Meaning |
@@ -194,7 +193,8 @@ or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
-| 0.1.8 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
+| 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
+| 0.1.8 | [0.3.12](https://pypi.org/project/elke27/0.3.12/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 
@@ -285,15 +285,34 @@ There is no reconfigure option, and the integration doesn't follow a panel to a 
 on its own: reconnects use the stored address. **Give the panel a DHCP reservation** so its
 address never changes.
 
-If the address does change:
+If the address does change, re-linking can't help: it reuses the stored host and port. What
+to do depends on whether the integration knows the panel's MAC address. It learns the MAC from
+network discovery, either during setup or, for entries added before 0.1.8.x, on the first
+connect after upgrading.
+
+Upgraded entries keyed by a real panel serial keep that unique ID after the MAC fill, so
+changing their address means deleting and re-adding the entry (the steps below for an unknown MAC).
+
+**The MAC is known** (and the entry is not keyed by a real panel serial):
 
 1. Go to **Settings → Devices & services → Add integration → Elk E27 Alarm Engine
    Integration → Manual setup**.
 2. Enter the **new** host, plus the access code and passphrase.
-3. The panel is recognized by its MAC address. The existing entry's address is updated in
-   place, and setup ends with *"This panel is already configured."*
+3. The integration asks the panel at the new address for its MAC. When it matches, the
+   existing entry's address is updated in place, and setup ends with *"This panel is already
+   configured."* Nothing is deleted, and your entities are kept.
 
-Nothing needs to be deleted, and your entities are kept.
+**The MAC isn't known** (the panel never answered discovery), or the panel at the new address
+doesn't answer discovery: the new address counts as a new panel.
+
+> **Delete the old entry first.** Adding the panel at the new address without deleting it
+> leaves two entries for the same panel.
+
+1. Delete the integration entry (**Settings → Devices & services → Elk E27 Alarm Engine
+   Integration → ⋮ → Delete**).
+2. Add the integration again at the **new** host, with the access code and passphrase.
+3. Entity IDs may change. Update automations, scripts and dashboards, or rename the new
+   entities back to the old IDs.
 
 ### Re-linking (reauthentication)
 
@@ -305,9 +324,9 @@ reloads with new link keys. Your entities and their IDs stay the same. Re-linkin
 refreshes the link keys for the stored address; to change the address, see
 [Changing the panel's address](#changing-the-panels-address).
 
-If the keys are rejected while **reconnecting**, no notice appears: the integration stops
-retrying and entities stay unavailable. **Reload the integration** (or restart Home
-Assistant) to get the reauthentication notice.
+If the keys are rejected while **reconnecting**, the integration stops retrying and starts the
+**reauthentication** flow once, so the notice appears. Entities stay unavailable until you
+re-link (or reload the integration).
 
 ---
 
@@ -620,7 +639,7 @@ These are by design or limits of the panel.
   - Arm away and custom bypass may end as `armed_home` through the panel's auto-stay.
   - **Custom bypass** always arms in away mode, and only bypasses open zones in that area.
   - Disarming an armed area clears all zone bypasses (panel behavior).
-  - There is no `arming`/`pending` state during the exit delay.
+  - The area shows `arming` during the exit delay (#54).
 - **No code prompt for other devices:** lights, locks, outputs and thermostats are controlled
   without a user code. If your panel demands a code for one of those commands, the action
   fails with *"PIN required to perform this action."*
@@ -648,10 +667,9 @@ These are problems that are tracked for a fix.
   setup.)
 - **Fire, CO and water zones show as generic openings**, not smoke, CO or moisture sensors.
 - **Address changes:** after the panel's IP address changes, reconnects keep using the old
-  address. Use a DHCP reservation, or run Manual setup again with the new address (see
-  [Changing the panel's address](#changing-the-panels-address)).
-- **No reauthentication prompt on reconnect:** if the link keys are rejected while
-  reconnecting, entities stay unavailable with no notice. Reload the integration.
+  address. Use a DHCP reservation. If the integration knows the panel's MAC, run Manual setup
+  at the new address to update the entry in place; otherwise delete the old entry first, then add it again (adding without deleting leaves
+  two entries for the same panel; see [Changing the panel's address](#changing-the-panels-address)).
 - **Occasional dropped connection during thermostat traffic.** The integration reconnects
   by itself. Entities may be briefly unavailable.
 
@@ -702,7 +720,7 @@ to retry (see [the example](#retry-automatic-arming-after-a-failure)).
 | *Unable to authenticate with the panel…* | The access code and passphrase are correct. These are the linking credentials set by your installer, not your alarm code. Confirm them with your installer if in doubt. |
 | *The panel requires linking…* | Enter the access code and passphrase again. |
 | *No panels were discovered…* | The panel is online and on the same network segment, and UDP broadcast on port 2362 isn't blocked. Otherwise use **Manual setup**. |
-| *This panel is already configured.* | The panel (matched by MAC address) already has an entry. |
+| *This panel is already configured.* | The panel already has an entry, matched by MAC address, or by the panel's serial number when it reports a real one, or, if neither is reported, by the same host and port. |
 
 ### Panel error messages
 
@@ -865,6 +883,14 @@ whole °F, so setpoints you set in °C are rounded.
 
 ## Upgrading
 
+### To 0.1.8.1
+
+Update in HACS and restart Home Assistant. No delete and re-add is needed from 0.1.8: on the
+first connect, the panel MAC from network discovery is stored and becomes the entry's unique
+ID, unless the entry is keyed by a real panel serial, which it keeps (changing the address of
+such an entry means deleting and re-adding it). Entity and device IDs stay on the config entry ID. See the
+[0.1.8.1 release notes](docs/release-notes/v0.1.8.1.md).
+
 ### To 0.1.8
 
 > **Upgrading from 0.1.7:** Delete each Elk E27 integration entry and add it again. There is
@@ -876,18 +902,23 @@ whole °F, so setpoints you set in °C are rounded.
 Remove each Elk E27 config entry under **Settings → Devices & services**, then add the panel
 again with the same linking credentials.
 
-- **Config entry `unique_id`** uses **formatted panel MAC** when the panel reports one, otherwise
-  the panel’s own **hardware serial** (when present). If the panel reports **neither MAC nor
-  serial** (as on some hardware today), `unique_id` stays **unset**, the entry is deduplicated by
-  **host and port** only, and devices and entities use the **config entry id** as their identity
-  until a later release adds a stronger panel identifier. **Changing the panel’s IP address** in
-  that case is treated as a new panel: delete the entry and add it again at the new host.
+- Entity unique IDs and device identifiers follow the panel **MAC address** when the panel
+  reports one, otherwise the panel **hardware serial**, otherwise the **config entry ID**.
+  **Panels today:** the panel's own messages carry no MAC, and current firmware reports a
+  placeholder serial, which is ignored. The MAC seen during network discovery is not used for
+  identity in 0.1.8 (0.1.8.1 adds it). Without a MAC or real serial, the config entry
+  **`unique_id` stays unset**, setup dedupes
+  on **host:port**, and devices and entities are keyed on the **config entry ID**. An IP change
+  counts as a new panel: **re-link can't change the address** (it reuses stored host and port),
+  so delete the entry and add it again at the new address.
 - The integration serial used for E27 linking identifies Home Assistant, not the panel, and is
   never used as config or entity identity.
-- **Entity unique IDs and entity IDs may change** (devices, entities, and automations that
-  referenced the old IDs or the integration serial as an entity base will need updating).
-- Dashboards, automations, and scripts that target Elk E27 entities should be reviewed after
-  re-adding.
+- **Entity unique IDs and entity IDs may change**; review dashboards, automations, and scripts
+  after re-adding.
+- **Requires** [elke27 0.3.12](https://pypi.org/project/elke27/0.3.12/) ([release notes](https://github.com/mitchmitchell/elke27/releases/tag/v0.3.12)) (#54). Reconnect policy (#53): auth failures
+  during automatic reconnect start re-link once; three non-transport failures since the last
+  successful connect (transport failures in between do not reset the count) can raise a
+  **`reconnect_failed`** Repairs issue while retry continues.
 
 ### To 0.1.7
 
