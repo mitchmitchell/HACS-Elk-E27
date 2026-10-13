@@ -6,7 +6,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ## [Unreleased] - 0.1.8 (draft; unreleased until the exit-delay double-arm fix (#54) lands)
 
 0.1.8 bundles **#48** (merged `2e589767`), **#53** (reconnect policy, merged `bac4c1ac`), and **#54**
-(exit-delay / `elke27` 0.3.12). **Batch C (#50)** is planned for **0.1.9**.
+(exit-delay / `elke27` 0.3.12; pending, draft waiting for its pin). **Batch C (#50)** is planned for **0.1.9**.
 
 ### Fixed
 - No duplicate arm when two `elke27.alarm_arm_automatic` calls for the same area overlap:
@@ -17,7 +17,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   status read when the area is fully armed or exit-delay arming (#54).
 
 ### Changed
-- Requires **`elke27==0.3.12`** (#54).
+- Requires **`elke27==0.3.12`** (#54, pending).
 - Setup: bad credentials or an invalid link show a re-link prompt. Temporary errors retry
   setup (#48).
 - A re-link prompt starts when the link is rejected while reconnecting, refreshing or running

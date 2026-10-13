@@ -878,7 +878,8 @@ again with the same linking credentials.
 
 - Entity unique IDs and device identifiers follow the panel **MAC address** when the panel
   reports one, otherwise the panel **hardware serial**, otherwise the **config entry ID**.
-  If the panel reports neither, the config entry **`unique_id` stays unset**, setup dedupes
+  **Panels today report neither MAC nor hardware serial.** For those, the config entry
+  **`unique_id` stays unset**, setup dedupes
   on **host:port**, and devices and entities are keyed on the **config entry ID**. An IP change
   counts as a new panel: **re-link can't change the address** (it reuses stored host and port),
   so delete the entry and add it again at the new address.
