@@ -455,3 +455,33 @@ async def test_duplicate_check_does_not_match_on_live_serial_vs_stored_mac(
     _entry(mac=MAC, unique_id=MAC_FMT, host="192.0.2.99").add_to_hass(hass)
     result = await _manual(hass)
     assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+@pytest.mark.parametrize("owner_by", ["unique_id", "stored_mac"])
+async def test_reauth_fill_skips_mac_owned_by_other_entry(
+    hass: HomeAssistant,
+    flow_client: Any,
+    mock_discover_host: AsyncMock,
+    owner_by: str,
+) -> None:
+    """Reauth must not store a MAC another entry owns (Bugbot 4263971532)."""
+    if owner_by == "unique_id":
+        other = _entry(unique_id=MAC_FMT, host="192.0.2.99")
+    else:
+        other = _entry(mac=MAC, unique_id="other-id", host="192.0.2.99")
+    other.add_to_hass(hass)
+    entry = _entry()
+    entry.add_to_hass(hass)
+    mock_discover_host.return_value = _discovered()
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: "1234", CONF_PASSPHRASE: "pw"}
+    )
+    assert result["reason"] == "reauth_successful"
+    assert CONF_PANEL_MAC not in entry.data
+    assert CONF_PANEL_MAC_FILLED not in entry.data
+    assert entry.unique_id != MAC_FMT
+    issue = ir.async_get(hass).async_get_issue(
+        DOMAIN, f"duplicate_unique_id_{entry.entry_id}"
+    )
+    assert issue is not None

@@ -2,4 +2,4 @@
 # and pytest; keep it matched to the homeassistant version in requirements.txt.
 -r requirements.txt
 pytest-homeassistant-custom-component==0.13.308
-git+https://github.com/mitchmitchell/elke27@8a8c13ec7ae4f0d3dc886af12dceae7bd665b5bd#egg=elke27
+elke27==0.3.13

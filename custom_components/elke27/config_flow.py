@@ -38,7 +38,6 @@ from .const import (
     CONF_LINK_KEYS_JSON,
     CONF_PANEL,
     CONF_PANEL_MAC,
-    CONF_PANEL_MAC_FILLED,
     DEFAULT_PORT,
     DOMAIN,
     READY_TIMEOUT,
@@ -53,6 +52,7 @@ from .identity import (
 )
 from .panel_mac import (
     async_discover_panel_mac,
+    async_reauth_mac_fill,
     normalize_panel_mac,
     panel_mac_from_discovered,
 )
@@ -426,9 +426,11 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             stored_mac = normalize_panel_mac(entry.data.get(CONF_PANEL_MAC))
             if stored_mac and panel_mac and stored_mac != panel_mac:
                 return self.async_abort(reason="wrong_panel")
+            mac_refused = False
             if panel_mac and not stored_mac:
-                data[CONF_PANEL_MAC] = panel_mac
-                data[CONF_PANEL_MAC_FILLED] = True
+                mac_fill = async_reauth_mac_fill(self.hass, entry, panel_mac)
+                mac_refused = not mac_fill
+                data.update(mac_fill)
             panel_unique_id = config_entry_unique_id(panel_info)
             if entry.unique_id is None:
                 if (
@@ -441,7 +443,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     panel_info, stored_panel
                 ):
                     return self.async_abort(reason="wrong_panel")
-                if panel_unique_id is not None:
+                if panel_unique_id is not None and not mac_refused:
                     _async_try_backfill_config_entry_unique_id(
                         self.hass, entry, panel_unique_id
                     )
