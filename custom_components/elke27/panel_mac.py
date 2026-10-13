@@ -18,6 +18,7 @@ from .const import (
     DOMAIN,
     ISSUE_PANEL_MAC_MISMATCH,
 )
+from .identity import is_placeholder_serial
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -144,10 +145,14 @@ def async_apply_discovered_mac(
         )
         return
     data = {**entry.data, CONF_PANEL_MAC: discovered, CONF_PANEL_MAC_FILLED: True}
-    if entry.unique_id is None or entry.unique_id == candidate:
+    if (
+        entry.unique_id is None
+        or entry.unique_id == candidate
+        or is_placeholder_serial(entry.unique_id)
+    ):
         hass.config_entries.async_update_entry(entry, data=data, unique_id=candidate)
     else:
-        # A real panel serial already identifies this entry; keep it.
+        # A real (non-placeholder) panel serial identifies this entry; keep it.
         hass.config_entries.async_update_entry(entry, data=data)
     ir.async_delete_issue(hass, DOMAIN, dup_issue)
     _LOGGER.info("Stored panel MAC %s for Elke27 entry %s", candidate, entry.entry_id)

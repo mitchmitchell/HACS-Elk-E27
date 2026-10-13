@@ -385,3 +385,73 @@ async def test_hub_connect_schedules_mac_check(
     mock_discover_host.assert_awaited()
     assert entry.data[CONF_PANEL_MAC] == MAC
     assert entry.unique_id == MAC_FMT
+
+
+async def test_reauth_discovery_entry_rediscovers_and_rejects_new_mac(
+    hass: HomeAssistant, flow_client: Any, mock_discover_host: AsyncMock
+) -> None:
+    """Reauth ignores the saved discovery record's MAC and checks the live one."""
+    entry = _entry(
+        mac=MAC,
+        unique_id=MAC_FMT,
+        **{CONF_PANEL: {"host": HOST, "port": PORT, "mac": MAC_FMT}},
+    )
+    entry.add_to_hass(hass)
+    mock_discover_host.return_value = _discovered(OTHER_MAC)
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: "1234", CONF_PASSPHRASE: "pw"}
+    )
+    mock_discover_host.assert_awaited_once()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "wrong_panel"
+    assert entry.data[CONF_PANEL_MAC] == MAC
+
+
+async def test_reauth_018_discovery_entry_fills_live_not_saved_mac(
+    hass: HomeAssistant, flow_client: Any, mock_discover_host: AsyncMock
+) -> None:
+    """A 0.1.8 discovery entry is filled from the live reply, not CONF_PANEL."""
+    entry = _entry(
+        **{CONF_PANEL: {"host": HOST, "port": PORT, "mac": "aa:bb:cc:dd:ee:ff"}}
+    )
+    entry.add_to_hass(hass)
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: "1234", CONF_PASSPHRASE: "pw"}
+    )
+    assert result["reason"] == "reauth_successful"
+    assert CONF_PANEL_MAC not in entry.data
+    mock_discover_host.assert_awaited_once()
+
+
+@pytest.mark.parametrize("placeholder", ["00000001", "0", "FFFFFFFF"])
+async def test_connect_fill_replaces_placeholder_serial_unique_id(
+    hass: HomeAssistant, mock_discover_host: AsyncMock, placeholder: str
+) -> None:
+    entry = _entry(unique_id=placeholder)
+    entry.add_to_hass(hass)
+    mock_discover_host.return_value = _discovered()
+    await async_verify_panel_mac(hass, entry)
+    assert entry.unique_id == MAC_FMT
+    assert entry.data[CONF_PANEL_MAC] == MAC
+
+
+async def test_duplicate_add_aborted_by_other_entry_stored_mac(
+    hass: HomeAssistant, flow_client: Any, mock_discover_host: AsyncMock
+) -> None:
+    """An entry with CONF_PANEL_MAC but a different unique_id still blocks a re-add."""
+    _entry(mac=MAC, unique_id="real-serial-1", host="192.0.2.99").add_to_hass(hass)
+    mock_discover_host.return_value = _discovered()
+    result = await _manual(hass)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_duplicate_check_does_not_match_on_live_serial_vs_stored_mac(
+    hass: HomeAssistant, flow_client: Any, mock_discover_host: AsyncMock
+) -> None:
+    """No live MAC: another entry's stored MAC is not compared with the serial."""
+    _entry(mac=MAC, unique_id=MAC_FMT, host="192.0.2.99").add_to_hass(hass)
+    result = await _manual(hass)
+    assert result["type"] is FlowResultType.CREATE_ENTRY

@@ -395,7 +395,11 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         # E1a: the panel MAC comes only from discovery. Use the discovered panel
         # when there is one, otherwise send a unicast discovery to the host. No
         # reply means no MAC (fall back to the next identity tier, no abort).
-        panel_mac = panel_mac_from_discovered(self._selected_panel)
+        # On reauth the selected panel is the saved discovery record, so its MAC
+        # is stale: always rediscover the live panel at the host.
+        panel_mac = (
+            panel_mac_from_discovered(self._selected_panel) if entry is None else None
+        )
         if panel_mac is None:
             panel_mac = await async_discover_panel_mac(host)
         if panel_mac is not None:
@@ -544,8 +548,13 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> bool:
         """Return True when another entry already represents this panel."""
         identity = config_entry_unique_id(panel_info)
+        live_mac = normalize_panel_mac(panel_mac_from_info(panel_info))
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             if identity is not None and entry.unique_id == identity:
+                return True
+            if live_mac is not None and (
+                normalize_panel_mac(entry.data.get(CONF_PANEL_MAC)) == live_mac
+            ):
                 return True
             if (
                 entry.data.get(CONF_HOST) == host
