@@ -93,9 +93,8 @@ or `Zone 12` is used.
   example *invalid parameter (check the user code) (error 11004)*. See
   [Panel error messages](#panel-error-messages). The reason and code are also logged as a
   warning.
-- States reported: `disarmed`, `armed_home`, `armed_away` and `triggered` (alarm active).
-  There is no `arming` or `pending` state: the area shows its armed state as soon as the panel
-  accepts the request, including during the exit delay.
+- States reported: `disarmed`, `arming` (during the exit delay), `armed_home`, `armed_away`
+  and `triggered` (alarm active). There is no `pending` state.
 - Extra attributes:
 
   | Attribute | Meaning |
@@ -620,7 +619,7 @@ These are by design or limits of the panel.
   - Arm away and custom bypass may end as `armed_home` through the panel's auto-stay.
   - **Custom bypass** always arms in away mode, and only bypasses open zones in that area.
   - Disarming an armed area clears all zone bypasses (panel behavior).
-  - There is no `arming`/`pending` state during the exit delay.
+  - The area shows `arming` during the exit delay (#54).
 - **No code prompt for other devices:** lights, locks, outputs and thermostats are controlled
   without a user code. If your panel demands a code for one of those commands, the action
   fails with *"PIN required to perform this action."*
