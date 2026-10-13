@@ -284,9 +284,22 @@ There is no reconfigure option, and the integration doesn't follow a panel to a 
 on its own: reconnects use the stored address. **Give the panel a DHCP reservation** so its
 address never changes.
 
-If the address does change, re-linking can't help: it reuses the stored host and port. Today's
-panels report no MAC in their own messages and only a placeholder serial, so 0.1.8 identifies
-them by the config entry ID, and a new address counts as a new panel:
+If the address does change, re-linking can't help: it reuses the stored host and port. What
+to do depends on whether the integration knows the panel's MAC address. It learns the MAC from
+network discovery, either during setup or, for entries added before 0.1.8.x, on the first
+connect after upgrading.
+
+**The MAC is known:**
+
+1. Go to **Settings → Devices & services → Add integration → Elk E27 Alarm Engine
+   Integration → Manual setup**.
+2. Enter the **new** host, plus the access code and passphrase.
+3. The integration asks the panel at the new address for its MAC. When it matches, the
+   existing entry's address is updated in place, and setup ends with *"This panel is already
+   configured."* Nothing is deleted, and your entities are kept.
+
+**The MAC isn't known** (the panel never answered discovery), or the panel at the new address
+doesn't answer discovery: the new address counts as a new panel.
 
 1. Delete the integration entry (**Settings → Devices & services → Elk E27 Alarm Engine
    Integration → ⋮ → Delete**).
@@ -647,8 +660,9 @@ These are problems that are tracked for a fix.
   setup.)
 - **Fire, CO and water zones show as generic openings**, not smoke, CO or moisture sensors.
 - **Address changes:** after the panel's IP address changes, reconnects keep using the old
-  address. Use a DHCP reservation, or delete the entry and add it again at the new address (see
-  [Changing the panel's address](#changing-the-panels-address)).
+  address. Use a DHCP reservation. If the integration knows the panel's MAC, run Manual setup
+  at the new address to update the entry in place; otherwise delete the entry and add it again
+  (see [Changing the panel's address](#changing-the-panels-address)).
 - **Occasional dropped connection during thermostat traffic.** The integration reconnects
   by itself. Entities may be briefly unavailable.
 
