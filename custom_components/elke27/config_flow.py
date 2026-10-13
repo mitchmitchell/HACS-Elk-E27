@@ -37,6 +37,8 @@ from .const import (
     CONF_INTEGRATION_SERIAL,
     CONF_LINK_KEYS_JSON,
     CONF_PANEL,
+    CONF_PANEL_MAC,
+    CONF_PANEL_MAC_FILLED,
     DEFAULT_PORT,
     DOMAIN,
     READY_TIMEOUT,
@@ -48,6 +50,11 @@ from .identity import (
     panel_identity_matches,
     panel_mac_from_info,
     panel_serial_tier,
+)
+from .panel_mac import (
+    async_discover_panel_mac,
+    normalize_panel_mac,
+    panel_mac_from_discovered,
 )
 
 if TYPE_CHECKING:
@@ -385,6 +392,15 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors=errors,
             )
 
+        # E1a: the panel MAC comes only from discovery. Use the discovered panel
+        # when there is one, otherwise send a unicast discovery to the host. No
+        # reply means no MAC (fall back to the next identity tier, no abort).
+        panel_mac = panel_mac_from_discovered(self._selected_panel)
+        if panel_mac is None:
+            panel_mac = await async_discover_panel_mac(host)
+        if panel_mac is not None:
+            panel_info = {**panel_info, "mac": format_mac(panel_mac)}
+
         link_keys_json = link_keys.to_json()
         data: dict[str, Any] = {
             CONF_HOST: host,
@@ -403,6 +419,12 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         }
 
         if entry is not None:
+            stored_mac = normalize_panel_mac(entry.data.get(CONF_PANEL_MAC))
+            if stored_mac and panel_mac and stored_mac != panel_mac:
+                return self.async_abort(reason="wrong_panel")
+            if panel_mac and not stored_mac:
+                data[CONF_PANEL_MAC] = panel_mac
+                data[CONF_PANEL_MAC_FILLED] = True
             panel_unique_id = config_entry_unique_id(panel_info)
             if entry.unique_id is None:
                 if (
@@ -438,6 +460,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._duplicate_panel_entry_exists(host, port, panel_info):
             return self.async_abort(reason="already_configured")
 
+        if panel_mac is not None:
+            data[CONF_PANEL_MAC] = panel_mac
         title = _panel_name(panel_info) or host
 
         result = self.async_create_entry(title=title, data=data, options=options)

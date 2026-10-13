@@ -8,7 +8,7 @@ from collections.abc import Callable, Generator
 import dataclasses
 from types import MappingProxyType
 from typing import Any
-from unittest.mock import MagicMock, create_autospec, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 from elke27_lib import AreaState, LinkKeys, PanelInfo, PanelSnapshot, ZoneState
 from elke27_lib.client import Elke27Client
@@ -65,6 +65,14 @@ def panel_snapshot() -> PanelSnapshot:
             {1: ZoneState(zone_id=1, name="Front Door", area_id=1, open=False)}
         ),
     )
+
+
+@pytest.fixture(autouse=True)
+def mock_discover_host() -> Generator[AsyncMock]:
+    """Stub unicast discovery (E1a); default is no reply. Never touches the network."""
+    mock = AsyncMock(return_value=None)
+    with patch("custom_components.elke27.panel_mac.async_discover_host", mock):
+        yield mock
 
 
 @pytest.fixture

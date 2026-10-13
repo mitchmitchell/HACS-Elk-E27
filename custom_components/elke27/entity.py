@@ -12,7 +12,7 @@ from homeassistant.helpers.device_registry import (
     format_mac,
 )
 
-from .const import DOMAIN
+from .const import CONF_PANEL_MAC, CONF_PANEL_MAC_FILLED, DOMAIN
 from .hub import NOT_ACCEPTED_MESSAGE
 from .identity import panel_serial_from_info
 
@@ -54,6 +54,12 @@ def get_panel_field(
     return sanitize_name(value) if field == "name" else value
 
 
+def stored_panel_mac(entry: Elke27ConfigEntry) -> str | None:
+    """Return the stored discovery MAC (12 uppercase hex) or None."""
+    value = entry.data.get(CONF_PANEL_MAC)
+    return value if isinstance(value, str) and value else None
+
+
 def device_info_for_entry(
     hub: Elke27Hub,
     coordinator: Elke27DataUpdateCoordinator,
@@ -63,6 +69,8 @@ def device_info_for_entry(
     snapshot = coordinator.data
     panel_name = get_panel_field(snapshot, hub.panel_name, "name") or entry.title
     mac = get_panel_field(snapshot, hub.panel_name, "mac")
+    if not mac and (stored_mac := stored_panel_mac(entry)):
+        mac = format_mac(stored_mac)
     panel_serial = get_panel_field(snapshot, hub.panel_name, "serial")
     model = get_panel_field(snapshot, hub.panel_name, "model")
     firmware = get_panel_field(snapshot, hub.panel_name, "firmware")
@@ -82,7 +90,16 @@ def entry_identity_key(
     coordinator: Elke27DataUpdateCoordinator,
     entry: Elke27ConfigEntry,
 ) -> str:
-    """Return identity: formatted MAC, panel serial, or entry id if both absent."""
+    """
+    Return identity: formatted MAC, panel serial, or entry id if both absent.
+
+    Tier 1 is the discovery MAC stored at entry creation (CONF_PANEL_MAC). A MAC
+    filled in later (CONF_PANEL_MAC_FILLED) is ignored here so an existing
+    entry's entity and device identity never changes in place.
+    """
+    stored_mac = stored_panel_mac(entry)
+    if stored_mac and not entry.data.get(CONF_PANEL_MAC_FILLED):
+        return format_mac(stored_mac)
     snapshot = coordinator.data
     mac = get_panel_field(snapshot, hub.panel_name, "mac")
     if mac:
