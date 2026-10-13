@@ -31,7 +31,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   status read when the area is fully armed or exit-delay arming (#54).
 
 ### Changed
-- Requires **`elke27==0.3.12`** (#54, pending).
+- Requires **`elke27==0.3.12`** once published (#54, pending).
 - Setup: bad credentials or an invalid link show a re-link prompt. Temporary errors retry
   setup (#48).
 - A re-link prompt starts when the link is rejected while reconnecting, refreshing or running
@@ -61,9 +61,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   then updated in place); otherwise by host:port only. Without a MAC or serial, an IP change
   counts as a new panel: re-link can't change the address (stored host and port), so delete
   and re-add at the new address (#48).
-- Re-linking a 0.1.7 entry usually stops with "wrong panel" because its stored unique ID
-  (often the integration serial) isn't accepted; a lower-case colon MAC may still work. Delete
-  and re-add instead (#48).
+- Upgrading from 0.1.7 requires delete and re-add; re-linking or keeping a 0.1.7 entry is not supported (#48).
 - Rolling back to 0.1.7 also requires delete and re-add after redownloading in HACS.
 - `elke27.alarm_arm_automatic` and `elke27.zone_bypass` reject a non-numeric `code`. Use
   digits only (#48).
