@@ -184,26 +184,15 @@ def async_apply_discovered_mac(
 
     candidate = format_mac(discovered)
     dup_issue = duplicate_unique_id_issue_id(entry.entry_id)
-    existing = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, candidate)
-    if existing is not None and existing.entry_id != entry.entry_id:
+    existing = async_find_other_mac_owner(hass, entry, discovered)
+    if existing is not None:
         _LOGGER.warning(
             "Cannot fill panel MAC %s on Elke27 entry %s: already used by %s",
             candidate,
             entry.entry_id,
             existing.entry_id,
         )
-        ir.async_create_issue(
-            hass,
-            DOMAIN,
-            dup_issue,
-            is_fixable=False,
-            severity=ir.IssueSeverity.ERROR,
-            translation_key="duplicate_unique_id",
-            translation_placeholders={
-                "candidate": candidate,
-                "other_entry": existing.title or existing.entry_id,
-            },
-        )
+        async_raise_duplicate_unique_id_issue(hass, entry, discovered, existing)
         return
     data = {**entry.data, CONF_PANEL_MAC: discovered, CONF_PANEL_MAC_FILLED: True}
     if (

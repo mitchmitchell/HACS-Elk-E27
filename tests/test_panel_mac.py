@@ -485,3 +485,34 @@ async def test_reauth_fill_skips_mac_owned_by_other_entry(
         DOMAIN, f"duplicate_unique_id_{entry.entry_id}"
     )
     assert issue is not None
+
+
+@pytest.mark.parametrize("via_reauth", [False, True])
+async def test_connect_fill_skipped_when_stored_mac_taken(
+    hass: HomeAssistant,
+    flow_client: Any,
+    mock_discover_host: AsyncMock,
+    via_reauth: bool,
+) -> None:
+    """Connect-time fill refuses a MAC another entry stores (Bugbot 4264098717)."""
+    other = _entry(mac=MAC, unique_id="other-id", host="192.0.2.99")
+    other.add_to_hass(hass)
+    entry = _entry()
+    entry.add_to_hass(hass)
+    mock_discover_host.return_value = _discovered()
+    issue_id = f"duplicate_unique_id_{entry.entry_id}"
+    if via_reauth:
+        # Reauth refuses the MAC, then the reload runs the connect-time fill.
+        result = await entry.start_reauth_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_ACCESS_CODE: "1234", CONF_PASSPHRASE: "pw"}
+        )
+        assert result["reason"] == "reauth_successful"
+        assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+    await async_verify_panel_mac(hass, entry)
+    assert CONF_PANEL_MAC not in entry.data
+    assert CONF_PANEL_MAC_FILLED not in entry.data
+    assert entry.unique_id != MAC_FMT
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_key == "duplicate_unique_id"
