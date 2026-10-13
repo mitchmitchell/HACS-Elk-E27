@@ -647,7 +647,7 @@ These are problems that are tracked for a fix.
   setup.)
 - **Fire, CO and water zones show as generic openings**, not smoke, CO or moisture sensors.
 - **Address changes:** after the panel's IP address changes, reconnects keep using the old
-  address. Use a DHCP reservation, or run Manual setup again with the new address (see
+  address. Use a DHCP reservation, or delete the entry and add it again at the new address (see
   [Changing the panel's address](#changing-the-panels-address)).
 - **Occasional dropped connection during thermostat traffic.** The integration reconnects
   by itself. Entities may be briefly unavailable.
@@ -699,7 +699,7 @@ to retry (see [the example](#retry-automatic-arming-after-a-failure)).
 | *Unable to authenticate with the panel…* | The access code and passphrase are correct. These are the linking credentials set by your installer, not your alarm code. Confirm them with your installer if in doubt. |
 | *The panel requires linking…* | Enter the access code and passphrase again. |
 | *No panels were discovered…* | The panel is online and on the same network segment, and UDP broadcast on port 2362 isn't blocked. Otherwise use **Manual setup**. |
-| *This panel is already configured.* | The panel (matched by MAC address) already has an entry. |
+| *This panel is already configured.* | The panel already has an entry, matched by MAC address or, when the panel reports no MAC or serial, by the same host and port. |
 
 ### Panel error messages
 
