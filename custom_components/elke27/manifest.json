@@ -16,7 +16,7 @@
     "elke27_lib"
   ],
   "requirements": [
-    "elke27@git+https://github.com/mitchmitchell/elke27@12ff00da9bd31b3ea5b8f4299f30a1405bffb1ce"
+    "elke27@git+https://github.com/mitchmitchell/elke27@e0abea2c05ea9bdfd5460cc893909a892c26f3c1"
   ],
   "version": "0.1.8"
 }
