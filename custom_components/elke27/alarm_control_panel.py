@@ -18,6 +18,7 @@ from homeassistant.components.alarm_control_panel.const import (
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .arming import ZoneBypassFailedError, area_faulted_zones, is_definitive_refusal
 from .const import DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import (
@@ -26,7 +27,6 @@ from .entity import (
     raise_if_not_sent,
     unique_base,
 )
-from .hub import ZoneBypassFailedError, area_faulted_zones, is_definitive_refusal
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -239,6 +239,8 @@ def _get_area(snapshot: PanelSnapshot, area_id: int) -> AreaState | None:
 def _area_state_to_ha(area: AreaState) -> AlarmControlPanelState | None:
     if area.alarm_active:
         return AlarmControlPanelState.TRIGGERED
+    if area.arming:
+        return AlarmControlPanelState.ARMING
     if area.arm_mode is None or area.arm_mode is ArmMode.DISARMED:
         return AlarmControlPanelState.DISARMED
     if area.arm_mode is ArmMode.ARMED_STAY:

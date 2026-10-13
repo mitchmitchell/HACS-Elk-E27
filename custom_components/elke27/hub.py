@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-import dataclasses
 import logging
 import random
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 from elke27_lib import (
-    ArmMode,
     ClientConfig,
     Elke27Event,
     EventType,
@@ -21,38 +18,59 @@ from elke27_lib import (
 )
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
-    E27Error,
-    E27NotReady,
-    E27Timeout,
-    E27TransportError,
-    Elke27AuthError,
-    Elke27ConnectionError,
-    Elke27CryptoError,
-    Elke27DisconnectedError,
     Elke27Error,
-    Elke27InvalidArgument,
     Elke27LinkRequiredError,
-    Elke27PanelError,
-    Elke27PermissionError,
     Elke27PinRequiredError,
-    Elke27TimeoutError,
 )
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import (
-    ConfigEntryNotReady,
-    HomeAssistantError,
-    ServiceValidationError,
-)
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 
+from .arming import (  # noqa: F401  # re-exported from hub for compatibility (D1 move)
+    _ARMED_MODES,
+    _ZONE_STATUS_BYPASSED,
+    _ZONE_STATUS_KNOWN,
+    _ZONE_STATUS_VIOLATED,
+    ARM_STATUS_POLL_INTERVAL,
+    ARM_STATUS_POLL_TIMEOUT,
+    PANEL_ERROR_ALREADY_ARMED,
+    PIN_REQUIRED_REASON,
+    ZoneBypassFailedError,
+    _arm_mode_from_text,
+    _library_arm_mode,
+    _validated_pin,
+    _zone_with_status_char,
+    area_armed_from_status_reply,
+    area_arming_from_status_reply,
+    area_faulted_zones,
+    area_is_armed,
+    area_skip_automatic_arm_from_status_reply,
+    is_already_armed_refusal,
+    is_definitive_refusal,
+    snapshot_with_status,
+    zone_bypass_label,
+)
 from .const import (
     DOMAIN,
     ISSUE_RECONNECT_FAILED,
     READY_TIMEOUT,
     RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
 )
+from .errors import (  # noqa: F401  # re-exported from hub for compatibility (D1 move)
+    AUTH_ERRORS,
+    COMMAND_ERRORS,
+    CONNECTION_MESSAGE,
+    NOT_ACCEPTED_MESSAGE,
+    TIMEOUT_MESSAGE,
+    _error_message,
+    is_connection_error,
+    is_reconnect_retryable,
+    is_timeout_error,
+    panel_error_code,
+)
 from .identity import build_client_identity
+from .panel_mac import async_verify_panel_mac
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
@@ -62,38 +80,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
-TIMEOUT_MESSAGE = (
-    "The panel did not respond in time; the command may not have been applied."
-)
-CONNECTION_MESSAGE = (
-    "Lost connection to the panel; the command may not have been applied."
-)
-# Every library failure a command can surface: elke27's public errors, its
-# lower-level E27 errors (async_execute returns these), and raw timeouts/OS errors.
-COMMAND_ERRORS: tuple[type[Exception], ...] = (
-    Elke27Error,
-    Elke27InvalidArgument,
-    E27Error,
-    TimeoutError,
-    OSError,
-)
-AUTH_ERRORS: tuple[type[Exception], ...] = (
-    Elke27LinkRequiredError,
-    Elke27AuthError,
-    Elke27CryptoError,
-)
-RECONNECT_RETRY_ERRORS: tuple[type[Exception], ...] = (
-    *COMMAND_ERRORS,
-    ConfigEntryNotReady,
-)
 
 # Seconds to wait before re-reading a light's status after a set_status.
 LIGHT_REFRESH_DELAY = 3.0
-# How long automatic arming waits for area_get_status to show armed after a
-# prior arm (for example a queued alarm_arm_automatic on the same area).
-ARM_STATUS_POLL_INTERVAL = 0.25
-ARM_STATUS_POLL_TIMEOUT = 2.5
 
 
 class Elke27Hub:
@@ -193,6 +182,7 @@ class Elke27Hub:
                     self._handle_connection_event
                 )
                 self._resubscribe_typed_callbacks()
+                self._schedule_panel_mac_check()
                 if self._unavailable_logged:
                     _LOGGER.info("Panel connection restored")
                     self._unavailable_logged = False
@@ -267,8 +257,8 @@ class Elke27Hub:
         command replies at all. Each request is sent once; if one fails, that
         part falls back to the client snapshot for zone data only.
 
-        The second value is whether area_get_status reported armed (True/False),
-        or None when that request failed.
+        The second value is whether the area_get_status reply reported armed or
+        exit-delay arming (True/False), or None when that request failed.
         """
         return await self._async_area_state_snapshot(area_id, include_zones=True)
 
@@ -295,7 +285,7 @@ class Elke27Hub:
         snapshot = snapshot_with_status(
             client.get_snapshot(), area_id, area_payload, zones_payload
         )
-        return snapshot, area_armed_from_status_reply(area_payload)
+        return snapshot, area_skip_automatic_arm_from_status_reply(area_payload)
 
     async def async_poll_until_area_armed(
         self,
@@ -304,10 +294,10 @@ class Elke27Hub:
         gate: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[PanelSnapshot | None, bool]:
         """
-        Poll area_get_status until the panel reports armed or the timeout elapses.
+        Poll area_get_status until the panel reports armed or exit delay arming.
 
-        A failed read is not armed and polling continues. Return the last snapshot
-        and whether a reply showed armed before the timeout.
+        A failed read does not skip and polling continues. Return the last snapshot
+        and whether a reply showed armed or arming before the timeout.
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + ARM_STATUS_POLL_TIMEOUT
@@ -315,8 +305,8 @@ class Elke27Hub:
         while True:
             if gate is not None:
                 await gate()
-            last, armed = await self.async_refresh_area_arm_status(area_id)
-            if armed is True:
+            last, skip = await self.async_refresh_area_arm_status(area_id)
+            if skip is True:
                 return last, True
             if loop.time() >= deadline:
                 return last, False
@@ -813,6 +803,15 @@ class Elke27Hub:
             self._async_reconnect_loop(), "elke27 reconnect"
         )
 
+    @callback
+    def _schedule_panel_mac_check(self) -> None:
+        """Verify (or fill) the entry's panel MAC by unicast discovery."""
+        if self._entry is None:
+            return
+        self._create_background_task(
+            async_verify_panel_mac(self._hass, self._entry), "elke27 panel mac check"
+        )
+
     def _create_background_task(
         self, coro: Coroutine[Any, Any, None], name: str
     ) -> asyncio.Task[None]:
@@ -956,214 +955,6 @@ class Elke27Hub:
             await asyncio.sleep(delay)
 
 
-PIN_REQUIRED_REASON = "a user code is required"
-
-
-class ZoneBypassFailedError(HomeAssistantError):
-    """Bypass could not be applied to a zone."""
-
-    def __init__(
-        self,
-        zone: ZoneState,
-        reason: str,
-        bypassed_zones: list[ZoneState] | tuple[ZoneState, ...] = (),
-        *,
-        pin_required: bool = False,
-    ) -> None:
-        """Initialize with the failed zone, the reason and zones already bypassed."""
-        self.zone = zone
-        self.reason = reason
-        self.bypassed_zones: tuple[ZoneState, ...] = tuple(bypassed_zones)
-        self.pin_required = pin_required
-        message = f"{zone_bypass_label(zone)}: {reason}"
-        if self.bypassed_zones:
-            labels = ", ".join(zone_bypass_label(item) for item in self.bypassed_zones)
-            message = f"{message} (already bypassed: {labels})"
-        super().__init__(message)
-
-
-# The panel answers "not allowed when armed" (ELKERR_NOT_ALLOWED_WHEN_ARMED).
-PANEL_ERROR_ALREADY_ARMED = 11028
-
-_ARMED_MODES = frozenset({ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY, ArmMode.ARMED_NIGHT})
-
-
-_ZONE_STATUS_BYPASSED = frozenset("DEF")
-_ZONE_STATUS_VIOLATED = frozenset("9AB")
-_ZONE_STATUS_KNOWN = frozenset("0123456789ABCDEF")
-
-
-def _arm_mode_from_text(value: Any) -> ArmMode | None:
-    """Map a panel arm_state string to an ArmMode (as elke27 does)."""
-    if not isinstance(value, str):
-        return None
-    lowered = value.lower()
-    if "disarm" in lowered:
-        return ArmMode.DISARMED
-    if "stay" in lowered:
-        return ArmMode.ARMED_STAY
-    if "away" in lowered:
-        return ArmMode.ARMED_AWAY
-    if "night" in lowered:
-        return ArmMode.ARMED_NIGHT
-    return None
-
-
-def _zone_with_status_char(zone: ZoneState, ch: str) -> ZoneState:
-    """Apply one zone_get_all_zones_status character (elke27's encoding)."""
-    if ch not in _ZONE_STATUS_KNOWN:
-        return zone
-    if ch in _ZONE_STATUS_BYPASSED:
-        return dataclasses.replace(zone, bypassed=True)
-    return dataclasses.replace(zone, bypassed=False, open=ch in _ZONE_STATUS_VIOLATED)
-
-
-def snapshot_with_status(
-    snapshot: PanelSnapshot | None,
-    area_id: int,
-    area_payload: Mapping[str, Any] | None,
-    zones_payload: Mapping[str, Any] | None,
-) -> PanelSnapshot | None:
-    """Overlay area and zone status reply payloads on a snapshot."""
-    if snapshot is None:
-        return None
-    areas = dict(snapshot.areas)
-    zones = dict(snapshot.zones)
-    if area_payload is not None and area_id in areas:
-        mode = _arm_mode_from_text(
-            area_payload.get("arm_state") or area_payload.get("armed_state")
-        )
-        if mode is not None:
-            areas[area_id] = dataclasses.replace(areas[area_id], arm_mode=mode)
-    status = zones_payload.get("status") if zones_payload is not None else None
-    if isinstance(status, str):
-        for index, ch in enumerate("".join(status.split()).upper()):
-            zone = zones.get(index + 1)
-            if zone is not None:
-                zones[index + 1] = _zone_with_status_char(zone, ch)
-    return dataclasses.replace(
-        snapshot,
-        areas=MappingProxyType(areas),
-        zones=MappingProxyType(zones),
-    )
-
-
-def area_armed_from_status_reply(
-    area_payload: Mapping[str, Any] | None,
-) -> bool | None:
-    """
-    Return whether area_get_status reported an armed mode.
-
-    None when the request failed: callers must not treat the cached snapshot as
-    armed for skip or no-op decisions.
-    """
-    if area_payload is None:
-        return None
-    mode = _arm_mode_from_text(
-        area_payload.get("arm_state") or area_payload.get("armed_state")
-    )
-    if mode is None:
-        return False
-    return mode in _ARMED_MODES
-
-
-def area_is_armed(snapshot: PanelSnapshot | None, area_id: int) -> bool:
-    """Return True when the snapshot shows the area in any armed state."""
-    if snapshot is None:
-        return False
-    area = snapshot.areas.get(area_id)
-    return area is not None and area.arm_mode in _ARMED_MODES
-
-
-def panel_error_code(err: BaseException | None) -> int | None:
-    """Return the panel error code on an error or its cause chain."""
-    while err is not None:
-        code = getattr(err, "panel_error_code", None)
-        if code is not None:
-            return int(code)
-        err = err.__cause__
-    return None
-
-
-def is_already_armed_refusal(err: BaseException) -> bool:
-    """Return True when the panel refused because the area is already armed."""
-    return panel_error_code(err) == PANEL_ERROR_ALREADY_ARMED
-
-
-def is_definitive_refusal(err: BaseException) -> bool:
-    """
-    Return True when a failed command is known not to have taken effect.
-
-    Definitive: a panel refusal with an error code, a missing user code, an
-    invalid argument, or a check made before anything was sent: an integration
-    check (a HomeAssistantError with no library cause), Elke27PermissionError
-    (elke27 raises it only from its pre-send session and disarmed-state checks)
-    and Elke27AuthError (raised for arm only by elke27's pre-send PIN check).
-    Not definitive, because the panel may have acted: timeouts, dropped or
-    not-ready sessions (Elke27ConnectionError can also come from the receive
-    path), Elke27LinkRequiredError (not reachable from an arm in elke27, so kept
-    conservative), the generic "Failed to arm area." protocol error, and any
-    unknown error. "Already armed" (11028) is a panel code but must not cause a
-    rollback; callers check is_already_armed_refusal first.
-    """
-    if isinstance(
-        err,
-        (
-            Elke27PinRequiredError,
-            Elke27InvalidArgument,
-            Elke27PanelError,
-            Elke27PermissionError,
-            Elke27AuthError,
-        ),
-    ):
-        return True
-    if getattr(err, "panel_error_code", None) is not None:
-        return True
-    if isinstance(err, HomeAssistantError):
-        cause = err.__cause__
-        if cause is None:
-            return True
-        return is_definitive_refusal(cause)
-    return False
-
-
-def area_faulted_zones(snapshot: PanelSnapshot | None, area_id: int) -> list[ZoneState]:
-    """Return open, non-bypassed zones assigned to the given area."""
-    if snapshot is None:
-        return []
-    return [zone for zone in snapshot.faulted_zones if zone.area_id == area_id]
-
-
-def zone_bypass_label(zone: ZoneState) -> str:
-    """Return a user-facing label for a zone, such as 'Perimeter (zone 16)'."""
-    name = (zone.name or "").strip()
-    if name:
-        return f"{name} (zone {zone.zone_id})"
-    return f"Zone {zone.zone_id}"
-
-
-def _validated_pin(pin: str) -> str:
-    """Return the user code as a digit string, or raise if it is not numeric."""
-    value = str(pin).strip()
-    if not value.isdigit():
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="code_not_numeric"
-        )
-    return value
-
-
-def _library_arm_mode(mode: Any) -> ArmMode:
-    """Map an integration arm request to the elke27 arm mode."""
-    # The E27 has Away and Stay arming only; it has no Night mode.
-    if mode in (ArmMode.ARMED_STAY, ArmMode.ARMED_AWAY):
-        return mode
-    # Custom bypass: the entity bypasses open zones first, then arms away.
-    if isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS":
-        return ArmMode.ARMED_AWAY
-    msg = "Arm mode is not supported."
-    raise HomeAssistantError(msg)
-
-
 def _log_command_failure(
     kind: str, target_id: int, action: str, err: Exception
 ) -> None:
@@ -1180,43 +971,6 @@ def _log_command_failure(
         )
     else:
         _LOGGER.warning("%s %s %s failed: %s", kind, target_id, action, err)
-
-
-def is_reconnect_retryable(err: BaseException) -> bool:
-    """Return True when a failed reconnect should be retried with backoff."""
-    if isinstance(err, ConfigEntryNotReady):
-        return True
-    return is_connection_error(err) or is_timeout_error(err)
-
-
-def is_timeout_error(err: BaseException) -> bool:
-    """Return True for any elke27 or raw timeout."""
-    return isinstance(err, (Elke27TimeoutError, E27Timeout, TimeoutError))
-
-
-def is_connection_error(err: BaseException) -> bool:
-    """Return True for any elke27 transport/session failure."""
-    if is_timeout_error(err):
-        return False
-    return isinstance(
-        err,
-        (
-            Elke27ConnectionError,
-            Elke27DisconnectedError,
-            E27TransportError,
-            E27NotReady,
-            OSError,
-        ),
-    )
-
-
-def _error_message(err: Exception) -> str:
-    """Return a user-facing message for a library error."""
-    if is_timeout_error(err):
-        return TIMEOUT_MESSAGE
-    if is_connection_error(err):
-        return CONNECTION_MESSAGE
-    return getattr(err, "user_message", None) or str(err) or type(err).__name__
 
 
 def _connection_state(event: Elke27Event) -> bool | None:

@@ -13,7 +13,13 @@ from elke27_lib import redact_for_diagnostics
 
 from homeassistant.const import CONF_HOST, CONF_PORT
 
-from .const import CONF_INTEGRATION_SERIAL, CONF_LINK_KEYS_JSON, MANUFACTURER_NUMBER
+from .const import (
+    CONF_INTEGRATION_SERIAL,
+    CONF_LINK_KEYS_JSON,
+    CONF_PANEL_MAC,
+    CONF_PANEL_MAC_FILLED,
+    MANUFACTURER_NUMBER,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -38,6 +44,10 @@ async def async_get_config_entry_diagnostics(
 
     return {
         "entry_id": entry.entry_id,
+        # A MAC is not a secret; exposed so identity can be checked on hardware.
+        "unique_id": entry.unique_id,
+        "panel_mac": entry.data.get(CONF_PANEL_MAC),
+        "panel_mac_filled": entry.data.get(CONF_PANEL_MAC_FILLED, False),
         "host": entry.data.get(CONF_HOST),
         "port": entry.data.get(CONF_PORT),
         "manufacturer_number": MANUFACTURER_NUMBER,

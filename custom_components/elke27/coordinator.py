@@ -20,7 +20,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
-from .hub import AUTH_ERRORS, COMMAND_ERRORS, is_connection_error, is_timeout_error
+from .errors import AUTH_ERRORS, COMMAND_ERRORS, is_connection_error, is_timeout_error
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Iterable
