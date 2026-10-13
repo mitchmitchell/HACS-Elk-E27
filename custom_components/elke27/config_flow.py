@@ -37,6 +37,7 @@ from .const import (
     CONF_INTEGRATION_SERIAL,
     CONF_LINK_KEYS_JSON,
     CONF_PANEL,
+    CONF_PANEL_MAC,
     DEFAULT_PORT,
     DOMAIN,
     READY_TIMEOUT,
@@ -48,6 +49,12 @@ from .identity import (
     panel_identity_matches,
     panel_mac_from_info,
     panel_serial_tier,
+)
+from .panel_mac import (
+    async_discover_panel_mac,
+    async_reauth_mac_fill,
+    normalize_panel_mac,
+    panel_mac_from_discovered,
 )
 
 if TYPE_CHECKING:
@@ -385,6 +392,19 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors=errors,
             )
 
+        # E1a: the panel MAC comes only from discovery. Use the discovered panel
+        # when there is one, otherwise send a unicast discovery to the host. No
+        # reply means no MAC (fall back to the next identity tier, no abort).
+        # On reauth the selected panel is the saved discovery record, so its MAC
+        # is stale: always rediscover the live panel at the host.
+        panel_mac = (
+            panel_mac_from_discovered(self._selected_panel) if entry is None else None
+        )
+        if panel_mac is None:
+            panel_mac = await async_discover_panel_mac(host)
+        if panel_mac is not None:
+            panel_info = {**panel_info, "mac": format_mac(panel_mac)}
+
         link_keys_json = link_keys.to_json()
         data: dict[str, Any] = {
             CONF_HOST: host,
@@ -403,6 +423,14 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         }
 
         if entry is not None:
+            stored_mac = normalize_panel_mac(entry.data.get(CONF_PANEL_MAC))
+            if stored_mac and panel_mac and stored_mac != panel_mac:
+                return self.async_abort(reason="wrong_panel")
+            mac_refused = False
+            if panel_mac and not stored_mac:
+                mac_fill = async_reauth_mac_fill(self.hass, entry, panel_mac)
+                mac_refused = not mac_fill
+                data.update(mac_fill)
             panel_unique_id = config_entry_unique_id(panel_info)
             if entry.unique_id is None:
                 if (
@@ -415,12 +443,15 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     panel_info, stored_panel
                 ):
                     return self.async_abort(reason="wrong_panel")
-                if panel_unique_id is not None:
+                if panel_unique_id is not None and not mac_refused:
                     _async_try_backfill_config_entry_unique_id(
                         self.hass, entry, panel_unique_id
                     )
             else:
                 candidates = _reauth_candidate_unique_ids(panel_info)
+                if panel_mac is None and stored_mac:
+                    # No discovery reply: trust the stored MAC for the check.
+                    candidates.add(format_mac(stored_mac))
                 if entry.unique_id not in candidates:
                     return self.async_abort(reason="wrong_panel")
             return self.async_update_reload_and_abort(
@@ -438,6 +469,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._duplicate_panel_entry_exists(host, port, panel_info):
             return self.async_abort(reason="already_configured")
 
+        if panel_mac is not None:
+            data[CONF_PANEL_MAC] = panel_mac
         title = _panel_name(panel_info) or host
 
         result = self.async_create_entry(title=title, data=data, options=options)
@@ -517,8 +550,13 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> bool:
         """Return True when another entry already represents this panel."""
         identity = config_entry_unique_id(panel_info)
+        live_mac = normalize_panel_mac(panel_mac_from_info(panel_info))
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             if identity is not None and entry.unique_id == identity:
+                return True
+            if live_mac is not None and (
+                normalize_panel_mac(entry.data.get(CONF_PANEL_MAC)) == live_mac
+            ):
                 return True
             if (
                 entry.data.get(CONF_HOST) == host

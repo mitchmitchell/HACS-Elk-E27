@@ -70,6 +70,7 @@ from .errors import (  # noqa: F401  # re-exported from hub for compatibility (D
     panel_error_code,
 )
 from .identity import build_client_identity
+from .panel_mac import async_verify_panel_mac
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
@@ -178,6 +179,7 @@ class Elke27Hub:
                     self._handle_connection_event
                 )
                 self._resubscribe_typed_callbacks()
+                self._schedule_panel_mac_check()
                 if self._unavailable_logged:
                     _LOGGER.info("Panel connection restored")
                     self._unavailable_logged = False
@@ -794,6 +796,15 @@ class Elke27Hub:
         _LOGGER.debug("Creating reconnect task")
         self._reconnect_task = self._create_background_task(
             self._async_reconnect_loop(), "elke27 reconnect"
+        )
+
+    @callback
+    def _schedule_panel_mac_check(self) -> None:
+        """Verify (or fill) the entry's panel MAC by unicast discovery."""
+        if self._entry is None:
+            return
+        self._create_background_task(
+            async_verify_panel_mac(self._hass, self._entry), "elke27 panel mac check"
         )
 
     def _create_background_task(

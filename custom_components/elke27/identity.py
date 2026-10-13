@@ -32,6 +32,19 @@ def panel_serial_from_info(panel_info: dict[str, Any]) -> str | None:
     return value or None
 
 
+def is_placeholder_serial(value: str | None) -> bool:
+    """
+    Return True for serials that are not unique per panel (e.g. 00000001).
+
+    Mirrors elke27_lib's rule: empty, all zeros, all F, or a value of 0/1 with
+    any zero padding.
+    """
+    text = (value or "").strip().upper()
+    if not text or set(text) <= {"0"} or set(text) <= {"F"}:
+        return True
+    return text.lstrip("0") == "1"
+
+
 def config_entry_unique_id(panel_info: dict[str, Any]) -> str | None:
     """Return config entry unique_id: MAC, panel serial, or None (dedupe host:port)."""
     mac = panel_mac_from_info(panel_info)
