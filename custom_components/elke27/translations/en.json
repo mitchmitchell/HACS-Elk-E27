@@ -121,6 +121,14 @@
     "duplicate_unique_id": {
       "title": "Duplicate panel configuration",
       "description": "This entry could not be assigned identity {candidate} because another entry ({other_entry}) already uses it. Remove one of the duplicate Elk E27 entries under Settings → Devices & services."
+    },
+    "reconnect_failed": {
+      "title": "Panel connection keeps failing",
+      "description": "Home Assistant could not reconnect to {name}. Check that the panel is powered and reachable on the network. The integration will keep retrying."
+    },
+    "panel_mac_mismatch": {
+      "title": "Different panel at this address",
+      "description": "The panel at {host} reports MAC {discovered}, but this entry was set up for the panel with MAC {stored}. The existing identity was kept. If you replaced the panel, delete this entry and add the new panel; otherwise check the address of this entry."
     }
   },
   "exceptions": {

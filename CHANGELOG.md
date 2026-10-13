@@ -6,21 +6,34 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ## [Unreleased] - 0.1.9 (draft; #50 not merged)
 
 ### Changed
-- Requires `elke27==0.3.12`, same as 0.1.8 (#54). #50's manifest still pins 0.3.11.
+- Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/), same as 0.1.8.1. #50's manifest still pins 0.3.11 and must move to 0.3.13.
 - The integration always starts from an empty panel snapshot, never `None` (#50).
 - A zone with no reported open/closed state shows unknown with the default icon (#50).
 - Strict mypy runs in CI. Unused snapshot helpers were removed; link-check probing still
   uses `request_link_check` when the client supports it (#50).
 
 ### Breaking
-- None found compared with 0.1.8 (checked at #50 6f1211b). The legacy `pin` cleanup is
-  kept, and the unique-ID migration was already removed in 0.1.8. Upgrading from 0.1.7?
-  Follow the 0.1.8 delete-and-re-add steps.
+- None found compared with 0.1.8 (checked at #50 6f1211b); not yet re-checked against
+  0.1.8.1, since #50 predates #60. Upgrading from 0.1.8 or 0.1.8.1: update and restart, no
+  re-add. Upgrading from 0.1.7? Follow the 0.1.8 delete-and-re-add steps.
 
-## [Unreleased] - 0.1.8 (draft; unreleased until the exit-delay double-arm fix (#54) lands)
+## [0.1.8.1] - 2026-10-13
+
+### Added
+- Panel identity from the discovery MAC: the MAC is stored on the entry and used as its unique ID; 0.1.8 entries are filled in place on connect with no re-add (#60).
+- Repairs issue "Different panel at this address" when the panel's MAC doesn't match the stored one (#60).
+- Diagnostics include `panel_mac`, `panel_mac_filled` and the entry unique ID (#60).
+
+### Changed
+- Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/) (#60).
+- README address-change steps match the shipped identity behaviour (#59).
+
+See [release notes](docs/release-notes/v0.1.8.1.md).
+
+## [0.1.8] - 2026-10-13
 
 0.1.8 bundles **#48** (merged `2e589767`), **#53** (reconnect policy, merged `bac4c1ac`), and **#54**
-(exit-delay / `elke27` 0.3.12; pending). **Batch C (#50)** is planned for **0.1.9**.
+(exit-delay / `elke27` 0.3.12, merged `e0dbdc11`). **Batch C (#50)** is planned for **0.1.9**.
 
 ### Fixed
 - No duplicate arm when two `elke27.alarm_arm_automatic` calls for the same area overlap:
@@ -31,7 +44,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   status read when the area is fully armed or exit-delay arming (#54).
 
 ### Changed
-- Requires [elke27 0.3.12](https://pypi.org/project/elke27/0.3.12/) ([release notes](https://github.com/mitchmitchell/elke27/releases/tag/v0.3.12)) (#54, pending; main still pins 0.3.11).
+- Requires [elke27 0.3.12](https://pypi.org/project/elke27/0.3.12/) ([release notes](https://github.com/mitchmitchell/elke27/releases/tag/v0.3.12)) (#54).
 - Setup: bad credentials or an invalid link show a re-link prompt. Temporary errors retry
   setup (#48).
 - A re-link prompt starts when the link is rejected while reconnecting, refreshing or running
