@@ -290,7 +290,10 @@ to do depends on whether the integration knows the panel's MAC address. It learn
 network discovery, either during setup or, for entries added before 0.1.8.x, on the first
 connect after upgrading.
 
-**The MAC is known:**
+Upgraded entries keyed by a real panel serial keep that unique ID after the MAC fill, so
+changing their address means deleting and re-adding the entry (the steps below for an unknown MAC).
+
+**The MAC is known** (and the entry is not keyed by a real panel serial):
 
 1. Go to **Settings → Devices & services → Add integration → Elk E27 Alarm Engine
    Integration → Manual setup**.
@@ -884,7 +887,8 @@ whole °F, so setpoints you set in °C are rounded.
 
 Update in HACS and restart Home Assistant. No delete and re-add is needed from 0.1.8: on the
 first connect, the panel MAC from network discovery is stored and becomes the entry's unique
-ID. Entity and device IDs stay on the config entry ID. See the
+ID, unless the entry is keyed by a real panel serial, which it keeps (changing the address of
+such an entry means deleting and re-adding it). Entity and device IDs stay on the config entry ID. See the
 [0.1.8.1 release notes](docs/release-notes/v0.1.8.1.md).
 
 ### To 0.1.8
