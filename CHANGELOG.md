@@ -3,6 +3,19 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
+## [0.1.8.1] - 2026-10-13
+
+### Added
+- Panel identity from the discovery MAC: the MAC is stored on the entry and used as its unique ID; 0.1.8 entries are filled in place on connect with no re-add (#60).
+- Repairs issue "Different panel at this address" when the panel's MAC doesn't match the stored one (#60).
+- Diagnostics include `panel_mac`, `panel_mac_filled` and the entry unique ID (#60).
+
+### Changed
+- Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/) (#60).
+- README address-change steps match the shipped identity behaviour (#59).
+
+See [release notes](docs/release-notes/v0.1.8.1.md).
+
 ## [0.1.8] - 2026-10-13
 
 0.1.8 bundles **#48** (merged `2e589767`), **#53** (reconnect policy, merged `bac4c1ac`), and **#54**

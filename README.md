@@ -193,6 +193,7 @@ or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.8 | [0.3.12](https://pypi.org/project/elke27/0.3.12/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
@@ -879,6 +880,13 @@ whole °F, so setpoints you set in °C are rounded.
 
 ## Upgrading
 
+### To 0.1.8.1
+
+Update in HACS and restart Home Assistant. No delete and re-add is needed from 0.1.8: on the
+first connect, the panel MAC from network discovery is stored and becomes the entry's unique
+ID. Entity and device IDs stay on the config entry ID. See the
+[0.1.8.1 release notes](docs/release-notes/v0.1.8.1.md).
+
 ### To 0.1.8
 
 > **Upgrading from 0.1.7:** Delete each Elk E27 integration entry and add it again. There is
@@ -894,7 +902,7 @@ again with the same linking credentials.
   reports one, otherwise the panel **hardware serial**, otherwise the **config entry ID**.
   **Panels today:** the panel's own messages carry no MAC, and current firmware reports a
   placeholder serial, which is ignored. The MAC seen during network discovery is not used for
-  identity in 0.1.8. Without a MAC or real serial, the config entry
+  identity in 0.1.8 (0.1.8.1 adds it). Without a MAC or real serial, the config entry
   **`unique_id` stays unset**, setup dedupes
   on **host:port**, and devices and entities are keyed on the **config entry ID**. An IP change
   counts as a new panel: **re-link can't change the address** (it reuses stored host and port),
