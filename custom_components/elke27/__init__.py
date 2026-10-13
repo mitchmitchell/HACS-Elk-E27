@@ -98,6 +98,48 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
             _handle_zone_bypass,
             schema=SERVICE_ZONE_BYPASS_SCHEMA,
         )
+    # TEST-ONLY (E1-8): probe whether the panel accepts a given client sn.
+    if not hass.services.has_service(DOMAIN, "debug_probe_client_sn"):
+        import voluptuous as vol
+        from elke27_lib import ClientConfig, Elke27Client, LinkKeys
+        from homeassistant.core import SupportsResponse
+
+        from .identity import build_client_identity
+
+        async def _probe(call: ServiceCall) -> dict:
+            entry = hass.config_entries.async_get_entry(call.data["entry_id"])
+            if entry is None:
+                return {"ok": False, "stage": "entry", "error": "entry not found"}
+            sn = call.data["sn"]
+            client = Elke27Client(ClientConfig())
+            stage = "identity"
+            try:
+                client.set_client_identity(build_client_identity(sn))
+                stage = "connect"
+                await client.async_connect(
+                    entry.data[CONF_HOST],
+                    entry.data.get(CONF_PORT, 2101),
+                    LinkKeys.from_json(entry.data[CONF_LINK_KEYS_JSON]),
+                )
+                stage = "ready"
+                ready = await client.wait_ready(timeout_s=20)
+                return {"ok": bool(ready), "stage": stage, "sn": sn, "sn_len": len(sn)}
+            except Exception as err:  # noqa: BLE001
+                return {"ok": False, "stage": stage, "sn": sn, "sn_len": len(sn),
+                        "error": f"{type(err).__name__}: {err}"}
+            finally:
+                try:
+                    await client.async_disconnect()
+                except Exception:  # noqa: BLE001
+                    pass
+
+        hass.services.async_register(
+            DOMAIN,
+            "debug_probe_client_sn",
+            _probe,
+            schema=vol.Schema({vol.Required("entry_id"): str, vol.Required("sn"): str}),
+            supports_response=SupportsResponse.ONLY,
+        )
     return True
 
 
