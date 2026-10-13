@@ -6,11 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from elke27_lib.errors import E27Error, Elke27Error
-import voluptuous as vol  # noqa: F401  # tests reach vol via the package
 
-from homeassistant.components import (  # noqa: F401  # tests patch it via the package
-    persistent_notification,
-)
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import callback
 from homeassistant.exceptions import (

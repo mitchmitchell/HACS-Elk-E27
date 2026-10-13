@@ -37,8 +37,7 @@ if _HAS_DEPS:
     from test_entities import _area_entity
     from test_hub_bypass import _hub, _snapshot, _two_area_snapshot
 
-    from custom_components.elke27 import services as integration
-    from custom_components.elke27 import hub as elke27_hub
+    from custom_components.elke27 import hub as elke27_hub, services as integration
     from custom_components.elke27.hub import ZoneBypassFailedError
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
