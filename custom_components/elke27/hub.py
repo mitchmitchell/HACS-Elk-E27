@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 import logging
-import random
 from typing import TYPE_CHECKING, Any
 
 from elke27_lib import (
@@ -17,15 +16,9 @@ from elke27_lib import (
     ZoneState,
 )
 from elke27_lib.client import Elke27Client
-from elke27_lib.errors import (
-    Elke27Error,
-    Elke27LinkRequiredError,
-    Elke27PinRequiredError,
-)
+from elke27_lib.errors import Elke27LinkRequiredError, Elke27PinRequiredError
 
-from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
-from homeassistant.helpers import issue_registry as ir
 
 from .arming import (  # noqa: F401  # re-exported from hub for compatibility (D1 move)
     _ARMED_MODES,
@@ -49,12 +42,7 @@ from .arming import (  # noqa: F401  # re-exported from hub for compatibility (D
     snapshot_with_status,
     zone_bypass_label,
 )
-from .const import (
-    DOMAIN,
-    ISSUE_RECONNECT_FAILED,
-    READY_TIMEOUT,
-    RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
-)
+from .const import DOMAIN, READY_TIMEOUT
 from .errors import (  # noqa: F401  # re-exported from hub for compatibility (D1 move)
     AUTH_ERRORS,
     COMMAND_ERRORS,
@@ -68,9 +56,12 @@ from .errors import (  # noqa: F401  # re-exported from hub for compatibility (D
     panel_error_code,
 )
 from .identity import build_client_identity
+from .reconnect import ReconnectSupervisor
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
+
+    from homeassistant.core import HomeAssistant
 
     from .models import Elke27ConfigEntry
 
@@ -108,21 +99,24 @@ class Elke27Hub:
         self._client: Elke27Client | None = None
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._connect_lock = asyncio.Lock()
-        self._reauth_requested = False
         self._area_arm_locks: dict[int, asyncio.Lock] = {}
         self._arm_automatic_tasks: dict[int, set[asyncio.Task[Any]]] = {}
         self._disarm_cancelled: set[asyncio.Task[Any]] = set()
         self._disarm_pending: dict[int, int] = {}
         self._disarm_clear: dict[int, asyncio.Event] = {}
-        self._reconnect_task: asyncio.Task[None] | None = None
-        self._reconnect_attempts = 0
-        self._reconnect_non_transport_streak = 0
         self._stopping = False
         self._unavailable_logged = False
         self._reconnect_listeners: list[Callable[[], None]] = []
         self._typed_callbacks: dict[
             Callable[[Any], None], Callable[[], None] | None
         ] = {}
+        self._reconnect = ReconnectSupervisor(
+            hass,
+            entry,
+            connect=self._async_connect,
+            is_stopping=lambda: self._stopping,
+            on_reconnected=self._notify_reconnected,
+        )
 
     @property
     def client(self) -> Elke27Client | None:
@@ -195,14 +189,8 @@ class Elke27Hub:
     async def async_disconnect(self) -> None:
         """Disconnect the client and unregister event handlers."""
         self._stopping = True
-        task = self._reconnect_task
-        self._reconnect_task = None
-        if task is not None and not task.done():
-            task.cancel()
-            # Wait for the loop to finish without swallowing a cancellation
-            # of this call itself.
-            await asyncio.wait([task])
-        self._clear_reconnect_repair_issue()
+        await self._reconnect.async_stop()
+        self._reconnect.clear_issue()
         await self._async_disconnect()
 
     async def _async_disconnect(self) -> None:
@@ -778,21 +766,9 @@ class Elke27Hub:
         if connected is False:
             _LOGGER.debug("Panel disconnect event received; scheduling reconnect")
             self._log_unavailable()
-            self._hass.loop.call_soon_threadsafe(self._schedule_reconnect)
+            self._hass.loop.call_soon_threadsafe(self._reconnect.start)
         elif connected is True:
-            self._hass.loop.call_soon_threadsafe(self._cancel_reconnect)
-
-    @callback
-    def _schedule_reconnect(self) -> None:
-        """Schedule reconnection attempts when the panel disconnects."""
-        if self._stopping:
-            return
-        if self._reconnect_task is not None and not self._reconnect_task.done():
-            return
-        _LOGGER.debug("Creating reconnect task")
-        self._reconnect_task = self._create_background_task(
-            self._async_reconnect_loop(), "elke27 reconnect"
-        )
+            self._hass.loop.call_soon_threadsafe(self._reconnect.cancel)
 
     def _create_background_task(
         self, coro: Coroutine[Any, Any, None], name: str
@@ -801,16 +777,6 @@ class Elke27Hub:
         if self._entry is not None:
             return self._entry.async_create_background_task(self._hass, coro, name)
         return self._hass.async_create_background_task(coro, name)
-
-    @callback
-    def _cancel_reconnect(self) -> None:
-        """Cancel any scheduled reconnection attempts."""
-        if self._reconnect_task is None:
-            return
-        if not self._reconnect_task.done():
-            self._reconnect_task.cancel()
-        self._reconnect_task = None
-        self._reconnect_attempts = 0
 
     def add_reconnect_listener(
         self, listener: Callable[[], None]
@@ -843,98 +809,7 @@ class Elke27Hub:
 
     def start_reauth_once(self) -> None:
         """Start a reauth flow at most once until the entry reloads."""
-        if self._entry is None or self._reauth_requested:
-            return
-        self._reauth_requested = True
-        self._entry.async_start_reauth(self._hass)
-
-    @callback
-    def _reconnect_repair_issue_id(self) -> str | None:
-        """Return the repairs issue id for this entry's reconnect failures."""
-        if self._entry is None:
-            return None
-        return f"{ISSUE_RECONNECT_FAILED}_{self._entry.entry_id}"
-
-    @callback
-    def _clear_reconnect_repair_issue(self) -> None:
-        """Remove the reconnect repair issue when the link is healthy or unloading."""
-        issue_id = self._reconnect_repair_issue_id()
-        if issue_id is None:
-            return
-        ir.async_delete_issue(self._hass, DOMAIN, issue_id)
-
-    @callback
-    def _ensure_reconnect_repair_issue(self) -> None:
-        """Raise a repair issue after repeated non-transport reconnect failures."""
-        if self._entry is None:
-            return
-        issue_id = self._reconnect_repair_issue_id()
-        if issue_id is None:
-            return
-        ir.async_create_issue(
-            self._hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=False,
-            severity=ir.IssueSeverity.ERROR,
-            translation_key=ISSUE_RECONNECT_FAILED,
-            translation_placeholders={"name": self._entry.title},
-        )
-
-    def _log_reconnect_failure(self, err: Exception, *, transport: bool) -> None:
-        """Log a reconnect failure; non-transport streaks warn once per streak."""
-        if transport:
-            _LOGGER.debug("Reconnect attempt failed: %s", err)
-            return
-        first_in_streak = self._reconnect_non_transport_streak == 1
-        if first_in_streak:
-            if isinstance(err, Elke27Error):
-                _LOGGER.warning("Reconnect attempt failed: %s", err)
-            else:
-                _LOGGER.warning("Reconnect attempt failed: %s", err, exc_info=err)
-            return
-        _LOGGER.debug("Reconnect attempt failed: %s", err)
-
-    async def _async_reconnect_loop(self) -> None:
-        """Reconnect with exponential backoff until successful or stopped."""
-        while not self._stopping:
-            _LOGGER.debug("Reconnect attempt %s starting", self._reconnect_attempts + 1)
-            try:
-                await self._async_connect()
-            except AUTH_ERRORS as err:
-                # The panel no longer accepts the link: retrying cannot help.
-                _LOGGER.warning("Reconnect stopped; relink required: %s", err)
-                self._reconnect_attempts = 0
-                self._reconnect_non_transport_streak = 0
-                self._clear_reconnect_repair_issue()
-                self.start_reauth_once()
-                return
-            except Exception as err:  # noqa: BLE001
-                transport = is_reconnect_retryable(err)
-                if not transport:
-                    self._reconnect_non_transport_streak += 1
-                    if (
-                        self._reconnect_non_transport_streak
-                        >= RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD
-                    ):
-                        self._ensure_reconnect_repair_issue()
-                self._log_reconnect_failure(err, transport=transport)
-            else:
-                self._reconnect_attempts = 0
-                self._reconnect_non_transport_streak = 0
-                self._clear_reconnect_repair_issue()
-                self._notify_reconnected()
-                return
-            self._reconnect_attempts += 1
-            # Cap the base delay at 300 s before jitter (max sleep is about 360 s).
-            base_delay = min(300, 2**self._reconnect_attempts)
-            delay = base_delay * random.uniform(0.8, 1.2)  # noqa: S311
-            _LOGGER.debug(
-                "Reconnect attempt %s sleeping for %s seconds",
-                self._reconnect_attempts,
-                round(delay, 2),
-            )
-            await asyncio.sleep(delay)
+        self._reconnect.start_reauth_once()
 
 
 def _log_command_failure(

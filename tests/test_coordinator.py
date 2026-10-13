@@ -117,7 +117,7 @@ async def test_auto_reconnect_pushes_update_without_connected_event(
     mock_client.client.is_ready = True
     mock_client.client.async_refresh_csm.reset_mock()
     hub._stopping = False
-    await hub._async_reconnect_loop()
+    await hub._reconnect._async_run()
     await hass.async_block_till_done()
     assert hass.states.get(ALARM).state != STATE_UNAVAILABLE
     mock_client.client.async_refresh_csm.assert_awaited_once()
@@ -210,7 +210,7 @@ async def test_refresh_after_connect_auth_error_starts_reauth_once(
     await task
     await hass.async_block_till_done()
     assert len(_reauth_flows(hass)) == 1
-    assert hub._reauth_requested is True
+    assert hub._reconnect.reauth_requested is True
 
     await coordinator._async_refresh_after_connect()
     await hass.async_block_till_done()
@@ -237,7 +237,7 @@ async def test_debounced_refresh_auth_error_starts_reauth_once(
     await task
     await hass.async_block_till_done()
     assert len(_reauth_flows(hass)) == 1
-    assert mock_config_entry.runtime_data.hub._reauth_requested is True
+    assert mock_config_entry.runtime_data.hub._reconnect.reauth_requested is True
 
     mock_client.emit(_domain_event("lock"))
     await asyncio.sleep(0)

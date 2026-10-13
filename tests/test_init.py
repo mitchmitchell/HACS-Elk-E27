@@ -456,11 +456,11 @@ async def test_reconnect_auth_failure_starts_reauth(
 
     connects_before = mock_client.client.async_connect.await_count
     mock_client.client.async_connect.side_effect = Elke27LinkRequiredError("relink")
-    hub._reconnect_attempts = 3
-    await hub._async_reconnect_loop()
+    hub._reconnect._reconnect_attempts = 3
+    await hub._reconnect._async_run()
     await hass.async_block_till_done()
     assert mock_client.client.async_connect.await_count == connects_before + 1
-    assert hub._reconnect_attempts == 0
+    assert hub._reconnect._reconnect_attempts == 0
     assert len(_reauth_flows(hass)) == 1
 
 
@@ -475,12 +475,12 @@ async def test_reconnect_auth_failure_clears_repair_issue(
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     hub = mock_config_entry.runtime_data.hub
-    hub._ensure_reconnect_repair_issue()
+    hub._reconnect._ensure_reconnect_repair_issue()
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
 
     mock_client.client.async_connect.side_effect = Elke27LinkRequiredError("relink")
-    await hub._async_reconnect_loop()
+    await hub._reconnect._async_run()
     await hass.async_block_till_done()
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
     assert len(_reauth_flows(hass)) == 1
@@ -496,8 +496,8 @@ async def test_reconnect_auth_failure_starts_reauth_once(
     hub = mock_config_entry.runtime_data.hub
 
     mock_client.client.async_connect.side_effect = Elke27AuthError("bad")
-    await hub._async_reconnect_loop()
-    await hub._async_reconnect_loop()
+    await hub._reconnect._async_run()
+    await hub._reconnect._async_run()
     await hass.async_block_till_done()
     assert len(_reauth_flows(hass)) == 1
 
@@ -520,13 +520,13 @@ async def test_reconnect_backoff_jitter_scales_base_delay(
     mock_client.client.wait_ready.return_value = True
     sleep_mock = AsyncMock()
     with (
-        patch("custom_components.elke27.hub.asyncio.sleep", sleep_mock),
+        patch("custom_components.elke27.reconnect.asyncio.sleep", sleep_mock),
         patch(
-            "custom_components.elke27.hub.random.uniform",
+            "custom_components.elke27.reconnect.random.uniform",
             side_effect=[0.8, 1.2],
         ) as uniform_mock,
     ):
-        await hub._async_reconnect_loop()
+        await hub._reconnect._async_run()
     uniform_mock.assert_any_call(0.8, 1.2)
     sleep_mock.assert_any_await(2 * 0.8)
     sleep_mock.assert_any_await(4 * 1.2)
@@ -551,10 +551,10 @@ async def test_reconnect_transport_failure_retries_with_backoff(
     mock_client.client.wait_ready.return_value = True
     sleep_mock = AsyncMock()
     with (
-        patch("custom_components.elke27.hub.asyncio.sleep", sleep_mock),
-        patch("custom_components.elke27.hub.random.uniform", return_value=1.0),
+        patch("custom_components.elke27.reconnect.asyncio.sleep", sleep_mock),
+        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
     ):
-        await hub._async_reconnect_loop()
+        await hub._reconnect._async_run()
     transport_failures = 2
     assert (
         mock_client.client.async_connect.await_count
@@ -583,10 +583,10 @@ async def test_reconnect_protocol_error_retries(
     mock_client.client.wait_ready.return_value = True
     sleep_mock = AsyncMock()
     with (
-        patch("custom_components.elke27.hub.asyncio.sleep", sleep_mock),
-        patch("custom_components.elke27.hub.random.uniform", return_value=1.0),
+        patch("custom_components.elke27.reconnect.asyncio.sleep", sleep_mock),
+        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
     ):
-        await hub._async_reconnect_loop()
+        await hub._reconnect._async_run()
     await hass.async_block_till_done()
     assert mock_client.client.async_connect.await_count == connects_before + 2
     sleep_mock.assert_awaited_once_with(2)
@@ -623,10 +623,10 @@ async def test_reconnect_streak_counts_through_transport_error(
     mock_client.client.async_connect.side_effect = _connect_with_stop
     caplog.set_level(logging.DEBUG, logger=HUB_LOGGER)
     with (
-        patch("custom_components.elke27.hub.asyncio.sleep", AsyncMock()),
-        patch("custom_components.elke27.hub.random.uniform", return_value=1.0),
+        patch("custom_components.elke27.reconnect.asyncio.sleep", AsyncMock()),
+        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
     ):
-        await hub._async_reconnect_loop()
+        await hub._reconnect._async_run()
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
     failure_logs = _reconnect_failure_log_records(caplog)
@@ -656,10 +656,10 @@ async def test_reconnect_non_transport_logs_warning_once_then_debug(
     mock_client.client.wait_ready.return_value = True
     caplog.set_level(logging.DEBUG, logger=HUB_LOGGER)
     with (
-        patch("custom_components.elke27.hub.asyncio.sleep", AsyncMock()),
-        patch("custom_components.elke27.hub.random.uniform", return_value=1.0),
+        patch("custom_components.elke27.reconnect.asyncio.sleep", AsyncMock()),
+        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
     ):
-        await hub._async_reconnect_loop()
+        await hub._reconnect._async_run()
     failure_logs = _reconnect_failure_log_records(caplog)
     warnings = [record for record in failure_logs if record.levelno == logging.WARNING]
     debug_logs = [record for record in failure_logs if record.levelno == logging.DEBUG]
@@ -688,10 +688,10 @@ async def test_reconnect_unknown_error_logs_traceback_once(
     mock_client.client.wait_ready.return_value = True
     caplog.set_level(logging.DEBUG, logger=HUB_LOGGER)
     with (
-        patch("custom_components.elke27.hub.asyncio.sleep", AsyncMock()),
-        patch("custom_components.elke27.hub.random.uniform", return_value=1.0),
+        patch("custom_components.elke27.reconnect.asyncio.sleep", AsyncMock()),
+        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
     ):
-        await hub._async_reconnect_loop()
+        await hub._reconnect._async_run()
     failure_logs = _reconnect_failure_log_records(caplog)
     warnings = [record for record in failure_logs if record.levelno == logging.WARNING]
     debug_logs = [record for record in failure_logs if record.levelno == logging.DEBUG]
@@ -712,7 +712,7 @@ async def test_remove_entry_clears_reconnect_repair_issue(
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     hub = mock_config_entry.runtime_data.hub
-    hub._ensure_reconnect_repair_issue()
+    hub._reconnect._ensure_reconnect_repair_issue()
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
 
@@ -744,12 +744,12 @@ async def test_reconnect_repair_issue_after_non_transport_threshold(
 
     with (
         patch(
-            "custom_components.elke27.hub.asyncio.sleep",
+            "custom_components.elke27.reconnect.asyncio.sleep",
             side_effect=_stop_after_third_sleep,
         ),
-        patch("custom_components.elke27.hub.random.uniform", return_value=1.0),
+        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
     ):
-        await hub._async_reconnect_loop()
+        await hub._reconnect._async_run()
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
 
@@ -775,10 +775,10 @@ async def test_reconnect_repair_issue_cleared_on_success(
     ]
     mock_client.client.wait_ready.return_value = True
     with (
-        patch("custom_components.elke27.hub.asyncio.sleep", AsyncMock()),
-        patch("custom_components.elke27.hub.random.uniform", return_value=1.0),
+        patch("custom_components.elke27.reconnect.asyncio.sleep", AsyncMock()),
+        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
     ):
-        await hub._async_reconnect_loop()
+        await hub._reconnect._async_run()
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
 
@@ -794,7 +794,7 @@ async def test_reconnect_repair_issue_cleared_on_unload(
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     hub = mock_config_entry.runtime_data.hub
-    hub._ensure_reconnect_repair_issue()
+    hub._reconnect._ensure_reconnect_repair_issue()
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
 
@@ -866,8 +866,8 @@ async def test_reconnect_task_cancelled_on_unload(
     hub = mock_config_entry.runtime_data.hub
 
     mock_client.client.async_connect.side_effect = Elke27ConnectionError("down")
-    hub._schedule_reconnect()
-    task = hub._reconnect_task
+    hub._reconnect.start()
+    task = hub._reconnect.task
     assert task is not None
     assert task in mock_config_entry._background_tasks
     await hass.async_block_till_done(wait_background_tasks=False)
