@@ -877,8 +877,8 @@ again with the same linking credentials.
 - Entity unique IDs and device identifiers follow the panel **MAC address** when the panel
   reports one, otherwise the panel **hardware serial**, otherwise the **config entry ID**.
   **Panels today:** the panel's own messages carry no MAC, and current firmware reports a
-  placeholder serial, which is ignored; the MAC is used when the panel is found by network
-  discovery. Without a MAC or real serial, the config entry
+  placeholder serial, which is ignored. The MAC seen during network discovery is not used for
+  identity in 0.1.8. Without a MAC or real serial, the config entry
   **`unique_id` stays unset**, setup dedupes
   on **host:port**, and devices and entities are keyed on the **config entry ID**. An IP change
   counts as a new panel: **re-link can't change the address** (it reuses stored host and port),
