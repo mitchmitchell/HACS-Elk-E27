@@ -650,8 +650,6 @@ These are problems that are tracked for a fix.
 - **Address changes:** after the panel's IP address changes, reconnects keep using the old
   address. Use a DHCP reservation, or run Manual setup again with the new address (see
   [Changing the panel's address](#changing-the-panels-address)).
-- **No reauthentication prompt on reconnect:** if the link keys are rejected while
-  reconnecting, entities stay unavailable with no notice. Reload the integration.
 - **Occasional dropped connection during thermostat traffic.** The integration reconnects
   by itself. Entities may be briefly unavailable.
 
