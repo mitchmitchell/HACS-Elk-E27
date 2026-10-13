@@ -287,7 +287,7 @@ address never changes.
 
 If the address does change, re-linking can't help: it reuses the stored host and port. What
 to do depends on whether the integration knows the panel's MAC address. It learns the MAC from
-network discovery, either during setup or, for entries added before 0.1.8.x, on the first
+network discovery, either during setup or, for entries added before 0.1.8.1, on the first
 connect after upgrading.
 
 Upgraded entries keyed by a real panel serial keep that unique ID after the MAC fill, so
