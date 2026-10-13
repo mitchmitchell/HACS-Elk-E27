@@ -301,6 +301,9 @@ connect after upgrading.
 **The MAC isn't known** (the panel never answered discovery), or the panel at the new address
 doesn't answer discovery: the new address counts as a new panel.
 
+> **Delete the old entry first.** Adding the panel at the new address without deleting it
+> leaves two entries for the same panel.
+
 1. Delete the integration entry (**Settings → Devices & services → Elk E27 Alarm Engine
    Integration → ⋮ → Delete**).
 2. Add the integration again at the **new** host, with the access code and passphrase.
@@ -661,8 +664,8 @@ These are problems that are tracked for a fix.
 - **Fire, CO and water zones show as generic openings**, not smoke, CO or moisture sensors.
 - **Address changes:** after the panel's IP address changes, reconnects keep using the old
   address. Use a DHCP reservation. If the integration knows the panel's MAC, run Manual setup
-  at the new address to update the entry in place; otherwise delete the entry and add it again
-  (see [Changing the panel's address](#changing-the-panels-address)).
+  at the new address to update the entry in place; otherwise delete the old entry first, then add it again (adding without deleting leaves
+  two entries for the same panel; see [Changing the panel's address](#changing-the-panels-address)).
 - **Occasional dropped connection during thermostat traffic.** The integration reconnects
   by itself. Entities may be briefly unavailable.
 
