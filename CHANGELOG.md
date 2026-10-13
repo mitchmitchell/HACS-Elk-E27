@@ -17,7 +17,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   status read when the area is fully armed or exit-delay arming (#54).
 
 ### Changed
-- Requires **`elke27==0.3.12`** once published (#54, pending).
+- Requires [elke27 0.3.12](https://pypi.org/project/elke27/0.3.12/) ([release notes](https://github.com/mitchmitchell/elke27/releases/tag/v0.3.12)) (#54, pending; main still pins 0.3.11).
 - Setup: bad credentials or an invalid link show a re-link prompt. Temporary errors retry
   setup (#48).
 - A re-link prompt starts when the link is rejected while reconnecting, refreshing or running
