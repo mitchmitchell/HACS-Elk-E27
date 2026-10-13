@@ -1,16 +1,22 @@
 {
   "domain": "elke27",
   "name": "Elk E27 Alarm Engine Integration",
-  "codeowners": ["@mitchmitchell"],
+  "codeowners": [
+    "@mitchmitchell"
+  ],
   "config_flow": true,
-  "dependencies": ["network"],
+  "dependencies": [
+    "network"
+  ],
   "documentation": "https://github.com/mitchmitchell/HACS-Elk-E27",
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/mitchmitchell/HACS-Elk-E27/issues",
-  "loggers": ["elke27_lib"],
+  "loggers": [
+    "elke27_lib"
+  ],
   "requirements": [
-    "elke27@git+https://github.com/mitchmitchell/elke27@cd75d1ef4f8703546c62fdcbf965df87b4bc45e8"
+    "elke27@git+https://github.com/mitchmitchell/elke27@12ff00da9bd31b3ea5b8f4299f30a1405bffb1ce"
   ],
   "version": "0.1.8"
 }
