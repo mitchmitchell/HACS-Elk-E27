@@ -194,7 +194,7 @@ or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
-| 0.1.8 (draft) | 0.3.12 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
+| 0.1.8 (draft) | 0.3.12 (once published) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 
@@ -305,9 +305,9 @@ reloads with new link keys. Your entities and their IDs stay the same. Re-linkin
 refreshes the link keys for the stored address; to change the address, see
 [Changing the panel's address](#changing-the-panels-address).
 
-If the keys are rejected while **reconnecting**, no notice appears: the integration stops
-retrying and entities stay unavailable. **Reload the integration** (or restart Home
-Assistant) to get the reauthentication notice.
+If the keys are rejected while **reconnecting**, the integration stops retrying and starts the
+**reauthentication** flow once, so the notice appears. Entities stay unavailable until you
+re-link (or reload the integration).
 
 ---
 
@@ -878,7 +878,9 @@ again with the same linking credentials.
 
 - Entity unique IDs and device identifiers follow the panel **MAC address** when the panel
   reports one, otherwise the panel **hardware serial**, otherwise the **config entry ID**.
-  **Panels today report neither MAC nor hardware serial.** For those, the config entry
+  **Panels today:** the panel's own messages carry no MAC, and current firmware reports a
+  placeholder serial, which is ignored; the MAC is used when the panel is found by network
+  discovery. Without a MAC or real serial, the config entry
   **`unique_id` stays unset**, setup dedupes
   on **host:port**, and devices and entities are keyed on the **config entry ID**. An IP change
   counts as a new panel: **re-link can't change the address** (it reuses stored host and port),
@@ -887,7 +889,7 @@ again with the same linking credentials.
   never used as config or entity identity.
 - **Entity unique IDs and entity IDs may change**; review dashboards, automations, and scripts
   after re-adding.
-- **Requires `elke27` 0.3.12** when 0.1.8 ships (#54). Reconnect policy (#53): auth failures
+- **Requires `elke27` 0.3.12** once published (#54). Reconnect policy (#53): auth failures
   during automatic reconnect start re-link once; three non-transport failures since the last
   successful connect (transport failures in between do not reset the count) can raise a
   **`reconnect_failed`** Repairs issue while retry continues.
