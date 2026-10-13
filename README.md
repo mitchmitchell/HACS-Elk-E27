@@ -699,7 +699,7 @@ to retry (see [the example](#retry-automatic-arming-after-a-failure)).
 | *Unable to authenticate with the panel…* | The access code and passphrase are correct. These are the linking credentials set by your installer, not your alarm code. Confirm them with your installer if in doubt. |
 | *The panel requires linking…* | Enter the access code and passphrase again. |
 | *No panels were discovered…* | The panel is online and on the same network segment, and UDP broadcast on port 2362 isn't blocked. Otherwise use **Manual setup**. |
-| *This panel is already configured.* | The panel already has an entry, matched by MAC address or, when the panel reports no MAC or serial, by the same host and port. |
+| *This panel is already configured.* | The panel already has an entry, matched by MAC address, or by the panel's serial number when it reports a real one, or, if neither is reported, by the same host and port. |
 
 ### Panel error messages
 
