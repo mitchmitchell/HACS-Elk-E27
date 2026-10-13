@@ -443,6 +443,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
             else:
                 candidates = _reauth_candidate_unique_ids(panel_info)
+                if panel_mac is None and stored_mac:
+                    # No discovery reply: trust the stored MAC for the check.
+                    candidates.add(format_mac(stored_mac))
                 if entry.unique_id not in candidates:
                     return self.async_abort(reason="wrong_panel")
             return self.async_update_reload_and_abort(

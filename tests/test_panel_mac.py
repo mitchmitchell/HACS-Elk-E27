@@ -1,4 +1,4 @@
-# ruff: noqa: S101, TC001, TC003, D103, ARG001, PLC0415
+# ruff: noqa: S101, TC001, TC003, D103, ARG001, PLC0415, FBT001
 """Tests for E1a: panel MAC from discovery as identity."""
 
 from __future__ import annotations
@@ -244,6 +244,25 @@ async def test_reauth_of_018_entry_fills_mac(
     assert entry.data[CONF_PANEL_MAC] == MAC
     assert entry.data[CONF_PANEL_MAC_FILLED] is True
     assert entry.unique_id == MAC_FMT
+
+
+@pytest.mark.parametrize("filled", [False, True])
+async def test_reauth_no_reply_keeps_stored_mac_entry(
+    hass: HomeAssistant, flow_client: Any, filled: bool
+) -> None:
+    """No discovery reply on reauth must not abort wrong_panel for a MAC entry."""
+    extra = {CONF_PANEL_MAC_FILLED: True} if filled else {}
+    entry = _entry(mac=MAC, unique_id=MAC_FMT, **extra)
+    entry.add_to_hass(hass)
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: "1234", CONF_PASSPHRASE: "pw"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_PANEL_MAC] == MAC
+    assert entry.unique_id == MAC_FMT
+    assert bool(entry.data.get(CONF_PANEL_MAC_FILLED)) is filled
 
 
 # --- connect-time verify / fill ---------------------------------------------
