@@ -284,15 +284,15 @@ There is no reconfigure option, and the integration doesn't follow a panel to a 
 on its own: reconnects use the stored address. **Give the panel a DHCP reservation** so its
 address never changes.
 
-If the address does change:
+If the address does change, re-linking can't help: it reuses the stored host and port. Today's
+panels report no MAC in their own messages and only a placeholder serial, so 0.1.8 identifies
+them by the config entry ID, and a new address counts as a new panel:
 
-1. Go to **Settings → Devices & services → Add integration → Elk E27 Alarm Engine
-   Integration → Manual setup**.
-2. Enter the **new** host, plus the access code and passphrase.
-3. The panel is recognized by its MAC address. The existing entry's address is updated in
-   place, and setup ends with *"This panel is already configured."*
-
-Nothing needs to be deleted, and your entities are kept.
+1. Delete the integration entry (**Settings → Devices & services → Elk E27 Alarm Engine
+   Integration → ⋮ → Delete**).
+2. Add the integration again at the **new** host, with the access code and passphrase.
+3. Entity IDs may change. Update automations, scripts and dashboards, or rename the new
+   entities back to the old IDs.
 
 ### Re-linking (reauthentication)
 
