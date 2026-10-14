@@ -980,6 +980,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             exit_delay_cancel=exit_delay_cancel,
             return_result=True,
         )
+        _log_command_result("arm", area_id, result)
         return _status_refresh_ok(result)
 
     async def _async_write_disarm(
@@ -998,6 +999,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             exit_delay_cancel=exit_delay_cancel,
             return_result=True,
         )
+        _log_command_result("disarm", area_id, result)
         return _status_refresh_ok(result)
 
     async def _async_write_zone_bypass(
@@ -1006,6 +1008,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         result = await client.async_set_zone_bypass(
             zone_id, bypassed=bypassed, pin=pin, return_result=True
         )
+        _log_command_result("bypass", zone_id, result)
         return _status_refresh_ok(result)
 
     async def _async_after_write(
@@ -1266,6 +1269,17 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:
         """Update coordinator data and track snapshot version."""
         self.async_set_updated_data(snapshot or PanelSnapshot.empty())
+
+
+def _log_command_result(kind: str, target_id: int, result: Any) -> None:
+    """TEST-ONLY: log the elke27 CommandResult returned by a write."""
+    _LOGGER.debug(
+        "CommandResult %s id=%s route=%s status_refresh_ok=%s",
+        kind,
+        target_id,
+        getattr(result, "route", None),
+        getattr(result, "status_refresh_ok", None),
+    )
 
 
 def _status_refresh_ok(result: Any) -> bool | None:
