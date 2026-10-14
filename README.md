@@ -885,6 +885,10 @@ whole °F, so setpoints you set in °C are rounded.
 
 ### To 0.1.8.1
 
+**Upgrading from 0.1.7:** delete each Elk E27 entry first, then install 0.1.8.1 and add the
+panel again (the 0.1.8 steps). Installing over 0.1.7 without deleting leaves duplicate
+entities with a `_2` suffix.
+
 Update in HACS and restart Home Assistant. No delete and re-add is needed from 0.1.8: on the
 first connect, the panel MAC from network discovery is stored and becomes the entry's unique
 ID, unless the entry is keyed by a real panel serial, which it keeps (changing the address of
