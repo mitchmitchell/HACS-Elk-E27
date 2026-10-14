@@ -32,31 +32,17 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-PARALLEL_UPDATES = 0
-
-_OPEN_STATUSES = frozenset({"OPEN"})
-_CLOSED_STATUSES = frozenset({"CLOSE", "CLOSED"})
+# One command at a time: a physical actuator, and the panel serialises anyway.
+PARALLEL_UPDATES = 1
 
 
 def barrier_is_closed(barrier: BarrierState) -> bool | None:
     """
     Map a barrier to HA is_closed: True, False, or None when unknown.
 
-    Uses the library's normalised is_open when present; otherwise maps the raw
-    status (OPEN, CLOSE/CLOSED). STOPPED and anything else are unknown.
+    Uses only the library's normalised is_open (None for STOPPED or unknown).
     """
-    is_open = getattr(barrier, "is_open", None)
-    if isinstance(is_open, bool):
-        return not is_open
-    status = barrier.status
-    if not isinstance(status, str):
-        return None
-    normalized = status.strip().upper()
-    if normalized in _OPEN_STATUSES:
-        return False
-    if normalized in _CLOSED_STATUSES:
-        return True
-    return None
+    return None if barrier.is_open is None else not barrier.is_open
 
 
 async def async_setup_entry(
@@ -70,7 +56,7 @@ async def async_setup_entry(
 
     def _async_add_barriers() -> None:
         snapshot = coordinator.data
-        barriers = getattr(snapshot, "barriers", None) if snapshot else None
+        barriers = snapshot.barriers if snapshot is not None else None
         if not barriers:
             return
         entities: list[Elke27BarrierCover] = []
@@ -121,7 +107,11 @@ class Elke27BarrierCover(CoordinatorEntity[Elke27DataUpdateCoordinator], CoverEn
         """Initialize the cover."""
         super().__init__(coordinator)
         self._barrier_id = barrier_id
-        self._attr_name = barrier.name or f"Garage door {barrier_id}"
+        if barrier.name:
+            self._attr_name = barrier.name
+        else:
+            # Translated "Garage door {barrier_id}" (translation_key garage_door).
+            self._attr_translation_placeholders = {"barrier_id": str(barrier_id)}
         # <key>:<N> (decision 16). Future tamper/low-battery binary sensors for a
         # barrier share binary_sensor with zones, so they must use <key>:<N>:<kind>.
         self._attr_unique_id = build_unique_id(
@@ -147,12 +137,6 @@ class Elke27BarrierCover(CoordinatorEntity[Elke27DataUpdateCoordinator], CoverEn
         barrier = self._barrier()
         return None if barrier is None else barrier_is_closed(barrier)
 
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose the raw panel status (e.g. STOPPED) for troubleshooting."""
-        barrier = self._barrier()
-        return {"raw_status": barrier.status if barrier else None}
-
     async def async_open_cover(self, **_kwargs: Any) -> None:
         """Open the door (sent once, never retried)."""
         await self.coordinator.async_set_barrier(self._barrier_id, open_=True)
@@ -165,5 +149,4 @@ class Elke27BarrierCover(CoordinatorEntity[Elke27DataUpdateCoordinator], CoverEn
 def _get_barrier(
     snapshot: PanelSnapshot | None, barrier_id: int
 ) -> BarrierState | None:
-    barriers = getattr(snapshot, "barriers", None) if snapshot else None
-    return barriers.get(barrier_id) if barriers else None
+    return snapshot.barriers.get(barrier_id) if snapshot is not None else None

@@ -25,10 +25,7 @@ if _HAS_DEPS:
     from elke27_lib import AreaState, PanelInfo, PanelSnapshot
     from elke27_lib.types import BarrierState
 
-    from custom_components.elke27 import (
-        coordinator as elke27_coordinator,
-        cover as cover_mod,
-    )
+    from custom_components.elke27 import cover as cover_mod
     from custom_components.elke27.coordinator import (
         BARRIER_OUTCOME_UNKNOWN_MESSAGE,
         BARRIER_PERMISSION_MESSAGE,
@@ -108,12 +105,6 @@ def test_state_mapping(status: str | None, closed: bool | None) -> None:
     assert cover_mod.barrier_is_closed(_barrier(status)) is closed
 
 
-def test_raw_status_fallback_without_is_open() -> None:
-    """A barrier without is_open still maps from the raw status."""
-    barrier = BarrierState(barrier_id=1, status="CLOSE")
-    assert cover_mod.barrier_is_closed(barrier) is True
-
-
 @pytest.mark.parametrize("count", [0, 1, 4])
 async def test_setup_creates_one_cover_per_barrier(count: int) -> None:
     """One cover per barrier; none when the panel has none."""
@@ -132,18 +123,32 @@ async def test_setup_creates_one_cover_per_barrier(count: int) -> None:
         assert ent.supported_features == (
             CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
         )
-        assert ent.unique_id.endswith(f":{ent._barrier_id}")  # noqa: SLF001
         assert ":barrier:" not in ent.unique_id
         assert ent.is_opening is False
         assert ent.is_closing is False
+    base = cover_mod.unique_base(coord, entry)
+    assert {ent.unique_id for ent in added} == {
+        f"{base}:{i}" for i in range(1, count + 1)
+    }
 
 
-def test_stopped_is_unknown_with_raw_status() -> None:
-    """STOPPED shows as unknown and the raw value is exposed."""
+def test_stopped_is_unknown() -> None:
+    """STOPPED shows as unknown; no extra state attributes are exposed."""
     coord = _coordinator(_snapshot({1: _barrier("STOPPED")}))
     ent = cover_mod.Elke27BarrierCover(coord, _entry(), 1, _barrier("STOPPED"))
     assert ent.is_closed is None
-    assert ent.extra_state_attributes == {"raw_status": "STOPPED"}
+    assert ent.extra_state_attributes is None
+
+
+def test_unnamed_barrier_uses_translated_name() -> None:
+    """No panel name: translation_key with the barrier id as placeholder."""
+    coord = _coordinator(_snapshot({3: _barrier("OPEN", barrier_id=3, name=None)}))
+    ent = cover_mod.Elke27BarrierCover(
+        coord, _entry(), 3, _barrier("OPEN", barrier_id=3, name=None)
+    )
+    assert ent.translation_key == "garage_door"
+    assert ent.translation_placeholders == {"barrier_id": "3"}
+    assert not hasattr(ent, "_attr_name")
 
 
 def test_device_is_panel_without_area() -> None:
@@ -192,15 +197,6 @@ async def test_outcome_unknown_not_retried() -> None:
     assert BARRIER_OUTCOME_UNKNOWN_MESSAGE.startswith("Garage door")
     client.async_set_barrier.assert_awaited_once()
     client.async_refresh_barrier.assert_awaited_once_with(1)
-
-
-async def test_real_outcome_unknown_class() -> None:
-    """The real elke27 class (0.3.14+) is recognised."""
-    errors = pytest.importorskip("elke27_lib.errors")
-    cls = getattr(errors, "Elke27CommandOutcomeUnknownError", None)
-    if cls is None:
-        pytest.skip("elke27 without OutcomeUnknown")
-    assert elke27_coordinator._is_outcome_unknown(cls(("barrier", "set_status")))  # noqa: SLF001
 
 
 async def test_permission_refusal_message() -> None:

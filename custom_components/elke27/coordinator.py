@@ -94,7 +94,9 @@ STALE_CHECK_INTERVAL = timedelta(seconds=10)
 _monotonic = time.monotonic
 
 # Domains whose config is read during setup.
-PRIMED_DOMAINS = ("light", "lock", "tstat")
+# Barriers, like lights and locks, keep their device list outside the CSM,
+# so without this snapshot.barriers stays empty and no covers are created.
+PRIMED_DOMAINS = ("barrier", "light", "lock", "tstat")
 
 
 REFRESH_AFTER_CONNECT_ERRORS: tuple[type[Exception], ...] = (
