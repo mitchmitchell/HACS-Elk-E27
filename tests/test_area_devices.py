@@ -301,3 +301,38 @@ async def test_area_device_service_target_filters_platform(
     assert _entity_ids_from_service_call(hass, named, Platform.BINARY_SENSOR) == [
         "alarm_control_panel.house"
     ]
+
+
+async def test_cleanup_and_delete_route_through_area_has_device(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prune and the delete check both follow area_has_device (one Q2 switch)."""
+    mock_config_entry.add_to_hass(hass)
+    registry = dr.async_get(hass)
+    unlisted = registry.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={(DOMAIN, f"{KEY}:area:9")},
+    )
+    answer = {"value": True}
+    calls: list[int | None] = []
+
+    def _fake(snapshot: object, area_id: int | None) -> bool:
+        calls.append(area_id)
+        return answer["value"]
+
+    monkeypatch.setattr("custom_components.elke27.area_has_device", _fake)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert 9 in calls
+    assert registry.async_get(unlisted.id) is not None
+    assert not await async_remove_config_entry_device(hass, mock_config_entry, unlisted)
+
+    live = _device(hass, f"{KEY}:area:1")
+    assert live is not None
+    answer["value"] = False
+    calls.clear()
+    assert await async_remove_config_entry_device(hass, mock_config_entry, live)
+    assert calls == [1]

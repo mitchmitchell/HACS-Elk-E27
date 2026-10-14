@@ -26,6 +26,7 @@ from .coordinator import (  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re
     Elke27DataUpdateCoordinator,
 )
 from .entity import (
+    area_has_device,
     area_id_from_device_identifier,
     device_info_for_entry,
     entry_identity_key,
@@ -170,7 +171,7 @@ async def async_remove_config_entry_device(
     snapshot = coordinator.data
     if not area_ids or not _full_snapshot(snapshot):
         return False
-    return not any(area_id in snapshot.areas for area_id in area_ids)
+    return not any(area_has_device(snapshot, area_id) for area_id in area_ids)
 
 
 @callback
@@ -193,7 +194,9 @@ def _async_prune_area_devices(
         device_registry, entry.entry_id
     ):
         area_ids = _entry_area_ids(entry, coordinator, device_entry)
-        if area_ids and not any(area_id in snapshot.areas for area_id in area_ids):
+        if area_ids and not any(
+            area_has_device(snapshot, area_id) for area_id in area_ids
+        ):
             _LOGGER.debug("Removing stale area device %s", device_entry.name)
             device_registry.async_update_device(
                 device_entry.id, remove_config_entry_id=entry.entry_id
