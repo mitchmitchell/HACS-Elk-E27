@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
     DeviceInfo,
@@ -18,6 +19,8 @@ from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
     from elke27_lib import AreaState, PanelSnapshot, ZoneState
+
+    from homeassistant.core import HomeAssistant
 
     from .coordinator import Elke27DataUpdateCoordinator
     from .models import Elke27ConfigEntry
@@ -141,14 +144,47 @@ def area_device_info(
     area_id: int,
     area: AreaState | None,
 ) -> DeviceInfo:
-    """Build device info for an area device linked to the panel device."""
+    """
+    Build device info for an area device.
+
+    The link to the panel device is not set here: `DeviceInfo["via_device"]`
+    is deprecated (removed in HA 2027.8). async_link_area_device sets
+    via_device_id on the registry entry instead.
+    """
     key = entry_identity_key(coordinator, entry)
     return DeviceInfo(
         identifiers={(DOMAIN, area_device_identifier(key, area_id))},
         name=area_device_name(area_id, area),
         model=AREA_DEVICE_MODEL,
-        via_device=(DOMAIN, key),
     )
+
+
+def async_link_area_device(
+    hass: HomeAssistant,
+    coordinator: Elke27DataUpdateCoordinator,
+    entry: Elke27ConfigEntry,
+    area_id: int,
+    area: AreaState | None,
+) -> None:
+    """
+    Create the area device and link it to the panel device by device id.
+
+    Uses via_device_id (supported on every HA version this integration runs
+    on) rather than the deprecated via_device identifier tuple. Does nothing
+    when the panel device is not registered yet.
+    """
+    device_registry = dr.async_get(hass)
+    panel = device_registry.async_get_device(
+        identifiers={(DOMAIN, entry_identity_key(coordinator, entry))}
+    )
+    if panel is None:
+        return
+    device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        **area_device_info(coordinator, entry, area_id, area),
+    )
+    if device.via_device_id != panel.id:
+        device_registry.async_update_device(device.id, via_device_id=panel.id)
 
 
 def device_info_for_zone(

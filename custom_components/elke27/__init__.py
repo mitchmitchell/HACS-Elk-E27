@@ -28,6 +28,7 @@ from .coordinator import (  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re
 from .entity import (
     area_has_device,
     area_id_from_device_identifier,
+    async_link_area_device,
     device_info_for_entry,
     entry_identity_key,
 )
@@ -124,6 +125,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
         config_entry_id=entry.entry_id, **device_info_for_entry(coordinator, entry)
     )
     _async_prune_area_devices(hass, entry, coordinator)
+    _async_link_area_devices(hass, entry, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -201,6 +203,21 @@ def _async_prune_area_devices(
             device_registry.async_update_device(
                 device_entry.id, remove_config_entry_id=entry.entry_id
             )
+
+
+@callback
+def _async_link_area_devices(
+    hass: HomeAssistant,
+    entry: Elke27ConfigEntry,
+    coordinator: Elke27DataUpdateCoordinator,
+) -> None:
+    """Create each area device and link it to the panel by via_device_id."""
+    snapshot = coordinator.data
+    if snapshot is None:
+        return
+    for area_id, area in snapshot.areas.items():
+        if area_has_device(snapshot, area_id):
+            async_link_area_device(hass, coordinator, entry, area_id, area)
 
 
 def _duplicate_unique_id_issue_id(entry_id: str) -> str:
