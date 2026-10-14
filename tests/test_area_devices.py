@@ -11,10 +11,7 @@ from elke27_lib import AreaState, ZoneState
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.elke27 import (
-    _async_prune_area_devices,
-    async_remove_config_entry_device,
-)
+from custom_components.elke27 import async_remove_config_entry_device
 from custom_components.elke27.const import DOMAIN
 from custom_components.elke27.entity import (
     area_device_identifier,
@@ -78,7 +75,7 @@ async def test_area_device_and_entity_placement(
     registry = er.async_get(hass)
     alarm = registry.async_get("alarm_control_panel.house")
     assert alarm is not None
-    assert alarm.unique_id == f"{KEY}:area:1"
+    assert alarm.unique_id == f"{KEY}:1"
     assert alarm.device_id == area.id
     state = hass.states.get("alarm_control_panel.house")
     assert state is not None
@@ -86,9 +83,9 @@ async def test_area_device_and_entity_placement(
 
     front = registry.async_get("binary_sensor.house_front_door")
     assert front is not None
-    assert front.unique_id == f"{KEY}:zone:1"
+    assert front.unique_id == f"{KEY}:1"
     assert front.device_id == area.id
-    for unique_id in (f"{KEY}:zone:2", f"{KEY}:zone:3"):
+    for unique_id in (f"{KEY}:2", f"{KEY}:3"):
         entity_id = registry.async_get_entity_id("binary_sensor", DOMAIN, unique_id)
         assert entity_id is not None
         entity = registry.async_get(entity_id)
@@ -147,57 +144,20 @@ async def test_remove_config_entry_device(
     assert not await async_remove_config_entry_device(hass, mock_config_entry, gone)
 
 
-async def test_prune_removes_stale_area_device(
+async def test_setup_keeps_unlisted_area_device(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
-    """Setup's first full snapshot detaches area devices it does not list."""
+    """Setup never detaches area devices; the user removes stale ones."""
     mock_config_entry.add_to_hass(hass)
     registry = dr.async_get(hass)
     stale = registry.async_get_or_create(
         config_entry_id=mock_config_entry.entry_id,
         identifiers={(DOMAIN, f"{KEY}:area:9")},
     )
-    other = registry.async_get_or_create(
-        config_entry_id=mock_config_entry.entry_id,
-        identifiers={(DOMAIN, "aa:bb:cc:dd:ee:ff:area:9")},
-    )
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    assert registry.async_get(stale.id) is None
-    assert registry.async_get(other.id) is not None
-    assert _device(hass, f"{KEY}:area:1") is not None
-
-
-@pytest.mark.parametrize("variant", ["stale", "empty"])
-async def test_prune_skips_untrusted_snapshot(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_client: ClientHarness,
-    variant: str,
-) -> None:
-    """A stale or empty-area snapshot never removes area devices."""
-    if variant == "stale":
-        mock_client.snapshot = dataclasses.replace(mock_client.snapshot, stale=True)
-    else:
-        mock_client.snapshot = _with_areas(mock_client.snapshot, {})
-    mock_config_entry.add_to_hass(hass)
-    registry = dr.async_get(hass)
-    kept = registry.async_get_or_create(
-        config_entry_id=mock_config_entry.entry_id,
-        identifiers={(DOMAIN, f"{KEY}:area:9")},
-    )
-    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
-    assert registry.async_get(kept.id) is not None
-
-
-def test_prune_skips_missing_snapshot() -> None:
-    """No snapshot at all: nothing is pruned."""
-    hass = MagicMock()
-    coordinator = MagicMock()
-    coordinator.data = None
-    _async_prune_area_devices(hass, MagicMock(), coordinator)
-    hass.assert_not_called()
+    assert registry.async_get(stale.id) is not None
+    assert await async_remove_config_entry_device(hass, mock_config_entry, stale)
 
 
 def _coordinator(snapshot: object) -> MagicMock:
@@ -225,18 +185,18 @@ def test_area_device_info_entry_id_tier() -> None:
     assert entry_identity_key(coordinator, entry) == "entry-1"
     info = area_device_info(coordinator, entry, 3, AreaState(area_id=3, name=None))
     assert info["identifiers"] == {(DOMAIN, "entry-1:area:3")}
-    assert "via_device" not in info
+    assert info["via_device"] == (DOMAIN, "entry-1")
     assert info["name"] == "Area 3"
 
 
 def test_area_device_info_mac_tier() -> None:
-    """The MAC tier key is used for the area identifier (no deprecated via_device)."""
+    """MAC tier key for the identifier; identifier via_device on older HA."""
     coordinator = _coordinator(panel_snapshot())
     info = area_device_info(
         coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
     )
     assert info["identifiers"] == {(DOMAIN, f"{KEY}:area:1")}
-    assert "via_device" not in info
+    assert info["via_device"] == (DOMAIN, KEY)
     assert info["name"] == "House"
 
 
@@ -309,7 +269,7 @@ async def test_cleanup_and_delete_route_through_area_has_device(
     mock_client: ClientHarness,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Prune and the delete check both follow area_has_device (one Q2 switch)."""
+    """The delete check follows area_has_device (one Q2 switch)."""
     mock_config_entry.add_to_hass(hass)
     registry = dr.async_get(hass)
     unlisted = registry.async_get_or_create(
@@ -326,9 +286,10 @@ async def test_cleanup_and_delete_route_through_area_has_device(
     monkeypatch.setattr("custom_components.elke27.area_has_device", _fake)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    assert 9 in calls
     assert registry.async_get(unlisted.id) is not None
+    calls.clear()
     assert not await async_remove_config_entry_device(hass, mock_config_entry, unlisted)
+    assert 9 in calls
 
     live = _device(hass, f"{KEY}:area:1")
     assert live is not None
@@ -336,3 +297,63 @@ async def test_cleanup_and_delete_route_through_area_has_device(
     calls.clear()
     assert await async_remove_config_entry_device(hass, mock_config_entry, live)
     assert calls == [1]
+
+
+def test_area_device_info_uses_via_device_id_when_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On HA with via_device_id, area devices link by the panel device id."""
+    from custom_components.elke27 import entity as entity_mod  # noqa: PLC0415
+
+    monkeypatch.setattr(entity_mod, "SUPPORTS_VIA_DEVICE_ID", True)
+    monkeypatch.delattr(entity_mod.dr, "ChildDeviceInfo", raising=False)
+    coordinator = _coordinator(panel_snapshot())
+    coordinator.panel_device_id = "panel-device-id"
+    info = area_device_info(
+        coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
+    )
+    assert info["via_device_id"] == "panel-device-id"
+    assert "via_device" not in info
+
+
+def test_area_device_info_falls_back_without_panel_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No panel device id yet: fall back to the identifier link."""
+    from custom_components.elke27 import entity as entity_mod  # noqa: PLC0415
+
+    monkeypatch.setattr(entity_mod, "SUPPORTS_VIA_DEVICE_ID", True)
+    coordinator = _coordinator(panel_snapshot())
+    coordinator.panel_device_id = None
+    info = area_device_info(
+        coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
+    )
+    assert info["via_device"] == (DOMAIN, KEY)
+
+
+def test_area_device_info_prefers_child_device_info(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When HA has ChildDeviceInfo, the area is a child of the panel device."""
+    from custom_components.elke27 import entity as entity_mod  # noqa: PLC0415
+
+    calls: list[dict[str, object]] = []
+
+    def _child(**kwargs: object) -> dict[str, object]:
+        calls.append(kwargs)
+        return dict(kwargs)
+
+    monkeypatch.setattr(entity_mod.dr, "ChildDeviceInfo", _child, raising=False)
+    coordinator = _coordinator(panel_snapshot())
+    coordinator.panel_device_id = "panel-device-id"
+    info = area_device_info(
+        coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
+    )
+    assert calls == [
+        {
+            "identifiers": {(DOMAIN, f"{KEY}:area:1")},
+            "name": "House",
+            "parent_device_id": "panel-device-id",
+        }
+    ]
+    assert "via_device" not in info
