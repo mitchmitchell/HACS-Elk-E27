@@ -808,3 +808,36 @@ async def test_reauth_keeps_existing_integration_id(
     assert mock_config_entry.data[CONF_INTEGRATION_ID] == INTEGRATION_ID
     identity = flow_client.async_link.await_args.kwargs["client_identity"]
     assert identity["sn"] == INTEGRATION_ID
+
+
+async def test_retry_after_failure_reuses_integration_id(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """A retried link in the same flow sends the same sn (no orphaned identity)."""
+    with patch(
+        "custom_components.elke27.config_flow.generate_integration_id",
+        side_effect=["314159265358", "271828182845"],
+    ) as gen:
+        result = await _start_manual(hass)
+        user_input = {
+            CONF_HOST: HOST,
+            CONF_ACCESS_CODE: ACCESS_CODE,
+            CONF_PASSPHRASE: PASSPHRASE,
+        }
+        flow_client.wait_ready.return_value = False
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input
+        )
+        assert result["errors"] == {"base": "cannot_connect"}
+        flow_client.wait_ready.return_value = True
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input
+        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_INTEGRATION_ID] == "314159265358"
+    gen.assert_called_once()
+    sns = [
+        c.kwargs["client_identity"]["sn"]
+        for c in flow_client.async_link.await_args_list
+    ]
+    assert sns == ["314159265358", "314159265358"]

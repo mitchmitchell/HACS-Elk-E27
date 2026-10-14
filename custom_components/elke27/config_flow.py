@@ -153,6 +153,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._selected_panel: Any | None = None
         self._selected_host: str | None = None
         self._selected_port: int | None = None
+        # Drawn once per flow, so a retried link reuses the same client sn.
+        self._integration_id: str | None = None
         self._discovered_panels: list[Any] | None = None
 
     async def async_step_user(
@@ -322,6 +324,21 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    def _flow_integration_id(self, entry: ConfigEntry | None) -> str:
+        """
+        Return the client sn for this link.
+
+        Reauth keeps the entry's integration ID (the panel binds the link to
+        it). A new entry, or one without a valid ID, gets one fresh ID per
+        flow, so a retried link reuses the same sn.
+        """
+        existing_id = entry.data.get(CONF_INTEGRATION_ID) if entry is not None else None
+        if is_valid_integration_id(existing_id):
+            return existing_id
+        if self._integration_id is None:
+            self._integration_id = generate_integration_id()
+        return self._integration_id
+
     async def _async_link_and_create_entry(
         self,
         access_code: str,
@@ -342,14 +359,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors=errors,
             )
 
-        # Reauth keeps the entry's integration ID (the panel binds the link to
-        # it); a new entry, or one without a valid ID, gets a fresh one.
-        existing_id = entry.data.get(CONF_INTEGRATION_ID) if entry is not None else None
-        integration_id = (
-            existing_id
-            if is_valid_integration_id(existing_id)
-            else generate_integration_id()
-        )
+        integration_id = self._flow_integration_id(entry)
         client_identity = build_client_identity(integration_id)
         client = _create_client()
         link_keys: LinkKeys | None = None
