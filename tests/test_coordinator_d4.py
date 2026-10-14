@@ -33,6 +33,8 @@ class FakeClient:
         self.get_snapshot = MagicMock(side_effect=lambda: self.snapshot)
         self.async_execute = AsyncMock(side_effect=self._execute)
         self.read_gate: asyncio.Event | None = None
+        self.reads_in_flight = 0
+        self.max_reads_in_flight = 0
 
     async def _write(self, kind: str, **params: Any) -> CommandResult:
         self.calls.append((kind, params))
@@ -51,8 +53,13 @@ class FakeClient:
 
     async def _execute(self, command_key: str, **params: Any) -> Result[Any]:
         self.calls.append((command_key, params))
-        if self.read_gate is not None:
-            await self.read_gate.wait()
+        self.reads_in_flight += 1
+        self.max_reads_in_flight = max(self.max_reads_in_flight, self.reads_in_flight)
+        try:
+            if self.read_gate is not None:
+                await self.read_gate.wait()
+        finally:
+            self.reads_in_flight -= 1
         if not self.read_ok:
             return Result.failure(TimeoutError("read timed out"))
         if command_key == "area_get_status":
@@ -284,14 +291,14 @@ async def test_q5_skips_while_fallback_in_flight(
     coordinator = _coordinator(hass, client)
     gate = asyncio.Event()
     if fallback_running:
-        coordinator._fallback_task = hass.async_create_task(gate.wait())
+        coordinator._fallback_tasks.add(hass.async_create_task(gate.wait()))
     coordinator._stale_since = 0.0
     coordinator._create_background_task = MagicMock()
     coordinator._async_check_stale(None)
     if fallback_running:
         coordinator._create_background_task.assert_not_called()
         gate.set()
-        await coordinator._fallback_task
+        await asyncio.gather(*coordinator._fallback_tasks)
     else:
         coordinator._create_background_task.assert_called_once()
         coordinator._create_background_task.call_args.args[0].close()
@@ -307,3 +314,54 @@ async def test_stale_properties(hass: HomeAssistant) -> None:
     assert coordinator.snapshot_stale is True
     assert coordinator.stale_area_ids == frozenset({2})
     assert coordinator.stale_zone_ids == frozenset({5, 6})
+
+
+async def test_three_concurrent_fallbacks_never_overlap(hass: HomeAssistant) -> None:
+    """Commands queued on the same in-flight read never read concurrently."""
+    client = FakeClient(_ok(False))
+    client.read_gate = asyncio.Event()
+    coordinator = _coordinator(hass, client)
+    tasks = [
+        hass.async_create_task(_run(coordinator, kind))
+        for kind in ("arm", "disarm", "arm")
+    ]
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert client.keys(READS) == ["area_get_status"]
+    client.read_gate.set()
+    for task in tasks:
+        assert await task
+    # Each command got its own read, started after its write, one at a time.
+    assert client.keys(READS) == ["area_get_status"] * 3
+    assert client.max_reads_in_flight == 1
+    assert coordinator.fallback_refresh_count == 3
+    assert not coordinator._fallback_tasks
+
+
+async def test_q5_skips_while_any_fallback_read_runs(hass: HomeAssistant) -> None:
+    """Q5 stays off while any fallback read runs or waits, not just the last."""
+    client = FakeClient(_ok(False))
+    client.read_gate = asyncio.Event()
+    client.is_ready = True
+    coordinator = _coordinator(hass, client)
+    first = hass.async_create_task(_run(coordinator, "arm"))
+    second = hass.async_create_task(_run(coordinator, "disarm"))
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert coordinator._fallback_lock.locked()
+    client.snapshot = dataclasses.replace(panel_snapshot(), stale=True)
+    coordinator._stale_since = 0.0
+    real_create = coordinator._create_background_task
+    created: list[str] = []
+
+    def _create(coro: Any, name: str) -> Any:
+        created.append(name)
+        return real_create(coro, name)
+
+    coordinator._create_background_task = _create
+    coordinator._async_check_stale(None)
+    assert not any("stale" in name for name in created)
+    client.read_gate.set()
+    assert await first
+    assert await second
+    assert client.max_reads_in_flight == 1

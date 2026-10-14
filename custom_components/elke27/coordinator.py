@@ -159,7 +159,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._stale_task: asyncio.Task[None] | None = None
         # D4: post-command fallback reads (status_refresh_ok False). Kept for
         # the soak gate; removed with snapshot_with_status after the soak.
-        self._fallback_task: asyncio.Task[PanelSnapshot | None] | None = None
+        # Every fallback read task still running, and a lock so only one of
+        # them reads the panel at a time (Q5 also skips while any is running).
+        self._fallback_tasks: set[asyncio.Task[PanelSnapshot | None]] = set()
+        self._fallback_lock = asyncio.Lock()
         self._fallback_refresh_count = 0
         self._last_fallback_at: datetime | None = None
         # D5 soak counter (Architect default, pending Mitch's OK): automatic
@@ -246,7 +249,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._debounce_task,
             self._refresh_task,
             self._stale_task,
-            self._fallback_task,
+            *self._fallback_tasks,
         ):
             if task is not None and not task.done():
                 task.cancel()
@@ -256,7 +259,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._debounce_task = None
         self._refresh_task = None
         self._stale_task = None
-        self._fallback_task = None
+        self._fallback_tasks.clear()
         self._stopping = True
         await self._reconnect.async_stop()
         self._reconnect.clear_issue()
@@ -302,8 +305,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             return
         if self._stale_task is not None and not self._stale_task.done():
             return
-        if self._fallback_task is not None and not self._fallback_task.done():
-            # D4: a post-command fallback read is already in flight.
+        if self._fallback_lock.locked() or any(
+            not task.done() for task in self._fallback_tasks
+        ):
+            # D4: a post-command fallback read is running or queued.
             return
         self._last_stale_refresh = now
         self._stale_auto_refresh_count += 1
@@ -1051,23 +1056,32 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """
         Run one fallback read that starts after this command's write.
 
-        A Q5 stale refresh or another command's fallback read already in flight
-        started before this write, so its snapshot may predate it. Wait for it
-        to finish (keeping one panel read at a time), then do a fresh read.
+        The read task is created now, after the write, and then waits for the
+        fallback lock and any Q5 refresh in flight, so it never reuses an older
+        read and never overlaps another fallback read or Q5. The lock is held
+        by the task itself, so a cancelled caller cannot release it early.
         """
-        for pending in (self._stale_task, self._fallback_task):
-            if pending is not None and not pending.done():
-                await asyncio.wait([pending])
         task = self._create_background_task(
-            self._async_fallback_status(area_id=area_id, zone_id=zone_id),
+            self._async_locked_fallback_status(area_id=area_id, zone_id=zone_id),
             f"{DOMAIN} post-command fallback read",
         )
-        self._fallback_task = task
+        self._fallback_tasks.add(task)
+        task.add_done_callback(self._fallback_tasks.discard)
         try:
             return await asyncio.shield(task)
         except COMMAND_ERRORS as err:
             _LOGGER.debug("Post-command fallback read failed: %s", err)
             return None
+
+    async def _async_locked_fallback_status(
+        self, *, area_id: int | None, zone_id: int | None
+    ) -> PanelSnapshot | None:
+        """Wait for the fallback lock and any Q5 refresh, then read once."""
+        async with self._fallback_lock:
+            stale = self._stale_task
+            if stale is not None and not stale.done():
+                await asyncio.wait([stale])
+            return await self._async_fallback_status(area_id=area_id, zone_id=zone_id)
 
     async def _async_fallback_status(
         self, *, area_id: int | None, zone_id: int | None
