@@ -558,6 +558,42 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             raise HomeAssistantError(_error_message(err)) from err
         return True
 
+    async def async_set_barrier(self, barrier_id: int, *, open_: bool) -> None:
+        """
+        Open or close a garage door (barrier). Sent at most once, never retried.
+
+        An unknown outcome raises a HomeAssistantError telling the user to check
+        the door, then one status read resyncs the state. A panel refusal says
+        the configured user may lack automation authority.
+        """
+        client = self._client
+        if client is None:
+            raise HomeAssistantError(BARRIER_NOT_CONNECTED_MESSAGE)
+        try:
+            await client.async_set_barrier(barrier_id, open=open_)
+        except COMMAND_ERRORS as err:
+            _log_command_failure("Barrier", barrier_id, "set", err)
+            self._note_command_error(err)
+            if _is_outcome_unknown(err):
+                await self.async_refresh_barrier(barrier_id)
+                raise HomeAssistantError(BARRIER_OUTCOME_UNKNOWN_MESSAGE) from err
+            if _is_permission_error(err):
+                raise HomeAssistantError(BARRIER_PERMISSION_MESSAGE) from err
+            raise HomeAssistantError(_error_message(err)) from err
+        await self.async_refresh_barrier(barrier_id)
+
+    async def async_refresh_barrier(self, barrier_id: int) -> None:
+        """Read one barrier's status and push the snapshot; failures are logged."""
+        client = self._client
+        if client is None:
+            return
+        try:
+            await client.async_refresh_barrier(barrier_id)
+        except COMMAND_ERRORS as err:
+            _LOGGER.debug("Barrier %s status read failed: %s", barrier_id, err)
+            return
+        self._set_snapshot(client.get_snapshot())
+
     async def async_set_light(
         self, light_id: int, *, state: bool, level: int | None = None
     ) -> bool:
@@ -1275,6 +1311,31 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:
         """Update coordinator data and track snapshot version."""
         self.async_set_updated_data(snapshot or PanelSnapshot.empty())
+
+
+BARRIER_NOT_CONNECTED_MESSAGE = (
+    "Not connected to the panel; the garage door command was not sent."
+)
+BARRIER_OUTCOME_UNKNOWN_MESSAGE = (
+    "Garage door command may or may not have reached the panel; "
+    "check the door before retrying"
+)
+BARRIER_PERMISSION_MESSAGE = (
+    "The panel refused the garage door command; the configured Elk user may "
+    "lack automation authority"
+)
+
+
+def _is_outcome_unknown(err: BaseException) -> bool:
+    """Return True for Elke27CommandOutcomeUnknownError (elke27 0.3.14+)."""
+    return any(
+        cls.__name__ == "Elke27CommandOutcomeUnknownError" for cls in type(err).__mro__
+    )
+
+
+def _is_permission_error(err: BaseException) -> bool:
+    """Return True for a panel permission refusal."""
+    return any(cls.__name__ == "Elke27PermissionError" for cls in type(err).__mro__)
 
 
 def _status_refresh_ok(result: Any) -> bool | None:
