@@ -14,7 +14,6 @@ from elke27_lib import redact_for_diagnostics
 from homeassistant.const import CONF_HOST, CONF_PORT
 
 from .const import (
-    CONF_INTEGRATION_SERIAL,
     CONF_LINK_KEYS_JSON,
     CONF_PANEL_MAC,
     CONF_PANEL_MAC_FILLED,
@@ -51,7 +50,6 @@ async def async_get_config_entry_diagnostics(
         "host": entry.data.get(CONF_HOST),
         "port": entry.data.get(CONF_PORT),
         "manufacturer_number": MANUFACTURER_NUMBER,
-        "integration_serial": entry.data.get(CONF_INTEGRATION_SERIAL),
         "link_keys_present": CONF_LINK_KEYS_JSON in entry.data,
         "snapshot_meta": snapshot_meta,
         "snapshot": redacted_snapshot,

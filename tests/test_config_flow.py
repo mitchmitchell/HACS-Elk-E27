@@ -7,7 +7,7 @@ from collections.abc import Generator
 import dataclasses
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, create_autospec, patch
+from unittest.mock import create_autospec, patch
 
 from elke27_lib import LinkKeys
 from elke27_lib.client import Elke27Client
@@ -35,7 +35,7 @@ from custom_components.elke27.config_flow import (
     Elke27ConfigFlow,
 )
 from custom_components.elke27.const import (
-    CONF_INTEGRATION_SERIAL,
+    CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     DOMAIN,
 )
@@ -48,7 +48,7 @@ from homeassistant.helpers.selector import SelectSelector
 from tests.conftest import (
     HOST,
     HOST_2,
-    INTEGRATION_SERIAL,
+    INTEGRATION_ID,
     PANEL_MAC,
     PANEL_SERIAL,
     PANEL_SERIAL_2,
@@ -73,8 +73,8 @@ def flow_client() -> Generator[Any]:
             "custom_components.elke27.config_flow._create_client", return_value=client
         ),
         patch(
-            "custom_components.elke27.config_flow.async_get_integration_serial",
-            AsyncMock(return_value=INTEGRATION_SERIAL),
+            "custom_components.elke27.config_flow.generate_integration_id",
+            return_value=INTEGRATION_ID,
         ),
         patch("custom_components.elke27.async_setup_entry", return_value=True),
     ):
@@ -129,7 +129,7 @@ async def test_reauth_accepts_formatted_mac_when_panel_reports_raw_mac(
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     mock_config_entry.add_to_hass(hass)
@@ -248,7 +248,7 @@ async def test_reauth_succeeds_when_entry_unique_id_is_none_no_mac_panel(
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     mock_config_entry.add_to_hass(hass)
@@ -284,7 +284,7 @@ async def test_reauth_legacy_none_backfill_clears_duplicate_unique_id_repair(
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     mock_config_entry.add_to_hass(hass)
@@ -325,7 +325,7 @@ async def test_reauth_legacy_none_skips_unique_id_when_identity_is_taken(
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     owner.add_to_hass(hass)
@@ -337,7 +337,7 @@ async def test_reauth_legacy_none_skips_unique_id_when_identity_is_taken(
             CONF_HOST: HOST_2,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
         options={
             CONF_PANEL_INFO: dataclasses.asdict(
@@ -374,7 +374,7 @@ async def test_reauth_legacy_none_accepts_live_mac_when_stored_panel_had_no_mac(
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
         options={
             CONF_PANEL_INFO: dataclasses.asdict(
@@ -406,7 +406,7 @@ async def test_reauth_legacy_none_matches_stored_panel_info(
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
         options={CONF_PANEL_INFO: dataclasses.asdict(snapshot.panel)},
     )
@@ -442,7 +442,7 @@ async def test_reauth_legacy_none_rejects_mismatched_stored_panel_info(
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
         options={CONF_PANEL_INFO: dataclasses.asdict(snapshot.panel)},
     )
@@ -494,7 +494,7 @@ async def test_manual_aborts_already_configured_legacy_none_unique_id_no_mac(
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     legacy.add_to_hass(hass)
@@ -522,7 +522,7 @@ async def test_manual_creates_entry_without_storing_codes(
     assert data[CONF_HOST] == HOST
     assert data[CONF_PORT] == PORT
     assert data[CONF_LINK_KEYS_JSON] == LINK_KEYS.to_json()
-    assert data[CONF_INTEGRATION_SERIAL] == INTEGRATION_SERIAL
+    assert data[CONF_INTEGRATION_ID] == INTEGRATION_ID
     assert result["result"].unique_id == PANEL_MAC
     stored = repr(data) + repr(result["options"])
     assert ACCESS_CODE not in stored
@@ -663,7 +663,7 @@ async def test_reauth_relinks_same_panel(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert mock_config_entry.data[CONF_LINK_KEYS_JSON] == LINK_KEYS.to_json()
-    assert mock_config_entry.data[CONF_INTEGRATION_SERIAL] == INTEGRATION_SERIAL
+    assert mock_config_entry.data[CONF_INTEGRATION_ID] == INTEGRATION_ID
     assert mock_config_entry.data[CONF_HOST] == HOST
     assert ACCESS_CODE not in repr(mock_config_entry.data)
     link_kwargs = flow_client.async_link.await_args.kwargs
@@ -687,7 +687,7 @@ async def test_reauth_succeeds_when_entry_unique_id_is_panel_serial(
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     mock_config_entry.add_to_hass(hass)
@@ -763,3 +763,48 @@ async def test_discovery_panel_select_rescan_and_dynamic_labels(
     assert "192.0.2.20" in options[1]["label"]
     assert options[2]["value"] == "1"
     assert "Garage" in options[2]["label"]
+
+
+async def test_manual_flow_sends_generated_integration_id_as_sn(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """The flow-generated ID is stored and sent as the client sn when linking."""
+    with patch(
+        "custom_components.elke27.config_flow.generate_integration_id",
+        return_value="314159265358",
+    ):
+        result = await _start_manual(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: HOST,
+                CONF_ACCESS_CODE: ACCESS_CODE,
+                CONF_PASSPHRASE: PASSPHRASE,
+            },
+        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_INTEGRATION_ID] == "314159265358"
+    assert "integration_serial" not in result["data"]
+    identity = flow_client.async_link.await_args.kwargs["client_identity"]
+    assert identity == {"mn": "222", "sn": "314159265358"}
+
+
+async def test_reauth_keeps_existing_integration_id(
+    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+) -> None:
+    """Reauth reuses the entry's integration ID; it never generates a new one."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    with patch(
+        "custom_components.elke27.config_flow.generate_integration_id",
+        return_value="999999999999",
+    ) as gen:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+        )
+    assert result["reason"] == "reauth_successful"
+    gen.assert_not_called()
+    assert mock_config_entry.data[CONF_INTEGRATION_ID] == INTEGRATION_ID
+    identity = flow_client.async_link.await_args.kwargs["client_identity"]
+    assert identity["sn"] == INTEGRATION_ID

@@ -21,7 +21,7 @@ from custom_components.elke27.config_flow import (
     SETUP_METHOD_MANUAL,
 )
 from custom_components.elke27.const import (
-    CONF_INTEGRATION_SERIAL,
+    CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     CONF_PANEL_MAC,
     CONF_PANEL_MAC_FILLED,
@@ -40,7 +40,7 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import issue_registry as ir
-from tests.conftest import HOST, INTEGRATION_SERIAL, LINK_KEYS_JSON, PORT
+from tests.conftest import HOST, INTEGRATION_ID, LINK_KEYS_JSON, PORT
 
 MAC = "2CCF67CA3B20"
 MAC_FMT = "2c:cf:67:ca:3b:20"
@@ -63,7 +63,7 @@ def _entry(
         CONF_HOST: host,
         CONF_PORT: PORT,
         CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-        CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        CONF_INTEGRATION_ID: INTEGRATION_ID,
         **extra,
     }
     if mac is not None:
@@ -121,8 +121,8 @@ def flow_client() -> Generator[Any]:
             "custom_components.elke27.config_flow._create_client", return_value=client
         ),
         patch(
-            "custom_components.elke27.config_flow.async_get_integration_serial",
-            AsyncMock(return_value=INTEGRATION_SERIAL),
+            "custom_components.elke27.config_flow.generate_integration_id",
+            return_value=INTEGRATION_ID,
         ),
         patch("custom_components.elke27.async_setup_entry", return_value=True),
     ):

@@ -7,7 +7,8 @@ READY_TIMEOUT = 30
 
 CONF_LINK_KEYS_JSON = "link_keys_json"
 CONF_PANEL = "panel"
-CONF_INTEGRATION_SERIAL = "integration_serial"
+# Flow-generated client sn sent to the panel: 12 digits, no leading zero.
+CONF_INTEGRATION_ID = "integration_id"
 # Panel MAC from UDP discovery (MAC_ADDR), 12 uppercase hex, no separators.
 CONF_PANEL_MAC = "panel_mac"
 # True when CONF_PANEL_MAC was filled in on an entry created without it (0.1.8
@@ -17,7 +18,7 @@ DISCOVER_HOST_TIMEOUT = 3.0
 ISSUE_PANEL_MAC_MISMATCH = "panel_mac_mismatch"
 
 MANUFACTURER_NUMBER = 222
-INTEGRATION_SERIAL_LENGTH = 12
+INTEGRATION_ID_LENGTH = 12
 
 ISSUE_RECONNECT_FAILED = "reconnect_failed"
 RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD = 3

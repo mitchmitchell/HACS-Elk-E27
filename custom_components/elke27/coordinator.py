@@ -55,7 +55,7 @@ from .arming import (
     snapshot_with_status,
 )
 from .const import (
-    CONF_INTEGRATION_SERIAL,
+    CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     CONF_PANEL,
     DOMAIN,
@@ -129,7 +129,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._host: str = entry.data[CONF_HOST]
         self._port: int = entry.data[CONF_PORT]
         self._link_keys_json: str = entry.data.get(CONF_LINK_KEYS_JSON) or ""
-        self._integration_serial: str = entry.data.get(CONF_INTEGRATION_SERIAL) or ""
+        self._integration_id: str = entry.data.get(CONF_INTEGRATION_ID) or ""
         self._panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
         self._client: Elke27Client | None = None
         self._connection_unsubscribe: Callable[[], None] | None = None
@@ -336,7 +336,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 msg = "Stored link keys are invalid; relink required"
                 raise Elke27LinkRequiredError(msg) from err
             client = Elke27Client(ClientConfig())
-            client.set_client_identity(build_client_identity(self._integration_serial))
+            client.set_client_identity(build_client_identity(self._integration_id))
             self._client = client
 
             def _raise_not_ready() -> None:

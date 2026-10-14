@@ -16,7 +16,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.elke27.const import (
-    CONF_INTEGRATION_SERIAL,
+    CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     DOMAIN,
 )
@@ -28,7 +28,7 @@ PANEL_SERIAL_2 = "elk-panel-serial-002"
 HOST = "192.0.2.10"
 HOST_2 = "192.0.2.20"
 PORT = 2101
-INTEGRATION_SERIAL = "123456789012"
+INTEGRATION_ID = "123456789012"
 LINK_KEYS_JSON = LinkKeys(
     tempkey_hex="00", linkkey_hex="11", linkhmac_hex="22"
 ).to_json()
@@ -86,7 +86,7 @@ def mock_config_entry() -> MockConfigEntry:
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
 
@@ -152,7 +152,7 @@ def make_coordinator(
         CONF_HOST: host,
         CONF_PORT: port,
         CONF_LINK_KEYS_JSON: link_keys_json,
-        CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        CONF_INTEGRATION_ID: INTEGRATION_ID,
         "panel": {"panel_name": panel_name} if panel_name else None,
     }
     entry.async_create_background_task.side_effect = (
