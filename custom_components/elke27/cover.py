@@ -13,19 +13,12 @@ from homeassistant.components.cover import (
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import (
-    area_device_info,
-    area_has_device,
-    build_unique_id,
-    device_info_for_entry,
-    unique_base,
-)
+from .entity import build_unique_id, device_info_for_entry, unique_base
 
 if TYPE_CHECKING:
     from elke27_lib import BarrierState, PanelSnapshot
 
     from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.device_registry import DeviceInfo
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
     from .models import Elke27ConfigEntry
@@ -55,10 +48,7 @@ async def async_setup_entry(
     known_ids: set[int] = set()
 
     def _async_add_barriers() -> None:
-        snapshot = coordinator.data
-        barriers = snapshot.barriers if snapshot is not None else None
-        if not barriers:
-            return
+        barriers = coordinator.data.barriers
         entities: list[Elke27BarrierCover] = []
         for barrier_id, barrier in barriers.items():
             if barrier_id in known_ids:
@@ -70,21 +60,6 @@ async def async_setup_entry(
 
     _async_add_barriers()
     entry.async_on_unload(coordinator.async_add_listener(_async_add_barriers))
-
-
-def device_info_for_barrier(
-    coordinator: Elke27DataUpdateCoordinator,
-    entry: Elke27ConfigEntry,
-    barrier: BarrierState,
-) -> DeviceInfo:
-    """Attach to the barrier's area device when it has one, else the panel."""
-    snapshot = coordinator.data
-    area_id = getattr(barrier, "area_id", None)
-    if snapshot is not None and area_has_device(snapshot, area_id):
-        return area_device_info(
-            coordinator, entry, area_id, snapshot.areas.get(area_id)
-        )
-    return device_info_for_entry(coordinator, entry)
 
 
 class Elke27BarrierCover(CoordinatorEntity[Elke27DataUpdateCoordinator], CoverEntity):
@@ -117,7 +92,7 @@ class Elke27BarrierCover(CoordinatorEntity[Elke27DataUpdateCoordinator], CoverEn
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry), barrier_id
         )
-        self._attr_device_info = device_info_for_barrier(coordinator, entry, barrier)
+        self._attr_device_info = device_info_for_entry(coordinator, entry)
 
     def _barrier(self) -> BarrierState | None:
         return _get_barrier(self.coordinator.data, self._barrier_id)
@@ -146,7 +121,5 @@ class Elke27BarrierCover(CoordinatorEntity[Elke27DataUpdateCoordinator], CoverEn
         await self.coordinator.async_set_barrier(self._barrier_id, open_=False)
 
 
-def _get_barrier(
-    snapshot: PanelSnapshot | None, barrier_id: int
-) -> BarrierState | None:
-    return snapshot.barriers.get(barrier_id) if snapshot is not None else None
+def _get_barrier(snapshot: PanelSnapshot, barrier_id: int) -> BarrierState | None:
+    return snapshot.barriers.get(barrier_id)

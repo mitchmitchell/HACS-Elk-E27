@@ -725,7 +725,7 @@ Each garage door set up on your panel appears in Home Assistant as a garage door
 - Stop: you can't stop the door partway.
 - Position: you can't set or see how far open it is.
 - "Opening" and "Closing" states: the integration doesn't guess that a door is moving.
-- A door the panel reports as stopped, or in any other state than open or closed, shows as **unknown**. The panel's own status value is shown in the cover's `raw_status` attribute.
+- A door the panel reports as stopped, or in any other state than open or closed, shows as **unknown**.
 
 **Before you start**
 - The user code the integration signs in with must belong to a panel user with automation permission. Without it, the panel refuses open and close commands and Home Assistant shows: "The panel refused the garage door command; the configured Elk user may lack automation authority".
