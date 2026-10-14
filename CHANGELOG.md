@@ -3,7 +3,7 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
-## [Unreleased] - 0.1.9 (draft; #50 approved, not merged)
+## [Unreleased] - 0.1.9 (draft; #50 merged as 139acbe)
 
 ### Changed
 - Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/), same as 0.1.8.1 (#50).
