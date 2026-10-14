@@ -1,4 +1,4 @@
-# ruff: noqa: S101, SLF001, TC001, ARG001, PLR2004, PT018, TC003
+# ruff: noqa: S101, TC001, ARG001, PLR2004, PT018, TC003
 """Direct tests for ReconnectSupervisor (ADR-0125 D2)."""
 
 from __future__ import annotations
@@ -54,6 +54,14 @@ class _Harness:
             raise err
 
 
+async def _run(h: _Harness) -> None:
+    """Start the loop through the public API and wait for it to end."""
+    h.supervisor.start()
+    task = h.supervisor.task
+    assert task is not None
+    await task
+
+
 @pytest.fixture
 def ir_mock() -> Iterator[MagicMock]:
     """Patch the issue registry helpers used by the supervisor."""
@@ -102,7 +110,7 @@ async def test_backoff_bounds_and_cap(hass: HomeAssistant, ir_mock: MagicMock) -
     # Ten transport failures, then success.
     h.connect.side_effect = [Elke27ConnectionError("down")] * 10 + [None]
     with patch(f"{MODULE}.random.uniform", return_value=1.2) as uniform:
-        await h.supervisor._async_run()
+        await _run(h)
     uniform.assert_called_with(0.8, 1.2)
     delays = [c.args[0] for c in ir_mock.sleep.await_args_list]
     expected = [min(300, 2**n) * 1.2 for n in range(1, 11)]
@@ -116,12 +124,12 @@ async def test_non_transport_issue_on_third_failure(
 ) -> None:
     """Two non-transport failures raise no issue; the third does."""
     h = _Harness(hass, [Elke27ProtocolError("a"), Elke27ProtocolError("b")])
-    await h.supervisor._async_run()
+    await _run(h)
     ir_mock.create.assert_not_called()
     assert not h.supervisor.issue_active
 
     h = _Harness(hass, [Elke27ProtocolError("a")] * 3)
-    await h.supervisor._async_run()
+    await _run(h)
     assert ir_mock.create.call_count == 1
     assert ir_mock.create.call_args.args[1:3] == (DOMAIN, ISSUE_ID)
     assert h.supervisor.issue_active
@@ -132,7 +140,7 @@ async def test_transport_failures_never_raise_issue(
 ) -> None:
     """Ten transport failures in a row raise no Repairs issue."""
     h = _Harness(hass, [Elke27ConnectionError("down")] * 10)
-    await h.supervisor._async_run()
+    await _run(h)
     ir_mock.create.assert_not_called()
     assert h.supervisor.attempts == 10
 
@@ -150,7 +158,7 @@ async def test_transport_failure_does_not_reset_streak(
             Elke27ProtocolError("3"),
         ],
     )
-    await h.supervisor._async_run()
+    await _run(h)
     assert ir_mock.create.call_count == 1
 
 
@@ -161,8 +169,8 @@ async def test_auth_deletes_issue_before_reauth_once(
     h = _Harness(hass, [])
     h.entry.async_start_reauth = ir_mock.reauth
     h.connect.side_effect = Elke27AuthError("bad")
-    await h.supervisor._async_run()
-    await h.supervisor._async_run()
+    await _run(h)
+    await _run(h)
     ordered = [c for c in ir_mock.mock_calls if c[0] in ("delete", "reauth")]
     assert ordered[:2] == [call.delete(hass, DOMAIN, ISSUE_ID), call.reauth(hass)]
     assert ir_mock.reauth.call_count == 1
@@ -177,7 +185,7 @@ async def test_success_clears_issue_and_notifies_once(
     """Success clears the issue, resets attempts and notifies exactly once."""
     h = _Harness(hass, [])
     h.connect.side_effect = [Elke27ProtocolError("x")] * 3 + [None]
-    await h.supervisor._async_run()
+    await _run(h)
     assert ir_mock.create.call_count == 1
     ir_mock.delete.assert_called_with(hass, DOMAIN, ISSUE_ID)
     assert not h.supervisor.issue_active
@@ -227,6 +235,6 @@ async def test_connect_is_the_only_side_effect(
         Elke27ProtocolError("p"),
         None,
     ]
-    await h.supervisor._async_run()
+    await _run(h)
     assert h.connect.await_count == 3
     assert h.client.mock_calls == []
