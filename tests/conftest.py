@@ -158,4 +158,7 @@ def make_coordinator(
     entry.async_create_background_task.side_effect = (
         lambda hass_, coro, name: hass_.async_create_background_task(coro, name)
     )
-    return Elke27DataUpdateCoordinator(hass, entry)
+    coordinator = Elke27DataUpdateCoordinator(hass, entry)
+    # async_setup_entry sets this before the platforms load.
+    coordinator.panel_device_id = "panel-device-id"
+    return coordinator
