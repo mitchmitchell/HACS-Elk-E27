@@ -74,7 +74,15 @@ def panel_identity_matches(
 
 
 def generate_integration_id() -> str:
-    """Return a new random integration ID: 12 decimal digits, no leading zero."""
+    """
+    Return a new random integration ID: 12 decimal digits, no leading zero.
+
+    This is the integration's client ID (the "sn" sent to the panel in the
+    link/HELLO), not a panel serial number. The panel stores it in a field of
+    at most 12 characters (longer values were stored as 000000000), and it is
+    needed during the config flow, before entry_id exists, so entry_id can't be
+    used. 12-digit decimal is the hardware-proven form (ADR-0126 §1b).
+    """
     return str(secrets.randbelow(9 * 10**11) + 10**11)
 
 

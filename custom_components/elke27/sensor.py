@@ -38,7 +38,6 @@ class Elke27SensorDescription(SensorEntityDescription):
     """Describe an Elke27 sensor."""
 
     key: str
-    numeric_id: int
     value_fn: Callable[
         [Elke27DataUpdateCoordinator, Any, Elke27ConfigEntry], StateType | None
     ]
@@ -47,7 +46,6 @@ class Elke27SensorDescription(SensorEntityDescription):
 SENSORS: tuple[Elke27SensorDescription, ...] = (
     Elke27SensorDescription(
         key="panel_name",
-        numeric_id=1,
         translation_key="panel_name",
         value_fn=lambda coordinator, snapshot, entry: panel_display_name(
             snapshot, coordinator, entry
@@ -55,7 +53,6 @@ SENSORS: tuple[Elke27SensorDescription, ...] = (
     ),
     Elke27SensorDescription(
         key="panel_ready",
-        numeric_id=2,
         translation_key="panel_ready",
         device_class=SensorDeviceClass.ENUM,
         options=["connected", "disconnected"],
@@ -100,8 +97,7 @@ class Elke27Sensor(CoordinatorEntity[Elke27DataUpdateCoordinator], SensorEntity)
         self._attr_translation_key = description.translation_key
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry),
-            "panel",
-            description.numeric_id,
+            description.key,
         )
         self._attr_device_info = device_info_for_entry(coordinator, entry)
 

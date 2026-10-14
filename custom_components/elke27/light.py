@@ -84,7 +84,6 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         self._attr_name = light.name or f"Light {light_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry),
-            "light",
             light_id,
         )
         self._attr_device_info = device_info_for_entry(coordinator, entry)
