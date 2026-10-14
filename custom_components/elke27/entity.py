@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -20,10 +21,14 @@ from .identity import panel_serial_from_info
 if TYPE_CHECKING:
     from elke27_lib import AreaState, PanelSnapshot, ZoneState
 
-    from homeassistant.core import HomeAssistant
-
     from .coordinator import Elke27DataUpdateCoordinator
     from .models import Elke27ConfigEntry
+
+# HA 2026.8+ accepts via_device_id; the pinned HA only has the identifier form.
+SUPPORTS_VIA_DEVICE_ID = (
+    "via_device_id"
+    in inspect.signature(dr.DeviceRegistry.async_get_or_create).parameters
+)
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9 _-]")
 
@@ -145,46 +150,37 @@ def area_device_info(
     area: AreaState | None,
 ) -> DeviceInfo:
     """
-    Build device info for an area device.
+    Build device info for an area device; entity registration creates it.
 
-    The link to the panel device is not set here: `DeviceInfo["via_device"]`
-    is deprecated (removed in HA 2027.8). async_link_area_device sets
-    via_device_id on the registry entry instead.
+    The panel device is registered once in async_setup_entry and its id kept on
+    the coordinator. Newer Home Assistant gets a ChildDeviceInfo (the area is a
+    logical part of the panel), else DeviceInfo with via_device_id. The pinned
+    Home Assistant has neither, so it gets the identifier form of via_device
+    (deprecated, removed in HA 2027.8, but the only option there).
     """
     key = entry_identity_key(coordinator, entry)
+    identifiers = {(DOMAIN, area_device_identifier(key, area_id))}
+    name = area_device_name(area_id, area)
+    panel_device_id = getattr(coordinator, "panel_device_id", None)
+    if isinstance(panel_device_id, str):
+        child_info = getattr(dr, "ChildDeviceInfo", None)
+        if child_info is not None:
+            return child_info(  # type: ignore[no-any-return]
+                identifiers=identifiers, name=name, parent_device_id=panel_device_id
+            )
+        if SUPPORTS_VIA_DEVICE_ID:
+            return DeviceInfo(  # type: ignore[typeddict-unknown-key]
+                identifiers=identifiers,
+                name=name,
+                model=AREA_DEVICE_MODEL,
+                via_device_id=panel_device_id,
+            )
     return DeviceInfo(
-        identifiers={(DOMAIN, area_device_identifier(key, area_id))},
-        name=area_device_name(area_id, area),
+        identifiers=identifiers,
+        name=name,
         model=AREA_DEVICE_MODEL,
+        via_device=(DOMAIN, key),
     )
-
-
-def async_link_area_device(
-    hass: HomeAssistant,
-    coordinator: Elke27DataUpdateCoordinator,
-    entry: Elke27ConfigEntry,
-    area_id: int,
-    area: AreaState | None,
-) -> None:
-    """
-    Create the area device and link it to the panel device by device id.
-
-    Uses via_device_id (supported on every HA version this integration runs
-    on) rather than the deprecated via_device identifier tuple. Does nothing
-    when the panel device is not registered yet.
-    """
-    device_registry = dr.async_get(hass)
-    panel = device_registry.async_get_device(
-        identifiers={(DOMAIN, entry_identity_key(coordinator, entry))}
-    )
-    if panel is None:
-        return
-    device = device_registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        **area_device_info(coordinator, entry, area_id, area),
-    )
-    if device.via_device_id != panel.id:
-        device_registry.async_update_device(device.id, via_device_id=panel.id)
 
 
 def device_info_for_zone(

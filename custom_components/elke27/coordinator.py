@@ -132,6 +132,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._integration_id: str = entry.data.get(CONF_INTEGRATION_ID) or ""
         self._panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
         self._client: Elke27Client | None = None
+        # Device id of the panel device, set in async_setup_entry (E2 via link).
+        self.panel_device_id: str | None = None
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._connect_lock = asyncio.Lock()
         self._area_arm_locks: dict[int, asyncio.Lock] = {}
