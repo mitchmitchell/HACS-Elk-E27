@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -231,8 +232,8 @@ async def test_result_without_status_is_no_reread(hass: HomeAssistant) -> None:
     assert coordinator.fallback_refresh_count == 0
 
 
-async def test_fallback_shares_q5_stale_refresh(hass: HomeAssistant) -> None:
-    """A fallback while Q5's refresh runs waits on it instead of reading."""
+async def test_fallback_waits_for_q5_then_reads_fresh(hass: HomeAssistant) -> None:
+    """A Q5 refresh in flight predates the write: wait for it, then read again."""
     client = FakeClient(_ok(False))
     coordinator = _coordinator(hass, client)
     release = asyncio.Event()
@@ -242,15 +243,20 @@ async def test_fallback_shares_q5_stale_refresh(hass: HomeAssistant) -> None:
 
     coordinator._stale_task = hass.async_create_task(_stale())
     task = hass.async_create_task(_run(coordinator, "arm"))
-    await asyncio.sleep(0)
+    for _ in range(5):
+        await asyncio.sleep(0)
+    # Still waiting on the older refresh: no read of its own yet.
+    assert client.keys(READS) == []
+    assert not task.done()
     release.set()
     assert await task
-    assert client.keys(READS) == []
+    # The post-command read starts only after the stale refresh finished.
+    assert client.keys(READS) == ["area_get_status"]
     assert coordinator.fallback_refresh_count == 1
 
 
-async def test_concurrent_fallbacks_single_flight(hass: HomeAssistant) -> None:
-    """Two fallbacks at once share one read."""
+async def test_concurrent_fallbacks_each_read_after_write(hass: HomeAssistant) -> None:
+    """A second fallback never reuses a read that started before its write."""
     client = FakeClient(_ok(False))
     client.read_gate = asyncio.Event()
     coordinator = _coordinator(hass, client)
@@ -258,26 +264,37 @@ async def test_concurrent_fallbacks_single_flight(hass: HomeAssistant) -> None:
     second = hass.async_create_task(_run(coordinator, "disarm"))
     for _ in range(5):
         await asyncio.sleep(0)
+    # One panel read at a time: the second waits for the first.
+    assert client.keys(READS) == ["area_get_status"]
     client.read_gate.set()
     assert await first
     assert await second
-    assert client.keys(READS) == ["area_get_status"]
+    assert client.keys(READS) == ["area_get_status", "area_get_status"]
     assert coordinator.fallback_refresh_count == 2
 
 
-async def test_q5_skips_while_fallback_in_flight(hass: HomeAssistant) -> None:
-    """Q5's stale check does not start a refresh during a fallback read."""
+@pytest.mark.parametrize("fallback_running", [True, False])
+async def test_q5_skips_while_fallback_in_flight(
+    hass: HomeAssistant, fallback_running: bool
+) -> None:
+    """Q5 skips during a fallback read and schedules once there is none."""
     client = FakeClient(_ok(True))
+    client.is_ready = True
+    client.snapshot = dataclasses.replace(panel_snapshot(), stale=True)
     coordinator = _coordinator(hass, client)
-    coordinator.data = type("S", (), {"stale": True})()
     gate = asyncio.Event()
-    coordinator._fallback_task = hass.async_create_task(gate.wait())
+    if fallback_running:
+        coordinator._fallback_task = hass.async_create_task(gate.wait())
     coordinator._stale_since = 0.0
     coordinator._create_background_task = MagicMock()
     coordinator._async_check_stale(None)
-    coordinator._create_background_task.assert_not_called()
-    gate.set()
-    await coordinator._fallback_task
+    if fallback_running:
+        coordinator._create_background_task.assert_not_called()
+        gate.set()
+        await coordinator._fallback_task
+    else:
+        coordinator._create_background_task.assert_called_once()
+        coordinator._create_background_task.call_args.args[0].close()
 
 
 async def test_stale_properties(hass: HomeAssistant) -> None:
