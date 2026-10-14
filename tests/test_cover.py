@@ -160,7 +160,7 @@ def test_device_is_area_when_barrier_has_area() -> None:
     barrier = MagicMock(area_id=2, status="OPEN", name="Door")
     info = cover_mod.device_info_for_barrier(coord, _entry(), barrier)
     assert info["name"] == "Garage"
-    assert info.get("via_device") is not None
+    assert info["model"] == "Area"
 
 
 @pytest.mark.parametrize(
