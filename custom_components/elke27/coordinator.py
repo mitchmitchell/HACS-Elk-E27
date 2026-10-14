@@ -1044,19 +1044,21 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     async def _async_fallback_read(
         self, *, area_id: int | None, zone_id: int | None
     ) -> PanelSnapshot | None:
-        """Run one fallback read, single-flight with the Q5 stale refresh."""
-        stale_task = self._stale_task
-        if stale_task is not None and not stale_task.done():
-            # Q5's refresh is already reading the panel: share it.
-            await asyncio.shield(stale_task)
-            return self.get_snapshot()
-        task = self._fallback_task
-        if task is None or task.done():
-            task = self._create_background_task(
-                self._async_fallback_status(area_id=area_id, zone_id=zone_id),
-                f"{DOMAIN} post-command fallback read",
-            )
-            self._fallback_task = task
+        """
+        Run one fallback read that starts after this command's write.
+
+        A Q5 stale refresh or another command's fallback read already in flight
+        started before this write, so its snapshot may predate it. Wait for it
+        to finish (keeping one panel read at a time), then do a fresh read.
+        """
+        for pending in (self._stale_task, self._fallback_task):
+            if pending is not None and not pending.done():
+                await asyncio.wait([pending])
+        task = self._create_background_task(
+            self._async_fallback_status(area_id=area_id, zone_id=zone_id),
+            f"{DOMAIN} post-command fallback read",
+        )
+        self._fallback_task = task
         try:
             return await asyncio.shield(task)
         except COMMAND_ERRORS as err:
