@@ -412,10 +412,15 @@ async def test_q5_waits_for_all_fallback_reads(
     assert client.keys({"csm"}) == []
     client.read_gate.set()
     # Keep the stale timer firing while the queued reads run one by one.
-    while not all(task.done() for task in tasks):
+    # Bounded, so a regression fails here instead of hanging the test.
+    for _ in range(50):
+        if all(task.done() for task in tasks):
+            break
         freezer.tick(STALE_CHECK_INTERVAL)
         async_fire_time_changed(hass)
         await asyncio.sleep(0)
+    else:
+        pytest.fail("fallback reads did not finish within 50 stale ticks")
     for task in tasks:
         assert await task
     await _tick_stale_timer(hass, freezer)
