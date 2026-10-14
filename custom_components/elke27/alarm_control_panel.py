@@ -21,7 +21,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .arming import ZoneBypassFailedError, area_faulted_zones, is_definitive_refusal
 from .const import DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import area_device_info, build_unique_id, raise_if_not_sent, unique_base
+from .entity import (
+    area_device_info,
+    async_link_area_device,
+    build_unique_id,
+    raise_if_not_sent,
+    unique_base,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -56,6 +62,8 @@ async def async_setup_entry(
             if area_id in known_ids:
                 continue
             known_ids.add(area_id)
+            # Areas that appear after setup get their panel link here.
+            async_link_area_device(_hass, coordinator, entry, area_id, area)
             entities.append(
                 Elke27AreaAlarmControlPanel(coordinator, entry, area_id, area)
             )

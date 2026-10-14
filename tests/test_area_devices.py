@@ -225,18 +225,18 @@ def test_area_device_info_entry_id_tier() -> None:
     assert entry_identity_key(coordinator, entry) == "entry-1"
     info = area_device_info(coordinator, entry, 3, AreaState(area_id=3, name=None))
     assert info["identifiers"] == {(DOMAIN, "entry-1:area:3")}
-    assert info["via_device"] == (DOMAIN, "entry-1")
+    assert "via_device" not in info
     assert info["name"] == "Area 3"
 
 
 def test_area_device_info_mac_tier() -> None:
-    """The MAC tier key is used for the area identifier and via_device."""
+    """The MAC tier key is used for the area identifier (no deprecated via_device)."""
     coordinator = _coordinator(panel_snapshot())
     info = area_device_info(
         coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
     )
     assert info["identifiers"] == {(DOMAIN, f"{KEY}:area:1")}
-    assert info["via_device"] == (DOMAIN, KEY)
+    assert "via_device" not in info
     assert info["name"] == "House"
 
 
