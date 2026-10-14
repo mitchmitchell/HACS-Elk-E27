@@ -3,19 +3,25 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
-## [Unreleased] - 0.1.9 (draft; #50 not merged)
+## [Unreleased] - 0.1.9 (draft; #50 approved, not merged)
 
 ### Changed
-- Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/), same as 0.1.8.1. #50's manifest still pins 0.3.11 and must move to 0.3.13.
+- Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/), same as 0.1.8.1 (#50).
 - The integration always starts from an empty panel snapshot, never `None` (#50).
 - A zone with no reported open/closed state shows unknown with the default icon (#50).
+- The panel name sensor falls back to the entry title (#50).
+- A link-key decryption failure during setup shows invalid authentication (#50).
 - Strict mypy runs in CI. Unused snapshot helpers were removed; link-check probing still
   uses `request_link_check` when the client supports it (#50).
 
+### Removed
+- Diagnostics field `snapshot_available` (a snapshot is always present). Update scripts that
+  parse diagnostics (#50).
+
 ### Breaking
-- None found compared with 0.1.8 (checked at #50 6f1211b); not yet re-checked against
-  0.1.8.1, since #50 predates #60. Upgrading from 0.1.8 or 0.1.8.1: update and restart, no
-  re-add. Upgrading from 0.1.7? Follow the 0.1.8 delete-and-re-add steps.
+- No config, identity or entity ID changes compared with 0.1.8.1 (checked at #50 ef6ad2f).
+  Upgrading from 0.1.8 or 0.1.8.1: update and restart, no re-add. Upgrading from 0.1.7?
+  Follow the 0.1.8 delete-and-re-add steps.
 
 ## [0.1.8.1] - 2026-10-13
 
