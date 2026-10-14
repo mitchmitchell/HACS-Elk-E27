@@ -16,7 +16,6 @@ from .entity import (
     build_unique_id,
     device_info_for_entry,
     raise_if_not_sent,
-    sanitize_name,
     unique_base,
 )
 
@@ -47,9 +46,6 @@ async def async_setup_entry(
 
     def _async_add_outputs() -> None:
         snapshot = coordinator.data
-        if snapshot is None:
-            _LOGGER.debug("Output switches skipped because snapshot is unavailable")
-            return
         entities: list[Elke27OutputSwitch] = []
         if not snapshot.outputs:
             _LOGGER.debug("No outputs available for entity creation")
@@ -86,7 +82,7 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         super().__init__(coordinator)
         self._hub = hub
         self._output_id = output_id
-        self._attr_name = sanitize_name(output.name) or f"Output {output_id}"
+        self._attr_name = output.name or f"Output {output_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "output",
@@ -102,7 +98,10 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         if output is None:
             self._log_missing()
             return None
-        return output.state
+        state = output.state
+        if state is None:
+            return None
+        return bool(state)
 
     @property
     def available(self) -> bool:
@@ -139,7 +138,5 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         _LOGGER.debug("Output %s missing from snapshot", self._output_id)
 
 
-def _get_output(snapshot: PanelSnapshot | None, output_id: int) -> OutputState | None:
-    if snapshot is None:
-        return None
+def _get_output(snapshot: PanelSnapshot, output_id: int) -> OutputState | None:
     return snapshot.outputs.get(output_id)

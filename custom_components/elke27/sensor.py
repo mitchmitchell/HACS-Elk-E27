@@ -14,7 +14,12 @@ from homeassistant.const import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import build_unique_id, device_info_for_entry, get_panel_field, unique_base
+from .entity import (
+    build_unique_id,
+    device_info_for_entry,
+    panel_display_name,
+    unique_base,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,7 +40,7 @@ class Elke27SensorDescription(SensorEntityDescription):
 
     key: str
     numeric_id: int
-    value_fn: Callable[[Elke27Hub, Any | None], StateType | None]
+    value_fn: Callable[[Elke27Hub, Any, Elke27ConfigEntry], StateType | None]
 
 
 SENSORS: tuple[Elke27SensorDescription, ...] = (
@@ -43,9 +48,7 @@ SENSORS: tuple[Elke27SensorDescription, ...] = (
         key="panel_name",
         numeric_id=1,
         translation_key="panel_name",
-        value_fn=lambda hub, snapshot: get_panel_field(
-            snapshot, hub.panel_name, "name"
-        ),
+        value_fn=lambda hub, snapshot, entry: panel_display_name(snapshot, hub, entry),
     ),
     Elke27SensorDescription(
         key="panel_ready",
@@ -53,7 +56,9 @@ SENSORS: tuple[Elke27SensorDescription, ...] = (
         translation_key="panel_ready",
         device_class=SensorDeviceClass.ENUM,
         options=["connected", "disconnected"],
-        value_fn=lambda hub, _snapshot: "connected" if hub.is_ready else "disconnected",
+        value_fn=lambda hub, _snapshot, _entry: (
+            "connected" if hub.is_ready else "disconnected"
+        ),
     ),
 )
 
@@ -103,4 +108,6 @@ class Elke27Sensor(CoordinatorEntity[Elke27DataUpdateCoordinator], SensorEntity)
     @property
     def native_value(self) -> StateType | None:
         """Return the current value."""
-        return self.entity_description.value_fn(self._hub, self.coordinator.data)
+        return self.entity_description.value_fn(
+            self._hub, self.coordinator.data, self._entry
+        )

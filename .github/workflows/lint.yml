@@ -25,10 +25,13 @@ jobs:
           cache: "pip"
 
       - name: Install requirements
-        run: python3 -m pip install -r requirements.txt
+        run: python3 -m pip install -r requirements_test.txt
 
       - name: Lint
         run: python3 -m ruff check .
 
       - name: Format
         run: python3 -m ruff format . --check
+
+      - name: Mypy
+        run: python3 -m mypy custom_components/elke27

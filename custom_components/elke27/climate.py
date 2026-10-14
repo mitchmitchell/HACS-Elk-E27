@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib.errors import Elke27PinRequiredError
 
-from homeassistant.components.climate import (
+from homeassistant.components.climate import ClimateEntity
+from homeassistant.components.climate.const import (
     ATTR_TARGET_TEMP_HIGH,
     ATTR_TARGET_TEMP_LOW,
     FAN_AUTO,
     FAN_ON,
-    ClimateEntity,
     ClimateEntityFeature,
     HVACAction,
     HVACMode,
@@ -26,7 +26,6 @@ from .entity import (
     build_unique_id,
     device_info_for_entry,
     raise_if_not_sent,
-    sanitize_name,
     unique_base,
 )
 from .temperature import normalize_temperature
@@ -79,9 +78,6 @@ async def async_setup_entry(
 
     def _async_add_tstats() -> None:
         snapshot = coordinator.data
-        if snapshot is None:
-            _LOGGER.debug("Thermostat entities skipped because snapshot is unavailable")
-            return
         entities: list[Elke27Thermostat] = []
         if not snapshot.thermostats:
             _LOGGER.debug("No thermostats available for entity creation")
@@ -109,13 +105,13 @@ class Elke27Thermostat(
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE_RANGE | ClimateEntityFeature.FAN_MODE
     )
-    _attr_hvac_modes: ClassVar[list[HVACMode]] = [
+    _attr_hvac_modes = [  # noqa: RUF012
         HVACMode.OFF,
         HVACMode.HEAT,
         HVACMode.COOL,
         HVACMode.HEAT_COOL,
     ]
-    _attr_fan_modes: ClassVar[list[str]] = [FAN_AUTO, FAN_ON]
+    _attr_fan_modes = [FAN_AUTO, FAN_ON]  # noqa: RUF012
     _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
     _attr_min_temp = 40
     _attr_max_temp = 99
@@ -132,7 +128,7 @@ class Elke27Thermostat(
         super().__init__(coordinator)
         self._hub = hub
         self._tstat_id = tstat_id
-        self._attr_name = sanitize_name(tstat.name) or f"Thermostat {tstat_id}"
+        self._attr_name = tstat.name or f"Thermostat {tstat_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "tstat",
@@ -158,6 +154,7 @@ class Elke27Thermostat(
             self._log_missing()
             return HVACMode.OFF
         mode = tstat.mode
+        # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
         if isinstance(mode, str):
             normalized = mode.strip().upper()
             return _TSTAT_TO_HVAC_MODE.get(normalized, HVACMode.OFF)
@@ -217,6 +214,7 @@ class Elke27Thermostat(
         if tstat is None:
             return None
         fan_mode = tstat.fan_mode
+        # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
         if isinstance(fan_mode, str):
             return _TSTAT_TO_FAN_MODE.get(fan_mode.strip().upper())
         return None
@@ -287,7 +285,5 @@ class Elke27Thermostat(
         _LOGGER.debug("Thermostat %s missing from snapshot", self._tstat_id)
 
 
-def _get_tstat(snapshot: PanelSnapshot | None, tstat_id: int) -> ThermostatState | None:
-    if snapshot is None:
-        return None
+def _get_tstat(snapshot: PanelSnapshot, tstat_id: int) -> ThermostatState | None:
     return snapshot.thermostats.get(tstat_id)
