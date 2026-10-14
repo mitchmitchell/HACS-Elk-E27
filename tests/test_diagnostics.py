@@ -3,15 +3,26 @@
 
 from __future__ import annotations
 
+import dataclasses
 from importlib.metadata import version as package_version
 
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from elke27_lib import ArmMode, CommandResult
+from elke27_lib.client import Result
+from freezegun.api import FrozenDateTimeFactory
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.elke27.const import (
     CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     CONF_PANEL_MAC,
     CONF_PANEL_MAC_FILLED,
+)
+from custom_components.elke27.coordinator import (
+    STALE_CHECK_INTERVAL,
+    STALE_REFRESH_AFTER,
 )
 from custom_components.elke27.diagnostics import async_get_config_entry_diagnostics
 from homeassistant.components.diagnostics import REDACTED
@@ -73,34 +84,53 @@ async def test_diagnostics_redact_identity(
 
 
 async def test_diagnostics_d5_fields_read_properties_only(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """D5 fields come from coordinator/supervisor properties, no client calls."""
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     coordinator = mock_config_entry.runtime_data.coordinator
-    coordinator._fallback_refresh_count = 2  # noqa: SLF001
-    coordinator._stale_auto_refresh_count = 3  # noqa: SLF001
+    # Two commands whose library refresh failed: two post-command fallback reads.
+    mock_client.client.async_arm_area.return_value = CommandResult(
+        route="test", status_refresh_ok=False
+    )
+    mock_client.client.async_disarm_area.return_value = CommandResult(
+        route="test", status_refresh_ok=False
+    )
+    mock_client.client.async_execute.return_value = Result.success(
+        {"arm_state": "DISARMED"}
+    )
+    assert await coordinator.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
+    assert await coordinator.async_disarm_area(1, "1234")
+    # A snapshot that stays stale: the stale timer runs one automatic read.
+    mock_client.snapshot = dataclasses.replace(mock_client.snapshot, stale=True)
+    steps = int(STALE_REFRESH_AFTER / STALE_CHECK_INTERVAL.total_seconds()) + 1
+    for _ in range(steps):
+        freezer.tick(STALE_CHECK_INTERVAL)
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
     mock_client.client.reset_mock()
 
     result = await async_get_config_entry_diagnostics(hass, mock_config_entry)
 
     called = [c for c in mock_client.client.mock_calls if not c[0].startswith("__")]
     assert called == []
-    assert "connected" not in result
     assert result["client_present"] is True
     assert result["client_ready"] is True
     assert result["last_update_success"] is True
     assert result["reconnect_attempts"] == 0
     assert result["repairs_issue_active"] is False
     assert result["reauth_requested"] is False
-    assert result["snapshot_stale"] is False
+    assert result["snapshot_stale"] is True
     assert result["stale_area_ids"] == []
     assert result["stale_zone_ids"] == []
     assert result["fallback_refresh_count"] == 2
-    assert result["last_fallback_at"] is None
-    assert result["stale_auto_refresh_count"] == 3
+    assert result["last_fallback_at"] is not None
+    assert result["stale_auto_refresh_count"] == 1
     assert result["integration_version"] == "0.2.0"
     assert result["elke27_version"] == package_version("elke27")
     assert result["area_device_count"] == len(mock_client.snapshot.areas)
