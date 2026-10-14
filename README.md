@@ -933,24 +933,24 @@ whole °F, so setpoints you set in °C are rounded.
 
 > [!WARNING]
 > **One-time delete and re-add required.** 0.2.0 can't upgrade an existing entry in place.
-> Entity names change; entity IDs are normally kept, because Home Assistant reuses them when
-> the same entity is added again. Check automations, scripts and dashboards that rely on
-> names. Entries left over from 0.1.x fail setup with:
-> "This entry was created before the integration ID existed, or its ID is invalid. Delete the integration and add it again."
+> Entity IDs and names change, so update your automations, dashboards and scripts.
+> Entries left over from 0.1.x fail setup with:
+> "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
 
 1. Make a Home Assistant backup.
-2. Note the entity names and IDs your automations, scripts and dashboards use.
+2. Note the entity IDs your automations, dashboards and scripts use.
 3. Delete the integration: Settings → Devices & services → Elk E27 Alarm Engine Integration → ⋮ → Delete.
 4. Update in HACS and restart Home Assistant.
 5. Add the integration again with the same access code and passphrase.
-6. Check that your entity IDs are unchanged, and fix automations, scripts and dashboards that rely on names.
+6. Update automations, dashboards and scripts to the new entity IDs.
 
 Each area now appears as its own device, with its zones under it; the area's alarm panel is
 named after the area, and zones are named "<area> <zone>". Zones with no area and panel-wide
-entities (outputs, lights, locks, thermostats, panel status) stay on the panel device. On a
-fresh install, entity IDs follow the new names (for example `alarm_control_panel.<area>`), and
-areas or zones with the same name get `_2`, `_3` IDs. Going back to 0.1.x also needs a delete
-and re-add. Requires elke27 0.3.14, which Home Assistant installs for you.
+entities (outputs, lights, locks, thermostats, panel status) stay on the panel device. New
+entity IDs follow the new names, for example `alarm_control_panel.<panel>_<area>` becomes
+`alarm_control_panel.<area>`, and areas or zones with the same name get `_2`, `_3` IDs.
+Going back to 0.1.x also needs a delete and re-add. Requires elke27 0.3.14, which Home
+Assistant installs for you.
 <!-- PENDING MITCH: Network Devices clean-up step -->
 See the [0.2.0 release notes](docs/release-notes/v0.2.0.md).
 

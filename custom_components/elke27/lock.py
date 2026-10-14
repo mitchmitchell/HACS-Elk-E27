@@ -79,7 +79,6 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
         self._attr_name = lock.name or f"Lock {lock_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry),
-            "lock",
             lock_id,
         )
         self._attr_device_info = device_info_for_entry(coordinator, entry)
