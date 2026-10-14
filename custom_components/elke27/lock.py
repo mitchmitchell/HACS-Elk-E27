@@ -16,7 +16,6 @@ from .entity import (
     build_unique_id,
     device_info_for_entry,
     raise_if_not_sent,
-    sanitize_name,
     unique_base,
 )
 
@@ -47,9 +46,6 @@ async def async_setup_entry(
 
     def _async_add_locks() -> None:
         snapshot = coordinator.data
-        if snapshot is None:
-            _LOGGER.debug("Lock entities skipped because snapshot is unavailable")
-            return
         entities: list[Elke27Lock] = []
         if not snapshot.locks:
             _LOGGER.debug("No locks available for entity creation")
@@ -84,7 +80,7 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
         super().__init__(coordinator)
         self._hub = hub
         self._lock_id = lock_id
-        self._attr_name = sanitize_name(lock.name) or f"Lock {lock_id}"
+        self._attr_name = lock.name or f"Lock {lock_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(hub, coordinator, entry),
             "lock",
@@ -101,8 +97,9 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
             self._log_missing()
             return None
         if lock.locked is not None:
-            return lock.locked
+            return bool(lock.locked)
         status = lock.status
+        # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
         if isinstance(status, str):
             normalized = status.strip().upper()
             if normalized in {"ON", "LOCKED"}:
@@ -146,7 +143,5 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
         _LOGGER.debug("Lock %s missing from snapshot", self._lock_id)
 
 
-def _get_lock(snapshot: PanelSnapshot | None, lock_id: int) -> LockState | None:
-    if snapshot is None:
-        return None
+def _get_lock(snapshot: PanelSnapshot, lock_id: int) -> LockState | None:
     return snapshot.locks.get(lock_id)

@@ -287,8 +287,8 @@ address never changes.
 
 If the address does change, re-linking can't help: it reuses the stored host and port. What
 to do depends on whether the integration knows the panel's MAC address. It learns the MAC from
-network discovery, either during setup or, for entries added before 0.1.8.x, on the first
-connect after upgrading.
+network discovery, either during setup or, for 0.1.8 entries, on the first connect after
+upgrading to 0.1.8.1.
 
 Upgraded entries keyed by a real panel serial keep that unique ID after the MAC fill, so
 changing their address means deleting and re-adding the entry (the steps below for an unknown MAC).
@@ -883,7 +883,23 @@ whole °F, so setpoints you set in °C are rounded.
 
 ## Upgrading
 
+### To 0.1.9
+
+Update in HACS and restart Home Assistant. No delete and re-add is needed from 0.1.8 or
+0.1.8.1. Mostly internal cleanup (typed snapshots, strict typing). Config entry, device and
+entity identity and entity names are unchanged compared with 0.1.8.1, and the legacy `pin`
+cleanup on setup is the same as 0.1.8. One change may affect scripts: diagnostics no longer
+include `snapshot_available`. Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/).
+Upgrading from **0.1.7** straight to 0.1.9: follow **To 0.1.8** below (delete and re-add;
+config entry, device and entity identity change; installing over 0.1.7 without deleting
+leaves duplicate `_2` entities). See the
+[0.1.9 release notes](docs/release-notes/v0.1.9.md).
+
 ### To 0.1.8.1
+
+**Upgrading from 0.1.7:** delete each Elk E27 entry first, then install 0.1.8.1 and add the
+panel again (the 0.1.8 steps). Installing over 0.1.7 without deleting leaves duplicate
+entities with a `_2` suffix.
 
 Update in HACS and restart Home Assistant. No delete and re-add is needed from 0.1.8: on the
 first connect, the panel MAC from network discovery is stored and becomes the entry's unique

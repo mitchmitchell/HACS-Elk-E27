@@ -13,7 +13,7 @@ from homeassistant.helpers.device_registry import (
 )
 
 from .const import CONF_PANEL_MAC, CONF_PANEL_MAC_FILLED, DOMAIN
-from .hub import NOT_ACCEPTED_MESSAGE
+from .errors import NOT_ACCEPTED_MESSAGE
 from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
@@ -124,6 +124,13 @@ def unique_base(
 def build_unique_id(base: str, domain: str, numeric_id: int | str) -> str:
     """Build a stable unique ID in <mac>:<domain>:<id> format."""
     return f"{base}:{domain}:{numeric_id}"
+
+
+def panel_display_name(
+    snapshot: PanelSnapshot, hub: Elke27Hub, entry: Elke27ConfigEntry
+) -> str | None:
+    """Return the panel name from the hub, snapshot, or entry title."""
+    return get_panel_field(snapshot, hub.panel_name, "name") or entry.title
 
 
 NOT_CONNECTED_MESSAGE = "The panel is not connected; the command was not sent."

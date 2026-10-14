@@ -151,7 +151,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
             translation_placeholders={"host": host, "port": str(port)},
         ) from err
 
-    coordinator.async_set_updated_data(hub.get_snapshot())
     entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
