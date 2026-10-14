@@ -885,10 +885,15 @@ whole °F, so setpoints you set in °C are rounded.
 
 ### To 0.1.9
 
-Mostly internal cleanup (typed snapshots, strict typing). **No breaking changes compared with
-0.1.8.1** (same legacy `pin` cleanup on setup as 0.1.8). Upgrading from **0.1.7** straight to
-0.1.9: follow **To 0.1.8** below (delete and re-add; config entry, device, and entity identity
-change — see 0.1.8 breaking changes).
+Update in HACS and restart Home Assistant. No delete and re-add is needed from 0.1.8 or
+0.1.8.1. Mostly internal cleanup (typed snapshots, strict typing). Config entry, device and
+entity identity and entity names are unchanged compared with 0.1.8.1, and the legacy `pin`
+cleanup on setup is the same as 0.1.8. One change may affect scripts: diagnostics no longer
+include `snapshot_available`. Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/).
+Upgrading from **0.1.7** straight to 0.1.9: follow **To 0.1.8** below (delete and re-add;
+config entry, device and entity identity change; installing over 0.1.7 without deleting
+leaves duplicate `_2` entities). See the
+[0.1.9 release notes](docs/release-notes/v0.1.9.md).
 
 ### To 0.1.8.1
 
