@@ -27,8 +27,8 @@ if _HAS_DEPS:
     )
 
     from custom_components.elke27 import _service_mode_to_arm_mode
-    from custom_components.elke27.hub import Elke27Hub
     from homeassistant.exceptions import HomeAssistantError
+    from tests.conftest import make_coordinator
 
 
 if _HAS_DEPS:
@@ -47,7 +47,7 @@ if _HAS_DEPS:
 
 
 def _hub_with_client(client: Any) -> Any:
-    hub = Elke27Hub(MagicMock(), "192.0.2.10", 2101, "{}", "123456789012", None)
+    hub = make_coordinator(MagicMock())
     hub._client = client  # noqa: SLF001
     return hub
 
@@ -133,7 +133,9 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
         client.async_arm_area.side_effect = _PanelRejectionError()
         hub = _hub_with_client(client)
         with (
-            self.assertLogs("custom_components.elke27.hub", level="WARNING") as logs,
+            self.assertLogs(
+                "custom_components.elke27.coordinator", level="WARNING"
+            ) as logs,
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
@@ -147,7 +149,9 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
         client.async_disarm_area.side_effect = Elke27AuthError("Denied.")
         hub = _hub_with_client(client)
         with (
-            self.assertLogs("custom_components.elke27.hub", level="WARNING") as logs,
+            self.assertLogs(
+                "custom_components.elke27.coordinator", level="WARNING"
+            ) as logs,
             self.assertRaises(HomeAssistantError),
         ):
             await hub.async_disarm_area(1, "1234")

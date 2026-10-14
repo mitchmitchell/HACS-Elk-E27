@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-    from .hub import Elke27Hub
     from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,7 +41,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up Elke27 lights from a config entry."""
     data = entry.runtime_data
-    hub = data.hub
     coordinator = data.coordinator
     known_ids: set[int] = set()
 
@@ -56,7 +54,7 @@ async def async_setup_entry(
             if light_id in known_ids:
                 continue
             known_ids.add(light_id)
-            entities.append(Elke27Light(coordinator, hub, entry, light_id, light))
+            entities.append(Elke27Light(coordinator, entry, light_id, light))
         if entities:
             async_add_entities(entities)
 
@@ -75,23 +73,21 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
     def __init__(
         self,
         coordinator: Elke27DataUpdateCoordinator,
-        hub: Elke27Hub,
         entry: Elke27ConfigEntry,
         light_id: int,
         light: LightState,
     ) -> None:
         """Initialize the light entity."""
         super().__init__(coordinator)
-        self._hub = hub
         self._entry = entry
         self._light_id = light_id
         self._attr_name = light.name or f"Light {light_id}"
         self._attr_unique_id = build_unique_id(
-            unique_base(hub, coordinator, entry),
+            unique_base(coordinator, entry),
             "light",
             light_id,
         )
-        self._attr_device_info = device_info_for_entry(hub, coordinator, entry)
+        self._attr_device_info = device_info_for_entry(coordinator, entry)
         self._missing_logged = False
 
     @property
@@ -128,15 +124,15 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         try:
             if ATTR_BRIGHTNESS in kwargs:
                 level = _level_from_kwargs(kwargs)
-                sent = await self._hub.async_set_light(
+                sent = await self.coordinator.async_set_light(
                     self._light_id, state=True, level=level
                 )
-                raise_if_not_sent(sent=sent, hub=self._hub)
+                raise_if_not_sent(sent=sent, coordinator=self.coordinator)
             else:
-                sent = await self._hub.async_set_light(
+                sent = await self.coordinator.async_set_light(
                     self._light_id, state=True, level=_ELK_MAX_DIM_LEVEL
                 )
-                raise_if_not_sent(sent=sent, hub=self._hub)
+                raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -144,8 +140,10 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
     async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the light off if supported by the client."""
         try:
-            sent = await self._hub.async_set_light(self._light_id, state=False, level=0)
-            raise_if_not_sent(sent=sent, hub=self._hub)
+            sent = await self.coordinator.async_set_light(
+                self._light_id, state=False, level=0
+            )
+            raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -155,7 +153,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         """Return if the entity is available."""
         return (
             super().available
-            and self._hub.is_ready
+            and self.coordinator.is_ready
             and _get_light(self.coordinator.data, self._light_id) is not None
         )
 

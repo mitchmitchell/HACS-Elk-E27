@@ -13,7 +13,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.elke27.entity import NOT_CONNECTED_MESSAGE
-from custom_components.elke27.hub import NOT_ACCEPTED_MESSAGE
+from custom_components.elke27.errors import NOT_ACCEPTED_MESSAGE
 from homeassistant.const import ATTR_CODE, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -75,7 +75,7 @@ async def test_command_while_disconnected_raises(
     data: dict[str, str],
 ) -> None:
     """A command with no panel connection raises instead of silently succeeding."""
-    hub = loaded.runtime_data.hub
+    hub = loaded.runtime_data.coordinator
     # The client drops between the entity's availability check and the call.
     hub._client = None
     entity = hass.data["entity_components"][domain].get_entity(entity_id)
@@ -94,7 +94,7 @@ async def test_not_sent_with_client_says_not_accepted(
     hass: HomeAssistant, loaded: MockConfigEntry
 ) -> None:
     """A False result while connected is reported as not accepted."""
-    hub = loaded.runtime_data.hub
+    hub = loaded.runtime_data.coordinator
     hub.async_set_output = AsyncMock(return_value=False)
     entity = hass.data["entity_components"]["switch"].get_entity(SWITCH)
     with pytest.raises(HomeAssistantError, match=NOT_ACCEPTED_MESSAGE):

@@ -29,9 +29,10 @@ if _HAS_DEPS:
     )
     from elke27_lib.generators.registry import COMMANDS
 
-    from custom_components.elke27 import hub as hub_module
-    from custom_components.elke27.hub import Elke27Hub, _connection_state
+    from custom_components.elke27 import coordinator as hub_module
+    from custom_components.elke27.coordinator import _connection_state
     from homeassistant.exceptions import HomeAssistantError
+    from tests.conftest import make_coordinator
 
 
 def _hub(client: Any, panel_name: str | None = None) -> Any:
@@ -42,7 +43,7 @@ def _hub(client: Any, panel_name: str | None = None) -> Any:
         background.append(coro)
 
     hass.async_create_background_task.side_effect = _background
-    hub = Elke27Hub(hass, "192.0.2.10", 2101, "{}", "123456789012", panel_name)
+    hub = make_coordinator(hass, panel_name=panel_name)
     hub._client = client
     hub.background_tasks = background
     return hub
@@ -81,9 +82,7 @@ class HubConnectTest(unittest.IsolatedAsyncioTestCase):
         client = _client()
         client.wait_ready.return_value = True
         link_keys = LinkKeys(tempkey_hex="00", linkkey_hex="11", linkhmac_hex="22")
-        hub = Elke27Hub(
-            MagicMock(), "192.0.2.10", 2101, link_keys.to_json(), "123456789012", None
-        )
+        hub = make_coordinator(MagicMock(), link_keys_json=link_keys.to_json())
         with patch.object(hub_module, "Elke27Client", return_value=client):
             await hub.async_connect()
 
@@ -162,7 +161,9 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
         client = _client()
         client.async_set_zone_bypass.side_effect = err
         with (
-            self.assertLogs("custom_components.elke27.hub", level="WARNING") as logs,
+            self.assertLogs(
+                "custom_components.elke27.coordinator", level="WARNING"
+            ) as logs,
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")

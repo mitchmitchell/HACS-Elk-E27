@@ -9,7 +9,6 @@ from homeassistant.config_entries import ConfigEntry
 
 if TYPE_CHECKING:
     from .coordinator import Elke27DataUpdateCoordinator
-    from .hub import Elke27Hub
 
 type Elke27ConfigEntry = ConfigEntry[Elke27RuntimeData]
 
@@ -18,5 +17,4 @@ type Elke27ConfigEntry = ConfigEntry[Elke27RuntimeData]
 class Elke27RuntimeData:
     """Runtime data stored on the config entry."""
 
-    hub: Elke27Hub
     coordinator: Elke27DataUpdateCoordinator

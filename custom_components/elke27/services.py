@@ -185,14 +185,14 @@ async def _async_arm_automatic_entity(
         hass, entity_id, Platform.ALARM_CONTROL_PANEL, "alarm control panel"
     )
     area_id = _area_id_from_unique_id(entity_entry.unique_id)
-    hub = runtime_data.hub
+    coordinator = runtime_data.coordinator
     attempted: list[ZoneState] = []
     arm_sent: list[bool] = []
 
     async def _run() -> None:
         # Serialize the whole bypass, arm and rollback sequence for this area so
         # a concurrent call cannot roll back bypasses another call relies on.
-        area_lock = hub.area_arm_lock(area_id)
+        area_lock = coordinator.area_arm_lock(area_id)
         lock_was_contended = area_lock.locked()
         # No await may be added between locked() and async with below.
         async with area_lock:
@@ -209,15 +209,15 @@ async def _async_arm_automatic_entity(
                 lock_was_contended=lock_was_contended,
             )
 
-    # Run each area in its own task, tracked on the hub (from before the lock
+    # Run each area in its own task, tracked on the coordinator (from before the lock
     # is taken), so a disarm of this area can cancel it, queued or running,
     # without touching other areas in the same call.
     task = asyncio.create_task(_run(), name=f"elke27 arm automatic area {area_id}")
-    hub.register_arm_automatic(area_id, task)
+    coordinator.register_arm_automatic(area_id, task)
     try:
         await asyncio.shield(task)
     except asyncio.CancelledError:
-        if not hub.cancelled_by_disarm(task):
+        if not coordinator.cancelled_by_disarm(task):
             task.cancel()
             raise
         # Disarm wins: send nothing more (no rollback, no arm) and report.
@@ -238,7 +238,7 @@ async def _async_arm_automatic_entity(
         )
         raise HomeAssistantError(msg) from None
     finally:
-        hub.unregister_arm_automatic(area_id, task)
+        coordinator.unregister_arm_automatic(area_id, task)
 
 
 async def _async_arm_automatic_locked(
@@ -255,11 +255,11 @@ async def _async_arm_automatic_locked(
     lock_was_contended: bool,
 ) -> None:
     """Bypass, arm and (on a definitive refusal) roll back one area."""
-    hub = runtime_data.hub
+    coordinator = runtime_data.coordinator
 
     async def _gate() -> None:
         # Pause before every command while a disarm of this area is pending.
-        await hub.async_wait_disarm_clear(area_id)
+        await coordinator.async_wait_disarm_clear(area_id)
 
     async def _fail(
         stage: str,
@@ -271,7 +271,7 @@ async def _async_arm_automatic_locked(
     ) -> NoReturn:
         # Definitive refusal: undo this call's bypasses, one un-bypass per
         # zone, never retried.
-        rolled_back, still_bypassed = await hub.async_rollback_bypasses(
+        rolled_back, still_bypassed = await coordinator.async_rollback_bypasses(
             tuple(bypassed), code, gate=_gate
         )
         summary = _rollback_summary(rolled_back, still_bypassed)
@@ -318,17 +318,21 @@ async def _async_arm_automatic_locked(
     # coordinator copy, so an earlier call's bypasses and arming are seen.
     async def _panel_reports_armed() -> tuple[PanelSnapshot | None, bool | None]:
         if lock_was_contended:
-            _snap, armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
+            _snap, armed = await coordinator.async_poll_until_area_armed(
+                area_id, gate=_gate
+            )
             if armed:
                 return _snap, True
-            return await hub.async_refresh_area_state(area_id)
-        return await hub.async_refresh_area_state(area_id)
+            return await coordinator.async_refresh_area_state(area_id)
+        return await coordinator.async_refresh_area_state(area_id)
 
     async def _already_armed(
         reason: str, bypassed: Sequence[ZoneState], cause: Exception
     ) -> None:
         # Poll until the panel reports armed; never trust the cache on a failed read.
-        _fresh, armed = await hub.async_poll_until_area_armed(area_id, gate=_gate)
+        _fresh, armed = await coordinator.async_poll_until_area_armed(
+            area_id, gate=_gate
+        )
         if armed:
             _LOGGER.info(
                 "Area %s is already armed (panel said: %s); automatic arming skipped",
@@ -348,7 +352,7 @@ async def _async_arm_automatic_locked(
     if snapshot is None:
         await _fail("arm", ARM_NOT_SENT_REASON, cause=None)
     try:
-        bypassed = await hub.async_bypass_faulted_zones(
+        bypassed = await coordinator.async_bypass_faulted_zones(
             area_id, snapshot, code, attempted=attempted, gate=_gate
         )
     except ZoneBypassFailedError as err:
@@ -364,7 +368,7 @@ async def _async_arm_automatic_locked(
     await _gate()
     arm_sent.append(True)
     try:
-        sent = await hub.async_arm_area(
+        sent = await coordinator.async_arm_area(
             area_id,
             _service_mode_to_arm_mode(mode_name),
             code,
@@ -548,15 +552,17 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
             hass, entity_id, Platform.BINARY_SENSOR, "zone"
         )
         zone_id = _numeric_id_from_unique_id(entity_entry.unique_id, "zone")
-        hub = runtime_data.hub
-        snapshot = hub.get_snapshot()
+        coordinator = runtime_data.coordinator
+        snapshot = coordinator.get_snapshot()
         zone = snapshot.zones.get(zone_id) if snapshot is not None else None
         area_id = zone.area_id if zone is not None else None
         # Share the area lock with automatic arming so a rollback cannot race
         # a manual bypass. Zones with no known area are not serialized.
-        lock = hub.area_arm_lock(area_id) if area_id else contextlib.nullcontext()
+        lock = (
+            coordinator.area_arm_lock(area_id) if area_id else contextlib.nullcontext()
+        )
         async with lock:
-            acknowledged = await hub.async_set_zone_bypass(
+            acknowledged = await coordinator.async_set_zone_bypass(
                 zone_id, bypassed=bypass, pin=code
             )
         if not acknowledged:

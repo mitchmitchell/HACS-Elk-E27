@@ -106,7 +106,7 @@ async def test_auto_reconnect_pushes_update_without_connected_event(
 ) -> None:
     """After an automatic reconnect, entities recover even if no event arrives."""
     await _setup(hass, mock_config_entry)
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     mock_client.client.is_ready = False
     mock_client.emit(_connection_event(connected=False))
     await hass.async_block_till_done()
@@ -169,7 +169,7 @@ async def test_debounced_refresh_stops_when_client_disconnects(
     """A debounced refresh stops cleanly when the hub has no client."""
     await _setup(hass, mock_config_entry)
     coordinator = mock_config_entry.runtime_data.coordinator
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     coordinator._debounce_seconds = 0
     hub._client = None
     refresh = AsyncMock()
@@ -199,7 +199,7 @@ async def test_refresh_after_connect_auth_error_starts_reauth_once(
     """An auth failure after reconnect starts reauth once, not a dead-link retry."""
     await _setup(hass, mock_config_entry)
     coordinator = mock_config_entry.runtime_data.coordinator
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     mock_client.client.async_refresh_csm.side_effect = Elke27AuthError("bad")
 
     coordinator._handle_reconnected()
@@ -237,7 +237,9 @@ async def test_debounced_refresh_auth_error_starts_reauth_once(
     await task
     await hass.async_block_till_done()
     assert len(_reauth_flows(hass)) == 1
-    assert mock_config_entry.runtime_data.hub._reconnect.reauth_requested is True
+    assert (
+        mock_config_entry.runtime_data.coordinator._reconnect.reauth_requested is True
+    )
 
     mock_client.emit(_domain_event("lock"))
     await asyncio.sleep(0)

@@ -35,15 +35,12 @@ if _HAS_DEPS:
         Elke27TimeoutError,
     )
 
-    from custom_components.elke27.hub import (
-        CONNECTION_MESSAGE,
-        TIMEOUT_MESSAGE,
-        Elke27Hub,
-    )
+    from custom_components.elke27.errors import CONNECTION_MESSAGE, TIMEOUT_MESSAGE
     from custom_components.elke27.light import Elke27Light
     from custom_components.elke27.lock import Elke27Lock
     from custom_components.elke27.switch import Elke27OutputSwitch
     from homeassistant.exceptions import HomeAssistantError
+    from tests.conftest import make_coordinator
 
 
 def _client() -> Any:
@@ -56,7 +53,7 @@ def _client() -> Any:
 def _hub(client: Any) -> Any:
     hass = MagicMock()
     hass.async_create_background_task.side_effect = lambda coro, _name: coro.close()
-    hub = Elke27Hub(hass, "192.0.2.10", 2101, "{}", "123456789012", None)
+    hub = make_coordinator(hass)
     hub._client = client
     return hub
 
@@ -73,6 +70,12 @@ def _coordinator(snapshot: Any) -> Any:
     return coordinator
 
 
+def _bound(coordinator: Any, snapshot: Any) -> Any:
+    """Give the coordinator (which now also sends commands) its data."""
+    coordinator.data = snapshot
+    return coordinator
+
+
 def _entry() -> Any:
     entry = MagicMock()
     entry.data = {"host": "192.0.2.10"}
@@ -85,19 +88,19 @@ def _entry() -> Any:
 def _switch(hub: Any) -> Any:
     output = OutputState(output_id=3, state=False)
     snap = _snapshot(outputs={3: output})
-    return Elke27OutputSwitch(_coordinator(snap), hub, _entry(), 3, output)
+    return Elke27OutputSwitch(_bound(hub, snap), _entry(), 3, output)
 
 
 def _light(hub: Any) -> Any:
     light = LightState(light_id=1, state=False)
     snap = _snapshot(lights={1: light})
-    return Elke27Light(_coordinator(snap), hub, _entry(), 1, light)
+    return Elke27Light(_bound(hub, snap), _entry(), 1, light)
 
 
 def _lock(hub: Any) -> Any:
     lock = LockState(lock_id=1, locked=True)
     snap = _snapshot(locks={1: lock})
-    return Elke27Lock(_coordinator(snap), hub, _entry(), 1, lock)
+    return Elke27Lock(_bound(hub, snap), _entry(), 1, lock)
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")

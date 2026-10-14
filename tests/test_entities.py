@@ -36,13 +36,16 @@ if _HAS_DEPS:
         Elke27AreaAlarmControlPanel,
         _area_state_to_ha,
     )
+    from custom_components.elke27.arming import (
+        ZoneBypassFailedError,
+        area_faulted_zones,
+    )
     from custom_components.elke27.binary_sensor import Elke27ZoneBinarySensor
     from custom_components.elke27.climate import Elke27Thermostat
     from custom_components.elke27.entity import (
         device_info_for_entry,
         panel_display_name,
     )
-    from custom_components.elke27.hub import ZoneBypassFailedError, area_faulted_zones
     from custom_components.elke27.light import Elke27Light
     from homeassistant.components.alarm_control_panel import (
         AlarmControlPanelEntity,
@@ -93,6 +96,12 @@ def _hub() -> Any:
     return hub
 
 
+def _bound(coordinator: Any, snapshot: Any) -> Any:
+    """Give the coordinator (which now also sends commands) its data."""
+    coordinator.data = snapshot
+    return coordinator
+
+
 def _entry() -> Any:
     entry = MagicMock()
     entry.data = {"host": "192.0.2.10"}
@@ -126,7 +135,7 @@ def _two_area_snapshot() -> Any:
 
 def _area_entity(snapshot: Any, hub: Any, area_id: int = 1) -> Any:
     return Elke27AreaAlarmControlPanel(
-        _coordinator(snapshot), hub, _entry(), area_id, snapshot.areas[area_id]
+        _bound(hub, snapshot), _entry(), area_id, snapshot.areas[area_id]
     )
 
 
@@ -291,9 +300,7 @@ class LightEntityTest(unittest.TestCase):
 
     def _light(self, light: Any) -> Any:
         snapshot = _snapshot(lights={light.light_id: light})
-        return Elke27Light(
-            _coordinator(snapshot), _hub(), _entry(), light.light_id, light
-        )
+        return Elke27Light(_bound(_hub(), snapshot), _entry(), light.light_id, light)
 
     def test_is_on_uses_state(self) -> None:
         """is_on follows LightState.state, even without a level."""
@@ -314,7 +321,7 @@ class ClimateEntityTest(unittest.TestCase):
     def _climate(self, tstat: Any) -> Any:
         snapshot = _snapshot(thermostats={tstat.tstat_id: tstat})
         return Elke27Thermostat(
-            _coordinator(snapshot), _hub(), _entry(), tstat.tstat_id, tstat
+            _bound(_hub(), snapshot), _entry(), tstat.tstat_id, tstat
         )
 
     def test_current_humidity(self) -> None:
@@ -352,7 +359,7 @@ class ZoneEntityTest(unittest.TestCase):
         )
         snapshot = _snapshot(zones={7: zone}, zone_definitions={7: definition})
         entity = Elke27ZoneBinarySensor(
-            _coordinator(snapshot), _hub(), _entry(), 7, zone, definition
+            _bound(_hub(), snapshot), _entry(), 7, zone, definition
         )
         assert entity.name == "Kitchen Window"
         assert entity.device_class is BinarySensorDeviceClass.WINDOW
@@ -375,7 +382,7 @@ class ZoneEntityTest(unittest.TestCase):
         )
         snapshot = _snapshot(zones={9: zone}, zone_definitions={9: definition})
         entity = Elke27ZoneBinarySensor(
-            _coordinator(snapshot), _hub(), _entry(), 9, zone, definition
+            _bound(_hub(), snapshot), _entry(), 9, zone, definition
         )
         assert entity.is_on is None
         assert entity.is_on is not False
@@ -386,7 +393,7 @@ class ZoneEntityTest(unittest.TestCase):
         zone = ZoneState(zone_id=8, name="Hall", open=False)
         snapshot = _snapshot(zones={8: zone})
         entity = Elke27ZoneBinarySensor(
-            _coordinator(snapshot), _hub(), _entry(), 8, zone, None
+            _bound(_hub(), snapshot), _entry(), 8, zone, None
         )
         assert entity.name == "Hall"
         assert entity.device_class is BinarySensorDeviceClass.OPENING
@@ -399,7 +406,7 @@ class PanelEntityHelpersTest(unittest.TestCase):
     """Test panel helpers that read typed snapshot fields."""
 
     def test_panel_display_name_and_device_info(self) -> None:
-        """Names and device info come from snapshot.panel and the hub."""
+        """Names and device info come from snapshot.panel and the coordinator."""
         snapshot = _snapshot(
             panel=PanelInfo(
                 mac="aa:bb:cc:dd:ee:ff",
@@ -415,7 +422,7 @@ class PanelEntityHelpersTest(unittest.TestCase):
         assert panel_display_name(snapshot, hub, entry) == "Override"
         hub.panel_name = None
         assert panel_display_name(snapshot, hub, entry) == "Main"
-        info = device_info_for_entry(hub, _coordinator(snapshot), entry)
+        info = device_info_for_entry(_bound(hub, snapshot), entry)
         assert info["serial_number"] == "S1"
         assert info["model"] == "E27"
         assert info["sw_version"] == "1.2"

@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot
 
     from .coordinator import Elke27DataUpdateCoordinator
-    from .hub import Elke27Hub
     from .models import Elke27ConfigEntry
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9 _-]")
@@ -61,20 +60,21 @@ def stored_panel_mac(entry: Elke27ConfigEntry) -> str | None:
 
 
 def device_info_for_entry(
-    hub: Elke27Hub,
     coordinator: Elke27DataUpdateCoordinator,
     entry: Elke27ConfigEntry,
 ) -> DeviceInfo:
     """Build device info for entities tied to a config entry."""
     snapshot = coordinator.data
-    panel_name = get_panel_field(snapshot, hub.panel_name, "name") or entry.title
-    mac = get_panel_field(snapshot, hub.panel_name, "mac")
+    panel_name = (
+        get_panel_field(snapshot, coordinator.panel_name, "name") or entry.title
+    )
+    mac = get_panel_field(snapshot, coordinator.panel_name, "mac")
     if not mac and (stored_mac := stored_panel_mac(entry)):
         mac = format_mac(stored_mac)
-    panel_serial = get_panel_field(snapshot, hub.panel_name, "serial")
-    model = get_panel_field(snapshot, hub.panel_name, "model")
-    firmware = get_panel_field(snapshot, hub.panel_name, "firmware")
-    identifiers = {(DOMAIN, entry_identity_key(hub, coordinator, entry))}
+    panel_serial = get_panel_field(snapshot, coordinator.panel_name, "serial")
+    model = get_panel_field(snapshot, coordinator.panel_name, "model")
+    firmware = get_panel_field(snapshot, coordinator.panel_name, "firmware")
+    identifiers = {(DOMAIN, entry_identity_key(coordinator, entry))}
     return DeviceInfo(
         connections={(CONNECTION_NETWORK_MAC, mac)} if mac else set(),
         identifiers=identifiers,
@@ -86,7 +86,6 @@ def device_info_for_entry(
 
 
 def entry_identity_key(
-    hub: Elke27Hub,
     coordinator: Elke27DataUpdateCoordinator,
     entry: Elke27ConfigEntry,
 ) -> str:
@@ -101,10 +100,10 @@ def entry_identity_key(
     if stored_mac and not entry.data.get(CONF_PANEL_MAC_FILLED):
         return format_mac(stored_mac)
     snapshot = coordinator.data
-    mac = get_panel_field(snapshot, hub.panel_name, "mac")
+    mac = get_panel_field(snapshot, coordinator.panel_name, "mac")
     if mac:
         return format_mac(str(mac))
-    serial = get_panel_field(snapshot, hub.panel_name, "serial")
+    serial = get_panel_field(snapshot, coordinator.panel_name, "serial")
     if serial is not None:
         panel_serial = panel_serial_from_info({"serial": serial})
         if panel_serial:
@@ -113,12 +112,11 @@ def entry_identity_key(
 
 
 def unique_base(
-    hub: Elke27Hub,
     coordinator: Elke27DataUpdateCoordinator,
     entry: Elke27ConfigEntry,
 ) -> str:
     """Return the stable unique ID base for this config entry."""
-    return entry_identity_key(hub, coordinator, entry)
+    return entry_identity_key(coordinator, entry)
 
 
 def build_unique_id(base: str, domain: str, numeric_id: int | str) -> str:
@@ -127,24 +125,26 @@ def build_unique_id(base: str, domain: str, numeric_id: int | str) -> str:
 
 
 def panel_display_name(
-    snapshot: PanelSnapshot, hub: Elke27Hub, entry: Elke27ConfigEntry
+    snapshot: PanelSnapshot,
+    coordinator: Elke27DataUpdateCoordinator,
+    entry: Elke27ConfigEntry,
 ) -> str | None:
-    """Return the panel name from the hub, snapshot, or entry title."""
-    return get_panel_field(snapshot, hub.panel_name, "name") or entry.title
+    """Return the panel name from the coordinator, snapshot, or entry title."""
+    return get_panel_field(snapshot, coordinator.panel_name, "name") or entry.title
 
 
 NOT_CONNECTED_MESSAGE = "The panel is not connected; the command was not sent."
 
 
-def raise_if_not_sent(*, sent: bool, hub: Elke27Hub) -> None:
+def raise_if_not_sent(*, sent: bool, coordinator: Elke27DataUpdateCoordinator) -> None:
     """
-    Raise when the hub reports a command did not go through.
+    Raise when the coordinator reports a command did not go through.
 
     "Not connected" only when there is no client; otherwise the panel answered
     without accepting it.
     """
     if sent:
         return
-    if hub.client is None:
+    if coordinator.client is None:
         raise HomeAssistantError(NOT_CONNECTED_MESSAGE)
     raise HomeAssistantError(NOT_ACCEPTED_MESSAGE)

@@ -258,7 +258,7 @@ async def test_unload_platform_failure_keeps_client(
         assert not await hass.config_entries.async_unload(mock_config_entry.entry_id)
     assert mock_config_entry.state is ConfigEntryState.FAILED_UNLOAD
     mock_client.client.async_disconnect.assert_not_awaited()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     assert hub.client is mock_client.client
 
 
@@ -286,7 +286,7 @@ def _reconnect_issue_id(entry_id: str) -> str:
     return f"{ISSUE_RECONNECT_FAILED}_{entry_id}"
 
 
-HUB_LOGGER = "custom_components.elke27.hub"
+HUB_LOGGER = "custom_components.elke27.coordinator"
 
 
 def _reconnect_failure_log_records(
@@ -431,7 +431,7 @@ async def test_command_auth_error_starts_reauth_once(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     mock_client.client.async_arm_area.side_effect = Elke27AuthError("bad")
 
     with pytest.raises(HomeAssistantError):
@@ -452,7 +452,7 @@ async def test_reconnect_auth_failure_starts_reauth(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
 
     connects_before = mock_client.client.async_connect.await_count
     mock_client.client.async_connect.side_effect = Elke27LinkRequiredError("relink")
@@ -474,7 +474,7 @@ async def test_reconnect_auth_failure_clears_repair_issue(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._reconnect._ensure_reconnect_repair_issue()
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
@@ -493,7 +493,7 @@ async def test_reconnect_auth_failure_starts_reauth_once(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
 
     mock_client.client.async_connect.side_effect = Elke27AuthError("bad")
     await hub._reconnect._async_run()
@@ -509,7 +509,7 @@ async def test_reconnect_backoff_jitter_scales_base_delay(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._stopping = False
 
     mock_client.client.async_connect.side_effect = [
@@ -539,7 +539,7 @@ async def test_reconnect_transport_failure_retries_with_backoff(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._stopping = False
 
     connects_before = mock_client.client.async_connect.await_count
@@ -572,7 +572,7 @@ async def test_reconnect_protocol_error_retries(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._stopping = False
 
     connects_before = mock_client.client.async_connect.await_count
@@ -604,7 +604,7 @@ async def test_reconnect_streak_counts_through_transport_error(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._stopping = False
 
     reconnect_errors: list[Exception] = [
@@ -645,7 +645,7 @@ async def test_reconnect_non_transport_logs_warning_once_then_debug(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._stopping = False
 
     mock_client.client.async_connect.side_effect = [
@@ -677,7 +677,7 @@ async def test_reconnect_unknown_error_logs_traceback_once(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._stopping = False
 
     mock_client.client.async_connect.side_effect = [
@@ -711,7 +711,7 @@ async def test_remove_entry_clears_reconnect_repair_issue(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._reconnect._ensure_reconnect_repair_issue()
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
@@ -730,7 +730,7 @@ async def test_reconnect_repair_issue_after_non_transport_threshold(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._stopping = False
 
     mock_client.client.async_connect.side_effect = Elke27ProtocolError("protocol")
@@ -764,7 +764,7 @@ async def test_reconnect_repair_issue_cleared_on_success(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._stopping = False
 
     mock_client.client.async_connect.side_effect = [
@@ -793,7 +793,7 @@ async def test_reconnect_repair_issue_cleared_on_unload(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
     hub._reconnect._ensure_reconnect_repair_issue()
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
@@ -829,16 +829,16 @@ async def test_connect_cancellation_disconnects_client(
 async def test_reconnect_listener_removed_on_unload(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
-    """Unload removes the coordinator's reconnect listener from the hub."""
+    """The supervisor reports reconnects straight to the coordinator (D3)."""
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
-    assert len(hub._reconnect_listeners) == 1
+    hub = mock_config_entry.runtime_data.coordinator
+    assert hub.reconnect._on_reconnected == hub._handle_reconnected
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    assert hub._reconnect_listeners == []
+    assert hub.reconnect.task is None or hub.reconnect.task.done()
 
 
 async def test_unload_does_not_log_connection_lost(
@@ -863,7 +863,7 @@ async def test_reconnect_task_cancelled_on_unload(
     mock_config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    hub = mock_config_entry.runtime_data.hub
+    hub = mock_config_entry.runtime_data.coordinator
 
     mock_client.client.async_connect.side_effect = Elke27ConnectionError("down")
     hub._reconnect.start()

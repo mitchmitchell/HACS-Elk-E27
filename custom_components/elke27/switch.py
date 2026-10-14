@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-    from .hub import Elke27Hub
     from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,7 +39,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up Elke27 switches from a config entry."""
     data = entry.runtime_data
-    hub = data.hub
     coordinator = data.coordinator
     known_output_ids: set[int] = set()
 
@@ -54,9 +52,7 @@ async def async_setup_entry(
             if output_id in known_output_ids:
                 continue
             known_output_ids.add(output_id)
-            entities.append(
-                Elke27OutputSwitch(coordinator, hub, entry, output_id, output)
-            )
+            entities.append(Elke27OutputSwitch(coordinator, entry, output_id, output))
         if entities:
             async_add_entities(entities)
 
@@ -73,22 +69,20 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
     def __init__(
         self,
         coordinator: Elke27DataUpdateCoordinator,
-        hub: Elke27Hub,
         entry: Elke27ConfigEntry,
         output_id: int,
         output: OutputState,
     ) -> None:
         """Initialize the output entity."""
         super().__init__(coordinator)
-        self._hub = hub
         self._output_id = output_id
         self._attr_name = output.name or f"Output {output_id}"
         self._attr_unique_id = build_unique_id(
-            unique_base(hub, coordinator, entry),
+            unique_base(coordinator, entry),
             "output",
             output_id,
         )
-        self._attr_device_info = device_info_for_entry(hub, coordinator, entry)
+        self._attr_device_info = device_info_for_entry(coordinator, entry)
         self._missing_logged = False
 
     @property
@@ -108,15 +102,15 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         """Return if the entity is available."""
         return (
             super().available
-            and self._hub.is_ready
+            and self.coordinator.is_ready
             and _get_output(self.coordinator.data, self._output_id) is not None
         )
 
     async def async_turn_on(self, **_kwargs: Any) -> None:
         """Turn the output on if supported by the client."""
         try:
-            sent = await self._hub.async_set_output(self._output_id, state=True)
-            raise_if_not_sent(sent=sent, hub=self._hub)
+            sent = await self.coordinator.async_set_output(self._output_id, state=True)
+            raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -124,8 +118,8 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
     async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the output off if supported by the client."""
         try:
-            sent = await self._hub.async_set_output(self._output_id, state=False)
-            raise_if_not_sent(sent=sent, hub=self._hub)
+            sent = await self.coordinator.async_set_output(self._output_id, state=False)
+            raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err

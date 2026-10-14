@@ -5,27 +5,22 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from elke27_lib.errors import E27Error, Elke27Error
-
-from homeassistant.const import CONF_HOST, CONF_PORT, Platform
+from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import callback
-from homeassistant.exceptions import (
-    ConfigEntryAuthFailed,
-    ConfigEntryNotReady,
-    HomeAssistantError,
-)
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
 
 from .const import (
     CONF_INTEGRATION_SERIAL,
     CONF_LINK_KEYS_JSON,
-    CONF_PANEL,
     DOMAIN,
     ISSUE_RECONNECT_FAILED,
 )
-from .coordinator import Elke27DataUpdateCoordinator
-from .errors import AUTH_ERRORS
-from .hub import Elke27Hub
+from .coordinator import (  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re-exported
+    PRIMED_DOMAINS,
+    SETUP_RETRY_ERRORS,
+    Elke27DataUpdateCoordinator,
+)
 from .identity import async_get_integration_serial
 from .models import Elke27ConfigEntry, Elke27RuntimeData
 from .panel_mac import mismatch_issue_id
@@ -51,18 +46,6 @@ _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-
-# Errors that mean the stored link is no longer accepted: start reauth.
-# Any other library or network failure during setup: let Home Assistant retry.
-SETUP_RETRY_ERRORS: tuple[type[Exception], ...] = (
-    Elke27Error,
-    E27Error,
-    TimeoutError,
-    OSError,
-    ConfigEntryNotReady,
-    HomeAssistantError,
-)
-PRIMED_DOMAINS = ("light", "lock", "tstat")
 
 PLATFORMS: list[Platform] = [
     Platform.ALARM_CONTROL_PANEL,
@@ -105,9 +88,7 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Set up Elke27 from a config entry."""
     host = entry.data[CONF_HOST]
-    port = entry.data[CONF_PORT]
     link_keys_json = entry.data.get(CONF_LINK_KEYS_JSON)
-    panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
     if not link_keys_json:
         raise ConfigEntryAuthFailed(
             translation_domain=DOMAIN, translation_key="auth_failed"
@@ -121,37 +102,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
         hass.config_entries.async_update_entry(entry, data=entry_data)
     elif pin_removed is not None:
         hass.config_entries.async_update_entry(entry, data=entry_data)
-    hub = Elke27Hub(
-        hass,
-        host,
-        port,
-        link_keys_json,
-        integration_serial,
-        panel_name,
-        entry=entry,
-    )
-    # Cleanup runs (last registered first) only after every platform unloaded,
-    # or when setup fails after this point.
-    entry.async_on_unload(hub.async_disconnect)
-    coordinator = Elke27DataUpdateCoordinator(hass, hub, entry)
-    entry.async_on_unload(coordinator.async_stop)
-    try:
-        await hub.async_connect()
-        await coordinator.async_start()
-        await coordinator.async_refresh_now()
-        await coordinator.async_refresh_domains(PRIMED_DOMAINS)
-    except AUTH_ERRORS as err:
-        raise ConfigEntryAuthFailed(
-            translation_domain=DOMAIN, translation_key="auth_failed"
-        ) from err
-    except SETUP_RETRY_ERRORS as err:
-        raise ConfigEntryNotReady(
-            translation_domain=DOMAIN,
-            translation_key="cannot_connect",
-            translation_placeholders={"host": host, "port": str(port)},
-        ) from err
-
-    entry.runtime_data = Elke27RuntimeData(hub=hub, coordinator=coordinator)
+    coordinator = Elke27DataUpdateCoordinator(hass, entry)
+    # Runs on unload, and when setup fails after this point.
+    entry.async_on_unload(coordinator.async_shutdown_client)
+    await coordinator.async_config_entry_first_refresh()
+    entry.runtime_data = Elke27RuntimeData(coordinator=coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -166,12 +121,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> b
 async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
     """Clean up integration state when a config entry is removed."""
     _async_delete_entry_issues(hass, entry)
-
-
-def _panel_name_from_entry(panel: object | None) -> str | None:
-    if isinstance(panel, dict):
-        return panel.get("panel_name") or panel.get("name")
-    return None
 
 
 def _duplicate_unique_id_issue_id(entry_id: str) -> str:

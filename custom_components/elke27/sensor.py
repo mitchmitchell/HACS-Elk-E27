@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
     from homeassistant.helpers.typing import StateType
 
-    from .hub import Elke27Hub
     from .models import Elke27ConfigEntry
 
 PARALLEL_UPDATES = 0
@@ -40,7 +39,9 @@ class Elke27SensorDescription(SensorEntityDescription):
 
     key: str
     numeric_id: int
-    value_fn: Callable[[Elke27Hub, Any, Elke27ConfigEntry], StateType | None]
+    value_fn: Callable[
+        [Elke27DataUpdateCoordinator, Any, Elke27ConfigEntry], StateType | None
+    ]
 
 
 SENSORS: tuple[Elke27SensorDescription, ...] = (
@@ -48,7 +49,9 @@ SENSORS: tuple[Elke27SensorDescription, ...] = (
         key="panel_name",
         numeric_id=1,
         translation_key="panel_name",
-        value_fn=lambda hub, snapshot, entry: panel_display_name(snapshot, hub, entry),
+        value_fn=lambda coordinator, snapshot, entry: panel_display_name(
+            snapshot, coordinator, entry
+        ),
     ),
     Elke27SensorDescription(
         key="panel_ready",
@@ -56,8 +59,8 @@ SENSORS: tuple[Elke27SensorDescription, ...] = (
         translation_key="panel_ready",
         device_class=SensorDeviceClass.ENUM,
         options=["connected", "disconnected"],
-        value_fn=lambda hub, _snapshot, _entry: (
-            "connected" if hub.is_ready else "disconnected"
+        value_fn=lambda coordinator, _snapshot, _entry: (
+            "connected" if coordinator.is_ready else "disconnected"
         ),
     ),
 )
@@ -70,10 +73,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up Elke27 sensors from a config entry."""
     data = entry.runtime_data
-    hub = data.hub
     coordinator = data.coordinator
     async_add_entities(
-        Elke27Sensor(coordinator, hub, entry, description) for description in SENSORS
+        Elke27Sensor(coordinator, entry, description) for description in SENSORS
     )
 
 
@@ -87,27 +89,25 @@ class Elke27Sensor(CoordinatorEntity[Elke27DataUpdateCoordinator], SensorEntity)
     def __init__(
         self,
         coordinator: Elke27DataUpdateCoordinator,
-        hub: Elke27Hub,
         entry: Elke27ConfigEntry,
         description: Elke27SensorDescription,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        self._hub = hub
         self._entry = entry
         self.entity_description: Elke27SensorDescription = description
         self._attr_device_class = description.device_class
         self._attr_translation_key = description.translation_key
         self._attr_unique_id = build_unique_id(
-            unique_base(hub, coordinator, entry),
+            unique_base(coordinator, entry),
             "panel",
             description.numeric_id,
         )
-        self._attr_device_info = device_info_for_entry(hub, coordinator, entry)
+        self._attr_device_info = device_info_for_entry(coordinator, entry)
 
     @property
     def native_value(self) -> StateType | None:
         """Return the current value."""
         return self.entity_description.value_fn(
-            self._hub, self.coordinator.data, self._entry
+            self.coordinator, self.coordinator.data, self._entry
         )

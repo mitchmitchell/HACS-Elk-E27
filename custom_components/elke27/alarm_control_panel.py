@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-    from .hub import Elke27Hub
     from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,7 +48,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up Elke27 area alarm control panels from a config entry."""
     data = entry.runtime_data
-    hub = data.hub
     coordinator = data.coordinator
     known_ids: set[int] = set()
 
@@ -64,7 +62,7 @@ async def async_setup_entry(
                 continue
             known_ids.add(area_id)
             entities.append(
-                Elke27AreaAlarmControlPanel(coordinator, hub, entry, area_id, area)
+                Elke27AreaAlarmControlPanel(coordinator, entry, area_id, area)
             )
         if entities:
             _LOGGER.debug("Adding %s area entities", len(entities))
@@ -91,23 +89,21 @@ class Elke27AreaAlarmControlPanel(
     def __init__(
         self,
         coordinator: Elke27DataUpdateCoordinator,
-        hub: Elke27Hub,
         entry: Elke27ConfigEntry,
         area_id: int,
         area: AreaState,
     ) -> None:
         """Initialize the area entity."""
         super().__init__(coordinator)
-        self._hub = hub
         self._entry = entry
         self._area_id = area_id
         self._attr_name = area.name or f"Area {area_id}"
         self._attr_unique_id = build_unique_id(
-            unique_base(hub, coordinator, entry),
+            unique_base(coordinator, entry),
             "area",
             area_id,
         )
-        self._attr_device_info = device_info_for_entry(hub, coordinator, entry)
+        self._attr_device_info = device_info_for_entry(coordinator, entry)
         self._missing_logged = False
 
     @property
@@ -146,28 +142,28 @@ class Elke27AreaAlarmControlPanel(
         """Return if the entity is available."""
         return (
             super().available
-            and self._hub.is_ready
+            and self.coordinator.is_ready
             and _get_area(self.coordinator.data, self._area_id) is not None
         )
 
     async def async_alarm_arm_away(self, code: str | None = None) -> None:
         """Arm the area in away mode."""
-        async with self._hub.area_arm_lock(self._area_id):
+        async with self.coordinator.area_arm_lock(self._area_id):
             await self._async_arm(ArmMode.ARMED_AWAY, code)
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
         """Arm the area in home mode."""
-        async with self._hub.area_arm_lock(self._area_id):
+        async with self.coordinator.area_arm_lock(self._area_id):
             await self._async_arm(ArmMode.ARMED_STAY, code)
 
     async def async_alarm_arm_custom_bypass(self, code: str | None = None) -> None:
         """Arm the area with a custom bypass."""
         code = _normalize_code(code)
         # Same per-area lock as alarm_arm_automatic and zone_bypass.
-        async with self._hub.area_arm_lock(self._area_id):
-            snapshot = self._hub.get_snapshot() or self.coordinator.data
+        async with self.coordinator.area_arm_lock(self._area_id):
+            snapshot = self.coordinator.get_snapshot() or self.coordinator.data
             try:
-                await self._hub.async_bypass_faulted_zones(
+                await self.coordinator.async_bypass_faulted_zones(
                     self._area_id, snapshot, code
                 )
             except ZoneBypassFailedError as err:
@@ -193,33 +189,33 @@ class Elke27AreaAlarmControlPanel(
         # timeout or transport error the panel may have disarmed, and resuming
         # could re-arm with someone inside. A disarm that was never sent (no
         # connection, missing code) or was definitively refused lets it resume.
-        hub = self._hub
-        hub.begin_disarm(self._area_id)
+        coordinator = self.coordinator
+        coordinator.begin_disarm(self._area_id)
         try:
             try:
-                accepted = await hub.async_disarm_area(self._area_id, code)
+                accepted = await coordinator.async_disarm_area(self._area_id, code)
             except Elke27PinRequiredError as err:
                 msg = "PIN required to perform this action."
                 raise HomeAssistantError(msg) from err
             except asyncio.CancelledError:
-                hub.cancel_arm_automatic(self._area_id)
+                coordinator.cancel_arm_automatic(self._area_id)
                 raise
             except Exception as err:
                 if not is_definitive_refusal(err):
-                    hub.cancel_arm_automatic(self._area_id)
+                    coordinator.cancel_arm_automatic(self._area_id)
                 raise
             # False: never sent (no connection), so arming may resume.
-            raise_if_not_sent(sent=accepted, hub=hub)
-            hub.cancel_arm_automatic(self._area_id)
+            raise_if_not_sent(sent=accepted, coordinator=coordinator)
+            coordinator.cancel_arm_automatic(self._area_id)
         finally:
-            hub.end_disarm(self._area_id)
+            coordinator.end_disarm(self._area_id)
 
     async def _async_arm(self, mode: ArmMode, code: str | None) -> None:
         """Arm the area; the caller holds the area lock."""
         code = _normalize_code(code)
         try:
-            sent = await self._hub.async_arm_area(self._area_id, mode, code)
-            raise_if_not_sent(sent=sent, hub=self._hub)
+            sent = await self.coordinator.async_arm_area(self._area_id, mode, code)
+            raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err

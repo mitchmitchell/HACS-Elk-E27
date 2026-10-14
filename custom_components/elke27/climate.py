@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-    from .hub import Elke27Hub
     from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,7 +71,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up Elke27 thermostats from a config entry."""
     data = entry.runtime_data
-    hub = data.hub
     coordinator = data.coordinator
     known_ids: set[int] = set()
 
@@ -86,7 +84,7 @@ async def async_setup_entry(
             if tstat_id in known_ids:
                 continue
             known_ids.add(tstat_id)
-            entities.append(Elke27Thermostat(coordinator, hub, entry, tstat_id, tstat))
+            entities.append(Elke27Thermostat(coordinator, entry, tstat_id, tstat))
         if entities:
             async_add_entities(entities)
 
@@ -119,22 +117,20 @@ class Elke27Thermostat(
     def __init__(
         self,
         coordinator: Elke27DataUpdateCoordinator,
-        hub: Elke27Hub,
         entry: Elke27ConfigEntry,
         tstat_id: int,
         tstat: ThermostatState,
     ) -> None:
         """Initialize the thermostat entity."""
         super().__init__(coordinator)
-        self._hub = hub
         self._tstat_id = tstat_id
         self._attr_name = tstat.name or f"Thermostat {tstat_id}"
         self._attr_unique_id = build_unique_id(
-            unique_base(hub, coordinator, entry),
+            unique_base(coordinator, entry),
             "tstat",
             tstat_id,
         )
-        self._attr_device_info = device_info_for_entry(hub, coordinator, entry)
+        self._attr_device_info = device_info_for_entry(coordinator, entry)
         self._missing_logged = False
 
     @property
@@ -142,7 +138,7 @@ class Elke27Thermostat(
         """Return if the entity is available."""
         return (
             super().available
-            and self._hub.is_ready
+            and self.coordinator.is_ready
             and _get_tstat(self.coordinator.data, self._tstat_id) is not None
         )
 
@@ -226,8 +222,10 @@ class Elke27Thermostat(
             msg = "HVAC mode is not supported."
             raise HomeAssistantError(msg)
         try:
-            sent = await self._hub.async_set_tstat_status(self._tstat_id, mode=mode)
-            raise_if_not_sent(sent=sent, hub=self._hub)
+            sent = await self.coordinator.async_set_tstat_status(
+                self._tstat_id, mode=mode
+            )
+            raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -239,10 +237,10 @@ class Elke27Thermostat(
             msg = "Fan mode is not supported."
             raise HomeAssistantError(msg)
         try:
-            sent = await self._hub.async_set_tstat_status(
+            sent = await self.coordinator.async_set_tstat_status(
                 self._tstat_id, fan_mode=value
             )
-            raise_if_not_sent(sent=sent, hub=self._hub)
+            raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err
@@ -267,12 +265,12 @@ class Elke27Thermostat(
             raise HomeAssistantError(msg)
 
         try:
-            sent = await self._hub.async_set_tstat_status(
+            sent = await self.coordinator.async_set_tstat_status(
                 self._tstat_id,
                 heat_setpoint=heat_setpoint,
                 cool_setpoint=cool_setpoint,
             )
-            raise_if_not_sent(sent=sent, hub=self._hub)
+            raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
             msg = "PIN required to perform this action."
             raise HomeAssistantError(msg) from err

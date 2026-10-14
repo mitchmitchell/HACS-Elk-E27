@@ -23,9 +23,8 @@ if _HAS_DEPS:
     from elke27_lib import AreaState, ArmMode, PanelInfo, PanelSnapshot, ZoneState
     from elke27_lib.errors import Elke27PinRequiredError
 
-    from custom_components.elke27 import hub as elke27_hub
-    from custom_components.elke27.hub import (
-        Elke27Hub,
+    from custom_components.elke27 import coordinator as elke27_hub
+    from custom_components.elke27.arming import (
         ZoneBypassFailedError,
         area_armed_from_status_reply,
         area_arming_from_status_reply,
@@ -35,6 +34,7 @@ if _HAS_DEPS:
         zone_bypass_label,
     )
     from homeassistant.exceptions import HomeAssistantError
+    from tests.conftest import make_coordinator
 
 
 def _snapshot(**kwargs: Any) -> PanelSnapshot:
@@ -65,9 +65,9 @@ def _two_area_snapshot() -> PanelSnapshot:
     )
 
 
-def _hub() -> Elke27Hub:
+def _hub() -> Any:
     hass = MagicMock()
-    return Elke27Hub(hass, "192.0.2.10", 2101, "{}", "123456789012", None)
+    return make_coordinator(hass)
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
@@ -228,7 +228,7 @@ class DefinitiveRefusalTest(unittest.TestCase):
             Elke27TimeoutError,
         )
 
-        from custom_components.elke27.hub import (  # noqa: PLC0415
+        from custom_components.elke27.arming import (  # noqa: PLC0415
             is_already_armed_refusal,
             is_definitive_refusal,
         )

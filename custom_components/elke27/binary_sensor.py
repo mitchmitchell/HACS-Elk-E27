@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-    from .hub import Elke27Hub
     from .models import Elke27ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -67,7 +66,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up Elke27 zone binary sensors from a config entry."""
     data = entry.runtime_data
-    hub = data.hub
     coordinator = data.coordinator
     known_ids: set[int] = set()
     skipped_zone_ids: set[int] = set()
@@ -99,7 +97,7 @@ async def async_setup_entry(
             known_ids.add(zone_id)
             entities.append(
                 Elke27ZoneBinarySensor(
-                    coordinator, hub, entry, zone_id, zone, zone_definition
+                    coordinator, entry, zone_id, zone, zone_definition
                 )
             )
             added += 1
@@ -127,7 +125,6 @@ class Elke27ZoneBinarySensor(
     def __init__(
         self,
         coordinator: Elke27DataUpdateCoordinator,
-        hub: Elke27Hub,
         entry: Elke27ConfigEntry,
         zone_id: int,
         zone: ZoneState,
@@ -135,16 +132,15 @@ class Elke27ZoneBinarySensor(
     ) -> None:
         """Initialize the zone entity."""
         super().__init__(coordinator)
-        self._hub = hub
         self._entry = entry
         self._zone_id = zone_id
         self._attr_name = _zone_name(zone, zone_definition) or f"Zone {zone_id}"
         self._attr_unique_id = build_unique_id(
-            unique_base(hub, coordinator, entry),
+            unique_base(coordinator, entry),
             "zone",
             zone_id,
         )
-        self._attr_device_info = device_info_for_entry(hub, coordinator, entry)
+        self._attr_device_info = device_info_for_entry(coordinator, entry)
         self._missing_logged = False
         self._attr_device_class = _zone_device_class(zone_definition)
 
@@ -199,7 +195,7 @@ class Elke27ZoneBinarySensor(
         """Return if the entity is available."""
         return (
             super().available
-            and self._hub.is_ready
+            and self.coordinator.is_ready
             and _get_zone(self.coordinator.data, self._zone_id) is not None
         )
 

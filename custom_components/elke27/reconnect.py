@@ -1,11 +1,11 @@
-"""Reconnect supervisor for the Elke27 hub (ADR-0125 D2)."""
+"""Reconnect supervisor for the Elke27 coordinator (ADR-0125 D2)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from elke27_lib.errors import Elke27Error
 
@@ -18,16 +18,16 @@ from .const import (
     RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
 )
 from .errors import AUTH_ERRORS, is_reconnect_retryable
+from .tasks import create_background_task
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Coroutine
+    from collections.abc import Awaitable, Callable
 
     from .models import Elke27ConfigEntry
 
 
-# D2 is a pure move: keep logging under the hub's logger name so existing
-# logger configuration and log filters see no change.
-_LOGGER = logging.getLogger(f"{__package__}.hub")
+# D3 deleted hub.py: reconnect logs under the coordinator, which owns the client.
+_LOGGER = logging.getLogger(f"{__package__}.coordinator")
 
 
 class ReconnectSupervisor:
@@ -87,17 +87,9 @@ class ReconnectSupervisor:
         if self._reconnect_task is not None and not self._reconnect_task.done():
             return
         _LOGGER.debug("Creating reconnect task")
-        self._reconnect_task = self._create_background_task(
-            self._async_run(), "elke27 reconnect"
+        self._reconnect_task = create_background_task(
+            self._hass, self._entry, self._async_run(), "elke27 reconnect"
         )
-
-    def _create_background_task(
-        self, coro: Coroutine[Any, Any, None], name: str
-    ) -> asyncio.Task[None]:
-        """Create a task that is cancelled when the config entry unloads."""
-        if self._entry is not None:
-            return self._entry.async_create_background_task(self._hass, coro, name)
-        return self._hass.async_create_background_task(coro, name)
 
     @callback
     def cancel(self) -> None:

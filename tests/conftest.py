@@ -121,6 +121,41 @@ def mock_client() -> Generator[ClientHarness]:
     """Patch the elke27 client the hub creates."""
     harness = ClientHarness()
     with patch(
-        "custom_components.elke27.hub.Elke27Client", return_value=harness.client
+        "custom_components.elke27.coordinator.Elke27Client", return_value=harness.client
     ):
         yield harness
+
+
+def make_coordinator(
+    hass: Any,
+    *,
+    panel_name: str | None = None,
+    link_keys_json: str = "{}",
+    host: str = HOST,
+    port: int = PORT,
+) -> Any:
+    """
+    Build a coordinator for unit tests without a real config entry.
+
+    Replaces the pre-D3 ``Elke27Hub(hass, host, port, keys, serial, name)``.
+    Background tasks go to ``hass.async_create_background_task``, as the hub
+    did without an entry, so tests can capture them there.
+    """
+    from custom_components.elke27.coordinator import (  # noqa: PLC0415
+        Elke27DataUpdateCoordinator,
+    )
+
+    entry = MagicMock()
+    entry.entry_id = "test-entry"
+    entry.title = "Test panel"
+    entry.data = {
+        CONF_HOST: host,
+        CONF_PORT: port,
+        CONF_LINK_KEYS_JSON: link_keys_json,
+        CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        "panel": {"panel_name": panel_name} if panel_name else None,
+    }
+    entry.async_create_background_task.side_effect = (
+        lambda hass_, coro, name: hass_.async_create_background_task(coro, name)
+    )
+    return Elke27DataUpdateCoordinator(hass, entry)

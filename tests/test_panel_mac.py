@@ -355,23 +355,22 @@ async def test_connect_fill_keeps_existing_serial_unique_id(
 
 
 def _hub_coord(mac: str | None = None) -> tuple[Any, Any]:
-    hub = SimpleNamespace(panel_name="Panel")
     panel = SimpleNamespace(mac=mac, serial=None, panel_name="Panel")
-    coordinator = SimpleNamespace(data=SimpleNamespace(panel=panel))
-    return hub, coordinator
+    coordinator = SimpleNamespace(panel_name="Panel", data=SimpleNamespace(panel=panel))
+    return coordinator, coordinator
 
 
 def test_identity_key_stored_mac_is_tier_one() -> None:
-    hub, coord = _hub_coord()
+    _hub, coord = _hub_coord()
     entry = _entry(mac=MAC)
-    assert entry_identity_key(hub, coord, entry) == MAC_FMT  # type: ignore[arg-type]
+    assert entry_identity_key(coord, entry) == MAC_FMT  # type: ignore[arg-type]
 
 
 def test_identity_key_ignores_filled_mac() -> None:
     """A filled-in MAC must not move an existing entry's entity identity."""
-    hub, coord = _hub_coord()
+    _hub, coord = _hub_coord()
     entry = _entry(mac=MAC, **{CONF_PANEL_MAC_FILLED: True})
-    assert entry_identity_key(hub, coord, entry) == entry.entry_id  # type: ignore[arg-type]
+    assert entry_identity_key(coord, entry) == entry.entry_id  # type: ignore[arg-type]
 
 
 async def test_hub_connect_schedules_mac_check(
