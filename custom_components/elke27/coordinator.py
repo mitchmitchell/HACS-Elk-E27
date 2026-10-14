@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 from elke27_lib import (
     ClientConfig,
@@ -21,6 +21,7 @@ from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
     E27Error,
     Elke27Error,
+    Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27PinRequiredError,
 )
@@ -42,6 +43,7 @@ from homeassistant.exceptions import (
 )
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .arming import (
     ARM_STATUS_POLL_INTERVAL,
@@ -90,6 +92,8 @@ LIGHT_REFRESH_DELAY = 3.0
 # read-only CSM refresh, at most once per STALE_REFRESH_AFTER seconds.
 STALE_REFRESH_AFTER = 60.0
 STALE_CHECK_INTERVAL = timedelta(seconds=10)
+# Same budget elke27's async_set_zone_bypass gives zone_set_status.
+ZONE_BYPASS_TIMEOUT = 15.0
 _monotonic = time.monotonic
 
 # Domains whose config is read during setup.
@@ -154,6 +158,11 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._last_stale_refresh: float | None = None
         self._unsubscribe_stale_timer: Callable[[], None] | None = None
         self._stale_task: asyncio.Task[None] | None = None
+        # D4: post-command fallback reads (status_refresh_ok False). Kept for
+        # the soak gate; removed with snapshot_with_status after the soak.
+        self._fallback_task: asyncio.Task[PanelSnapshot | None] | None = None
+        self._fallback_refresh_count = 0
+        self._last_fallback_at: datetime | None = None
         self._reconnect = ReconnectSupervisor(
             hass,
             entry,
@@ -231,7 +240,12 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Event unsubscribe failed: %s", err)
             self._unsubscribe = None
-        for task in (self._debounce_task, self._refresh_task, self._stale_task):
+        for task in (
+            self._debounce_task,
+            self._refresh_task,
+            self._stale_task,
+            self._fallback_task,
+        ):
             if task is not None and not task.done():
                 task.cancel()
                 # Wait for the task to finish without swallowing a cancellation
@@ -240,6 +254,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._debounce_task = None
         self._refresh_task = None
         self._stale_task = None
+        self._fallback_task = None
         self._stopping = True
         await self._reconnect.async_stop()
         self._reconnect.clear_issue()
@@ -284,6 +299,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if self._refresh_task is not None and not self._refresh_task.done():
             return
         if self._stale_task is not None and not self._stale_task.done():
+            return
+        if self._fallback_task is not None and not self._fallback_task.done():
+            # D4: a post-command fallback read is already in flight.
             return
         self._last_stale_refresh = now
         _LOGGER.debug("Snapshot stale for %.0f s; refreshing", now - self._stale_since)
@@ -770,8 +788,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             bypassed,
         )
         try:
-            await client.async_set_zone_bypass(
-                zone_id, bypassed=bypassed, pin=pin_value
+            refresh_ok = await self._async_write_zone_bypass(
+                client, zone_id, bypassed=bypassed, pin=pin_value
             )
         except Elke27PinRequiredError:
             raise
@@ -783,6 +801,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
+        await self._async_after_write("bypass", refresh_ok=refresh_ok, zone_id=zone_id)
         return True
 
     async def _async_execute(self, command_key: str, **params: Any) -> bool:
@@ -866,7 +885,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         pin_value = _validated_pin(pin)
         arm_mode = _library_arm_mode(mode)
         try:
-            await client.async_arm_area(
+            refresh_ok = await self._async_write_arm(
+                client,
                 area_id,
                 mode=arm_mode,
                 pin=pin_value,
@@ -883,6 +903,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
+        await self._async_after_write("arm", refresh_ok=refresh_ok, area_id=area_id)
         return True
 
     def _resubscribe_typed_callbacks(self) -> None:
@@ -920,7 +941,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             raise Elke27PinRequiredError(msg)
         pin_value = _validated_pin(pin)
         try:
-            await client.async_disarm_area(
+            refresh_ok = await self._async_write_disarm(
+                client,
                 area_id,
                 pin=pin_value,
                 auto_stay_cancel=auto_stay_cancel,
@@ -936,7 +958,190 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
+        await self._async_after_write("disarm", refresh_ok=refresh_ok, area_id=area_id)
         return True
+
+    # The three writes below take the same arguments as the elke27 public
+    # methods they replace (async_arm_area, async_disarm_area,
+    # async_set_zone_bypass) and send the same request.
+
+    async def _async_write_arm(
+        self,
+        client: Elke27Client,
+        area_id: int,
+        *,
+        mode: Any,
+        pin: str,
+        auto_stay_cancel: bool,
+        exit_delay_cancel: bool,
+    ) -> bool | None:
+        return await self._async_send_write(
+            client,
+            "area_set_arm_state",
+            "Failed to arm area.",
+            area_id=_positive_id(area_id, "area_id"),
+            arm_state=str(mode.value).upper(),
+            pin=_wire_pin(pin),
+            auto_stay_cancel=auto_stay_cancel,
+            exit_delay_cancel=exit_delay_cancel,
+        )
+
+    async def _async_write_disarm(
+        self,
+        client: Elke27Client,
+        area_id: int,
+        *,
+        pin: str,
+        auto_stay_cancel: bool,
+        exit_delay_cancel: bool,
+    ) -> bool | None:
+        return await self._async_send_write(
+            client,
+            "area_set_arm_state",
+            "Failed to disarm area.",
+            area_id=_positive_id(area_id, "area_id"),
+            arm_state="DISARMED",
+            pin=_wire_pin(pin),
+            auto_stay_cancel=auto_stay_cancel,
+            exit_delay_cancel=exit_delay_cancel,
+        )
+
+    async def _async_write_zone_bypass(
+        self, client: Elke27Client, zone_id: int, *, bypassed: bool, pin: str
+    ) -> bool | None:
+        return await self._async_send_write(
+            client,
+            "zone_set_status",
+            "Failed to set zone bypass.",
+            zone_id=_positive_id(zone_id, "zone_id"),
+            pin=_wire_pin(pin),
+            bypassed=bypassed,
+            timeout_s=ZONE_BYPASS_TIMEOUT,
+        )
+
+    async def _async_send_write(
+        self,
+        client: Elke27Client,
+        command_key: str,
+        failure_message: str,
+        **params: Any,
+    ) -> bool | None:
+        """
+        Send one arm/disarm/bypass write and return its status_refresh_ok (D4).
+
+        Sends the same request the elke27 public method sends, through
+        async_execute, so the Result's status_refresh_ok is visible. A failed
+        Result is raised as the same typed error the public method raises.
+        The write is sent once and never repeated.
+        """
+        result = await client.async_execute(command_key, **params)
+        if not result.ok:
+            if result.error is not None:
+                _raise_library_error(client, result.error)
+            raise E27Error(failure_message)
+        refresh_ok: bool | None = result.status_refresh_ok
+        return refresh_ok
+
+    async def _async_after_write(
+        self,
+        kind: str,
+        *,
+        refresh_ok: bool | None,
+        area_id: int | None = None,
+        zone_id: int | None = None,
+    ) -> None:
+        """
+        Push post-command state; fall back to one status read if needed (D4).
+
+        status_refresh_ok True or None: the library already refreshed (or the
+        reply carried the state), so push its snapshot with no extra request.
+        False: one fallback read via snapshot_with_status, then push. A failed
+        fallback pushes the client snapshot as is; the command still succeeded.
+        """
+        if refresh_ok is not False:
+            self._set_snapshot(self.get_snapshot())
+            return
+        self._fallback_refresh_count += 1
+        self._last_fallback_at = dt_util.utcnow()
+        _LOGGER.debug(
+            "Post-command status refresh failed (%s area=%s zone=%s); fallback read %s",
+            kind,
+            area_id,
+            zone_id,
+            self._fallback_refresh_count,
+        )
+        snapshot = await self._async_fallback_read(area_id=area_id, zone_id=zone_id)
+        self._set_snapshot(snapshot or self.get_snapshot())
+
+    async def _async_fallback_read(
+        self, *, area_id: int | None, zone_id: int | None
+    ) -> PanelSnapshot | None:
+        """Run one fallback read, single-flight with the Q5 stale refresh."""
+        stale_task = self._stale_task
+        if stale_task is not None and not stale_task.done():
+            # Q5's refresh is already reading the panel: share it.
+            await asyncio.shield(stale_task)
+            return self.get_snapshot()
+        task = self._fallback_task
+        if task is None or task.done():
+            task = self._create_background_task(
+                self._async_fallback_status(area_id=area_id, zone_id=zone_id),
+                f"{DOMAIN} post-command fallback read",
+            )
+            self._fallback_task = task
+        try:
+            return await asyncio.shield(task)
+        except COMMAND_ERRORS as err:
+            _LOGGER.debug("Post-command fallback read failed: %s", err)
+            return None
+
+    async def _async_fallback_status(
+        self, *, area_id: int | None, zone_id: int | None
+    ) -> PanelSnapshot | None:
+        """Read area status (and all zone status for a bypass) once."""
+        if zone_id is None:
+            if area_id is None:
+                return self.get_snapshot()
+            snapshot, _skip = await self.async_refresh_area_arm_status(area_id)
+            return snapshot
+        current = self.get_snapshot()
+        zone = current.zones.get(zone_id) if current is not None else None
+        zone_area = zone.area_id if zone is not None else None
+        if zone_area:
+            snapshot, _skip = await self.async_refresh_area_state(zone_area)
+            return snapshot
+        client = self._client
+        if client is None:
+            return None
+        zones_payload = await self._async_status_request(
+            client, "zone_get_all_zones_status"
+        )
+        return snapshot_with_status(client.get_snapshot(), 0, None, zones_payload)
+
+    @property
+    def fallback_refresh_count(self) -> int:
+        """Post-command fallback reads since this entry loaded (D4 soak gate)."""
+        return self._fallback_refresh_count
+
+    @property
+    def last_fallback_at(self) -> datetime | None:
+        """UTC time of the last post-command fallback read, if any."""
+        return self._last_fallback_at
+
+    @property
+    def snapshot_stale(self) -> bool:
+        """Return the library's snapshot.stale flag (read-only, for D5)."""
+        return bool(getattr(self.data, "stale", False))
+
+    @property
+    def stale_area_ids(self) -> frozenset[int]:
+        """Area ids the library marks stale (read-only, for D5)."""
+        return frozenset(getattr(self.data, "stale_area_ids", None) or ())
+
+    @property
+    def stale_zone_ids(self) -> frozenset[int]:
+        """Zone ids the library marks stale (read-only, for D5)."""
+        return frozenset(getattr(self.data, "stale_zone_ids", None) or ())
 
     def _handle_connection_event(self, event: Elke27Event) -> None:
         """Handle connection lifecycle events from the client."""
@@ -1095,6 +1300,36 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:
         """Update coordinator data and track snapshot version."""
         self.async_set_updated_data(snapshot or PanelSnapshot.empty())
+
+
+def _positive_id(value: int, name: str) -> int:
+    """Reject a non-positive id, as the elke27 public methods do."""
+    if value < 1:
+        msg = f"{name} must be a positive integer."
+        raise Elke27InvalidArgument(msg)
+    return value
+
+
+def _wire_pin(pin: str) -> int:
+    """Return the validated digit-string PIN as the JSON integer sent."""
+    value = int(pin)
+    if value <= 0:
+        msg = "PIN must be a positive number (all-zero PINs are invalid)."
+        raise Elke27InvalidArgument(msg)
+    return value
+
+
+def _raise_library_error(client: Elke27Client, err: BaseException) -> NoReturn:
+    """
+    Raise a failed write's error as the elke27 public method would.
+
+    Uses the client's own mapping (elke27==0.3.13) so error handling is the
+    same as before D4; an unmapped error is raised as is.
+    """
+    mapper = getattr(client, "_raise_v2_command_error", None)
+    if callable(mapper):
+        mapper(err)
+    raise err
 
 
 def _log_command_failure(
