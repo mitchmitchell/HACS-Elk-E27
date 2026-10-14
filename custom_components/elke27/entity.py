@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
@@ -161,20 +161,20 @@ def area_device_info(
     key = entry_identity_key(coordinator, entry)
     identifiers = {(DOMAIN, area_device_identifier(key, area_id))}
     name = area_device_name(area_id, area)
-    panel_device_id = getattr(coordinator, "panel_device_id", None)
-    if isinstance(panel_device_id, str):
-        child_info = getattr(dr, "ChildDeviceInfo", None)
-        if child_info is not None:
-            return child_info(  # type: ignore[no-any-return]
-                identifiers=identifiers, name=name, parent_device_id=panel_device_id
-            )
-        if SUPPORTS_VIA_DEVICE_ID:
-            return DeviceInfo(  # type: ignore[typeddict-unknown-key]
-                identifiers=identifiers,
-                name=name,
-                model=AREA_DEVICE_MODEL,
-                via_device_id=panel_device_id,
-            )
+    # Set in async_setup_entry before the platforms load.
+    panel_device_id = cast("str", coordinator.panel_device_id)
+    child_info = getattr(dr, "ChildDeviceInfo", None)
+    if child_info is not None:
+        return child_info(  # type: ignore[no-any-return]
+            identifiers=identifiers, name=name, parent_device_id=panel_device_id
+        )
+    if SUPPORTS_VIA_DEVICE_ID:
+        return DeviceInfo(  # type: ignore[typeddict-unknown-key]
+            identifiers=identifiers,
+            name=name,
+            model=AREA_DEVICE_MODEL,
+            via_device_id=panel_device_id,
+        )
     return DeviceInfo(
         identifiers=identifiers,
         name=name,

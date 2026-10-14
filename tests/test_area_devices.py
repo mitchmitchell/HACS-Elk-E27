@@ -316,21 +316,6 @@ def test_area_device_info_uses_via_device_id_when_supported(
     assert "via_device" not in info
 
 
-def test_area_device_info_falls_back_without_panel_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No panel device id yet: fall back to the identifier link."""
-    from custom_components.elke27 import entity as entity_mod  # noqa: PLC0415
-
-    monkeypatch.setattr(entity_mod, "SUPPORTS_VIA_DEVICE_ID", True)
-    coordinator = _coordinator(panel_snapshot())
-    coordinator.panel_device_id = None
-    info = area_device_info(
-        coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
-    )
-    assert info["via_device"] == (DOMAIN, KEY)
-
-
 def test_area_device_info_prefers_child_device_info(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
