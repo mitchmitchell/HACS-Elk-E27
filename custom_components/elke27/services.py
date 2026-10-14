@@ -129,7 +129,7 @@ async def _async_handle_alarm_arm_automatic(
     mode_name = call.data[ATTR_MODE]
     code = call.data[ATTR_CODE]
 
-    entity_ids = _entity_ids_from_service_call(hass, call)
+    entity_ids = _entity_ids_from_service_call(hass, call, Platform.ALARM_CONTROL_PANEL)
     if not entity_ids:
         msg = "No Elke27 alarm control panel target was provided"
         raise ServiceValidationError(msg)
@@ -168,10 +168,26 @@ def _config_entry_id(entity_entry: er.RegistryEntry) -> str:
     return config_entry_id
 
 
-def _entity_ids_from_service_call(hass: HomeAssistant, call: ServiceCall) -> list[str]:
-    """Extract target entity IDs from a service call."""
+def _entity_ids_from_service_call(
+    hass: HomeAssistant, call: ServiceCall, platform: Platform
+) -> list[str]:
+    """
+    Extract target entity IDs from a service call.
+
+    Entities named directly are all kept (a wrong one is reported). Entities
+    reached through a device or area target are kept only for this platform:
+    since E2 an area device holds both its alarm panel and its zones.
+    """
     referenced = async_extract_referenced_entity_ids(hass, TargetSelection(call.data))
-    return sorted(referenced.referenced | referenced.indirectly_referenced)
+    registry = er.async_get(hass)
+    indirect = {
+        entity_id
+        for entity_id in referenced.indirectly_referenced
+        if (entity_entry := registry.async_get(entity_id)) is not None
+        and entity_entry.platform == DOMAIN
+        and entity_entry.domain == platform
+    }
+    return sorted(referenced.referenced | indirect)
 
 
 async def _async_arm_automatic_entity(
@@ -542,7 +558,7 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
     code = call.data[ATTR_CODE]
     bypass = call.data[ATTR_BYPASS]
 
-    entity_ids = _entity_ids_from_service_call(hass, call)
+    entity_ids = _entity_ids_from_service_call(hass, call, Platform.BINARY_SENSOR)
     if not entity_ids:
         msg = "No Elke27 zone target was provided"
         raise ServiceValidationError(msg)
@@ -586,12 +602,16 @@ def _area_id_from_unique_id(unique_id: str) -> int:
 
 
 def _numeric_id_from_unique_id(unique_id: str, domain: str) -> int:
-    """Extract the numeric ID from an Elke27 ``<base>:<domain>:<id>`` unique ID."""
-    prefix = f":{domain}:"
-    if prefix not in unique_id:
+    """
+    Extract the numeric ID from an Elke27 ``<base>:<id>`` unique ID.
+
+    The caller has already checked the entity's platform, so the kind
+    (area or zone) is known; ``domain`` only names it in errors.
+    """
+    if ":" not in unique_id:
         msg = f"Entity unique ID is not a recognized Elke27 {domain} identifier"
         raise ServiceValidationError(msg)
-    id_str = unique_id.rsplit(prefix, 1)[1]
+    id_str = unique_id.rsplit(":", 1)[1]
     try:
         return int(id_str)
     except ValueError as err:

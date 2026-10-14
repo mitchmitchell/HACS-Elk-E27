@@ -13,12 +13,12 @@ if TYPE_CHECKING:
     from .models import Elke27ConfigEntry
 
 
-def create_background_task(
+def create_background_task[T](
     hass: HomeAssistant,
     entry: Elke27ConfigEntry | None,
-    coro: Coroutine[Any, Any, None],
+    coro: Coroutine[Any, Any, T],
     name: str,
-) -> asyncio.Task[None]:
+) -> asyncio.Task[T]:
     """
     Create a task that is cancelled when the config entry unloads.
 

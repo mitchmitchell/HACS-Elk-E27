@@ -607,9 +607,10 @@ conditions:
 
 - **Local push:** the integration holds a persistent, encrypted session with the panel and
   updates entities when the panel reports changes. It doesn't poll on a schedule.
-- **Linking identity:** Home Assistant identifies itself to the panel with a client serial
-  number. Setup generates a random 12-digit integration ID for each entry and sends it as
-  that serial. It is stored in the config entry, so it stays the same across restarts.
+- **Linking identity:** Home Assistant identifies itself to the panel with a client ID. Setup
+  generates a random 12-digit client ID for each entry and sends it when linking. It is
+  stored in the config entry, so it stays the same across restarts. It is the integration's
+  own ID, not a panel serial number.
 - **Reconnects:** if the connection drops, entities become unavailable and the integration
   keeps reconnecting with a delay that starts at 2 seconds and doubles up to 5 minutes between
   attempts, with no limit on attempts. When the
@@ -649,7 +650,7 @@ These are by design or limits of the panel.
   - HVAC *action* (heating/cooling/off) is inferred from the selected mode. It does not
     show whether the equipment is actually running.
   - Only Auto and On fan modes are supported.
-- **Garage doors:** garage door (barrier) support is a planned future feature.
+- **Garage doors:** planned for 0.2.1; see [Garage doors](#garage-doors).
 - **Setup**
   - Manual setup always uses port 2101.
   - There is no options or reconfigure flow (see
@@ -709,7 +710,55 @@ to retry (see [the example](#retry-automatic-arming-after-a-failure)).
 
 ---
 
+## Garage doors
+
+Planned for Elk E27 Alarm Engine Integration 0.2.1. It requires elke27 0.3.15, which Home Assistant installs for you. This is an added feature: updating from 0.2.0 needs no delete and re-add, and your existing entities don't change.
+
+Each garage door set up on your panel appears in Home Assistant as a garage door cover (named "Garage door" unless the panel gives it a name: TBD). If the panel puts the door in an area, it appears on that area's device; otherwise it appears on the panel device.
+
+**Supported**
+- Open the door.
+- Close the door.
+- See whether the door is open or closed.
+
+**Not supported**
+- Stop: you can't stop the door partway.
+- Position: you can't set or see how far open it is.
+- "Opening" and "Closing" states: the integration doesn't guess that a door is moving.
+- A door the panel reports as stopped, or in any other state than open or closed, shows as **unknown**.
+
+**Before you start**
+- The user code the integration signs in with must belong to a panel user with automation permission. Without it, the panel refuses open and close commands and Home Assistant shows: "The panel refused the garage door command; the configured Elk user may lack automation authority".
+
+**Things to know**
+- Closing from Home Assistant works the same as pressing your opener's remote. There is no extra warning and no setting to turn off remote closing, so check that the doorway is clear before you close it from an automation or while away.
+- Each command is sent once. If the integration can't tell whether the panel received it, you see "Garage door command may or may not have reached the panel; check the door before retrying", and the integration reads the door's status once; it never resends the command.
+- After each command the integration reads the door's status once.
+- If the panel is disconnected, the cover shows as unavailable and commands aren't queued ("Not connected to the panel; the garage door command was not sent.").
+- Tamper and low-battery sensors appear only for doors whose hardware reports them (TBD: not in #68 yet).
+
+**TBD**
+- Whether door changes show up right away or only after a refresh.
+- Hardware confirmation of the error messages and of status after open/close (Tester).
+- Whether a door can belong to an area (the test panel's door has none).
+
 ## Troubleshooting
+
+### Diagnostics fields (0.2.0)
+
+Use **Download diagnostics** on the entry. Useful fields:
+
+| Field | What it tells you |
+|---|---|
+| `client_ready`, `last_update_success` | Whether the panel session is up and ready (the library's ready state), and whether the last refresh worked. |
+| `client_present` | Whether the integration holds a client object. It can be `true` while the link is down and the client waits to reconnect, so use `client_ready` for link state. |
+| `reconnect_attempts`, `repairs_issue_active`, `reauth_requested` | Reconnect progress after a link drop; a Repairs issue appears only after 3 consecutive non-network failures (a plain network outage raises none), and re-auth when the panel rejects the link keys. |
+| `snapshot_stale`, `stale_area_ids`, `stale_zone_ids` | Whether the library marks panel data stale; a snapshot stale for over 60 s while connected gets one automatic read. |
+| `fallback_refresh_count`, `last_fallback_at`, `stale_auto_refresh_count` | Soak counters: post-command fallback reads and automatic stale reads since the entry loaded. |
+| `elke27_version`, `integration_version` | Installed versions; include them when reporting an issue. |
+| `area_device_count` | How many area devices the integration created. |
+
+Host, panel MAC, unique ID and client ID are redacted; link keys are never included.
 
 ### Setup errors
 
@@ -858,8 +907,8 @@ single command or a refused request is not retried. See [Retries and errors](#re
 **Can I bypass a zone?** Yes, one or more, with [`elke27.zone_bypass`](#elke27zone_bypass).
 Disarming an armed area clears bypasses.
 
-**Can I control a garage door?** Not yet. Garage door (barrier) support is a planned future
-feature.
+**Can I control a garage door?** Planned for 0.2.1 (open, close and open/closed state); see
+[Garage doors](#garage-doors).
 
 **Does it support Celsius?** For display, yes: Home Assistant converts. The panel works in
 whole °F, so setpoints you set in °C are rounded.
@@ -882,6 +931,31 @@ whole °F, so setpoints you set in °C are rounded.
 ---
 
 ## Upgrading
+
+### To 0.2.0
+
+> [!WARNING]
+> **One-time delete and re-add required.** 0.2.0 can't upgrade an existing entry in place.
+> Entity IDs and names change, so update your automations, dashboards and scripts.
+> Entries left over from 0.1.x fail setup with:
+> "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
+
+1. Make a Home Assistant backup.
+2. Note the entity IDs your automations, dashboards and scripts use.
+3. Delete the integration: Settings → Devices & services → Elk E27 Alarm Engine Integration → ⋮ → Delete.
+4. Update in HACS and restart Home Assistant.
+5. Add the integration again with the same access code and passphrase.
+6. Update automations, dashboards and scripts to the new entity IDs.
+
+Each area now appears as its own device, with its zones under it; the area's alarm panel is
+named after the area, and zones are named "<area> <zone>". Zones with no area and panel-wide
+entities (outputs, lights, locks, thermostats, panel status) stay on the panel device. New
+entity IDs follow the new names, for example `alarm_control_panel.<panel>_<area>` becomes
+`alarm_control_panel.<area>`, and areas or zones with the same name get `_2`, `_3` IDs.
+Going back to 0.1.x also needs a delete and re-add. Requires elke27 0.3.14, which Home
+Assistant installs for you.
+<!-- PENDING MITCH: Network Devices clean-up step -->
+See the [0.2.0 release notes](docs/release-notes/v0.2.0.md).
 
 ### To 0.1.9
 

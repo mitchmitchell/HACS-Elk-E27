@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from tests.conftest import ClientHarness
 
-ALARM = "alarm_control_panel.test_panel_house"
+ALARM = "alarm_control_panel.house"
 SWITCH = "switch.test_panel_siren"
 LOCK = "lock.test_panel_back_door"
 
@@ -41,7 +41,7 @@ async def loaded(
 
 
 @pytest.mark.parametrize(
-    "entity_id", [ALARM, SWITCH, LOCK, "binary_sensor.test_panel_front_door"]
+    "entity_id", [ALARM, SWITCH, LOCK, "binary_sensor.house_front_door"]
 )
 async def test_unavailable_when_coordinator_update_failed(
     hass: HomeAssistant, loaded: MockConfigEntry, entity_id: str

@@ -6,19 +6,38 @@ from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 import enum
+from importlib.metadata import PackageNotFoundError, version as package_version
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from elke27_lib import redact_for_diagnostics
 
+from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.loader import async_get_integration
 
 from .const import (
+    CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     CONF_PANEL_MAC,
     CONF_PANEL_MAC_FILLED,
+    DOMAIN,
     MANUFACTURER_NUMBER,
 )
+from .entity import area_has_device
+
+# Host, MAC, panel serial (unique_id may be a serial or MAC), integration ID and
+# link keys never leave the box unredacted. Link keys are not emitted at all.
+TO_REDACT = {
+    CONF_HOST,
+    CONF_PANEL_MAC,
+    CONF_INTEGRATION_ID,
+    CONF_LINK_KEYS_JSON,
+    "unique_id",
+    "serial",
+    "panel_serial",
+    "mac",
+}
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -27,10 +46,16 @@ if TYPE_CHECKING:
 
 
 async def async_get_config_entry_diagnostics(
-    _hass: HomeAssistant, entry: Elke27ConfigEntry
+    hass: HomeAssistant, entry: Elke27ConfigEntry
 ) -> dict[str, Any]:
-    """Return diagnostics for a config entry."""
-    snapshot = entry.runtime_data.coordinator.data
+    """
+    Return diagnostics for a config entry.
+
+    Reads coordinator and supervisor properties only; never calls the client.
+    """
+    coordinator = entry.runtime_data.coordinator
+    supervisor = coordinator.reconnect
+    snapshot = coordinator.data
     snapshot_dict = _to_jsonable(snapshot)
     redacted_snapshot = redact_for_diagnostics(snapshot_dict)
 
@@ -40,20 +65,50 @@ async def async_get_config_entry_diagnostics(
             "updated_at": snapshot.updated_at,
         }
     )
+    integration = await async_get_integration(hass, DOMAIN)
 
-    return {
+    data: dict[str, Any] = {
         "entry_id": entry.entry_id,
-        # A MAC is not a secret; exposed so identity can be checked on hardware.
         "unique_id": entry.unique_id,
-        "panel_mac": entry.data.get(CONF_PANEL_MAC),
+        CONF_PANEL_MAC: entry.data.get(CONF_PANEL_MAC),
         "panel_mac_filled": entry.data.get(CONF_PANEL_MAC_FILLED, False),
-        "host": entry.data.get(CONF_HOST),
+        CONF_HOST: entry.data.get(CONF_HOST),
         "port": entry.data.get(CONF_PORT),
+        CONF_INTEGRATION_ID: entry.data.get(CONF_INTEGRATION_ID),
         "manufacturer_number": MANUFACTURER_NUMBER,
         "link_keys_present": CONF_LINK_KEYS_JSON in entry.data,
+        "integration_version": str(integration.version),
+        "elke27_version": _elke27_version(),
+        # A client object exists (connect done, not torn down). This is not
+        # link state; client_ready is the library's ready signal for that.
+        "client_present": coordinator.client is not None,
+        "client_ready": coordinator.is_ready,
+        "last_update_success": coordinator.last_update_success,
+        "reconnect_attempts": supervisor.attempts,
+        "repairs_issue_active": supervisor.issue_active,
+        "reauth_requested": supervisor.reauth_requested,
+        "snapshot_stale": coordinator.snapshot_stale,
+        "stale_area_ids": sorted(coordinator.stale_area_ids),
+        "stale_zone_ids": sorted(coordinator.stale_zone_ids),
+        "fallback_refresh_count": coordinator.fallback_refresh_count,
+        "last_fallback_at": _to_jsonable(coordinator.last_fallback_at),
+        # Soak aid: Architect default, pending Mitch's OK.
+        "stale_auto_refresh_count": coordinator.stale_auto_refresh_count,
+        "area_device_count": sum(
+            1 for area_id in snapshot.areas if area_has_device(snapshot, area_id)
+        ),
         "snapshot_meta": snapshot_meta,
         "snapshot": redacted_snapshot,
     }
+    return async_redact_data(data, TO_REDACT)
+
+
+def _elke27_version() -> str | None:
+    """Return the installed elke27 library version."""
+    try:
+        return package_version("elke27")
+    except PackageNotFoundError:
+        return None
 
 
 def _to_jsonable(value: Any) -> Any:

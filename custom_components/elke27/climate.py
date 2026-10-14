@@ -127,7 +127,6 @@ class Elke27Thermostat(
         self._attr_name = tstat.name or f"Thermostat {tstat_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry),
-            "tstat",
             tstat_id,
         )
         self._attr_device_info = device_info_for_entry(coordinator, entry)
