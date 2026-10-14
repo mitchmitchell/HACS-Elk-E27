@@ -272,15 +272,14 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
                 {"entity_id": ["binary_sensor.x"], "code": "12ab"}
             )
 
-    def test_numeric_id_from_unique_id(self) -> None:
-        """IDs are parsed from <base>:<id> unique IDs (no platform segment)."""
-        parse = integration._numeric_id_from_unique_id  # noqa: SLF001
-        assert parse("aa:bb:cc:dd:ee:ff:7", "zone") == 7
-        assert integration._area_id_from_unique_id("x:2") == 2  # noqa: SLF001
-        with self.assertRaises(ServiceValidationError):
-            parse("noseparator", "zone")
-        with self.assertRaises(ServiceValidationError):
-            parse("base:abc", "zone")
+    async def test_bypass_rejects_unparseable_unique_id(self) -> None:
+        """A target whose unique ID has no numeric <id> part is a validation error."""
+        for unique_id in ("noseparator", "base:abc"):
+            runtime = _runtime()
+            entities = {"binary_sensor.bad": (_entry(unique_id), runtime)}
+            with self.assertRaises(ServiceValidationError):
+                await self._run({"code": "1234", "bypass": True}, entities)
+            runtime.coordinator.async_set_zone_bypass.assert_not_awaited()
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
