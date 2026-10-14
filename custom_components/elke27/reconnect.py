@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from elke27_lib.errors import Elke27Error
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 
 from .const import (
@@ -17,7 +18,7 @@ from .const import (
     ISSUE_RECONNECT_FAILED,
     RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
 )
-from .errors import AUTH_ERRORS, is_reconnect_retryable
+from .errors import AUTH_ERRORS, COMMAND_ERRORS, is_reconnect_retryable
 from .tasks import create_background_task
 
 if TYPE_CHECKING:
@@ -28,6 +29,11 @@ if TYPE_CHECKING:
 
 # D3 deleted hub.py: reconnect logs under the coordinator, which owns the client.
 _LOGGER = logging.getLogger(f"{__package__}.coordinator")
+
+# What a reconnect attempt may fail with: the library's errors, raw timeouts and
+# OS errors, and not-ready. Anything else is a bug and ends the loop (HA logs it)
+# instead of retrying forever.
+RECONNECT_ERRORS: tuple[type[Exception], ...] = (*COMMAND_ERRORS, ConfigEntryNotReady)
 
 
 class ReconnectSupervisor:
@@ -181,7 +187,7 @@ class ReconnectSupervisor:
                 self.clear_issue()
                 self.start_reauth_once()
                 return
-            except Exception as err:  # noqa: BLE001
+            except RECONNECT_ERRORS as err:
                 transport = is_reconnect_retryable(err)
                 if not transport:
                     self._reconnect_non_transport_streak += 1
