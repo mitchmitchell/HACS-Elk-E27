@@ -607,9 +607,10 @@ conditions:
 
 - **Local push:** the integration holds a persistent, encrypted session with the panel and
   updates entities when the panel reports changes. It doesn't poll on a schedule.
-- **Linking identity:** Home Assistant identifies itself to the panel with a client serial
-  number. Setup generates a random 12-digit integration ID for each entry and sends it as
-  that serial. It is stored in the config entry, so it stays the same across restarts.
+- **Linking identity:** Home Assistant identifies itself to the panel with a client ID. Setup
+  generates a random 12-digit client ID for each entry and sends it when linking. It is
+  stored in the config entry, so it stays the same across restarts. It is the integration's
+  own ID, not a panel serial number.
 - **Reconnects:** if the connection drops, entities become unavailable and the integration
   keeps reconnecting with a delay that starts at 2 seconds and doubles up to 5 minutes between
   attempts, with no limit on attempts. When the
@@ -725,7 +726,7 @@ Use **Download diagnostics** on the entry. Useful fields:
 | `elke27_version`, `integration_version` | Installed versions; include them when reporting an issue. |
 | `area_device_count` | How many area devices the integration created. |
 
-Host, panel MAC, unique ID and integration ID are redacted; link keys are never included.
+Host, panel MAC, unique ID and client ID are redacted; link keys are never included.
 
 ### Setup errors
 
