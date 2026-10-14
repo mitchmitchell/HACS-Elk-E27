@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from elke27_lib import (
     ClientConfig,
@@ -80,6 +80,7 @@ if TYPE_CHECKING:
 
     from .models import Elke27ConfigEntry
 
+_T = TypeVar("_T")
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -304,8 +305,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         )
 
     def _create_background_task(
-        self, coro: Coroutine[Any, Any, None], name: str
-    ) -> asyncio.Task[None]:
+        self, coro: Coroutine[Any, Any, _T], name: str
+    ) -> asyncio.Task[_T]:
         """Create a task that is cancelled when the config entry unloads."""
         return create_background_task(self.hass, self.config_entry, coro, name)
 
