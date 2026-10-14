@@ -72,6 +72,7 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
             pin="1234",
             auto_stay_cancel=False,
             exit_delay_cancel=False,
+            return_result=True,
         )
         client.async_execute.assert_not_called()
 
@@ -86,6 +87,7 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
             pin="0042",
             auto_stay_cancel=False,
             exit_delay_cancel=False,
+            return_result=True,
         )
 
     async def test_custom_bypass_arms_away(self) -> None:
@@ -117,6 +119,7 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
                 pin="1234",
                 auto_stay_cancel=True,
                 exit_delay_cancel=True,
+                return_result=True,
             )
 
     async def test_arm_night_is_rejected(self) -> None:
@@ -201,6 +204,7 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
             pin="1234",
             auto_stay_cancel=False,
             exit_delay_cancel=False,
+            return_result=True,
         )
         client.async_execute.assert_not_called()
 
