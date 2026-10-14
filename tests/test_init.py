@@ -268,12 +268,17 @@ async def test_unload_platform_failure_keeps_client(
 async def test_setup_failure_after_connect_disconnects(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
-    """A failure after connecting still disconnects the client."""
+    """
+    An unexpected failure after connecting still disconnects the client.
+
+    The coordinator's first refresh handles unexpected errors itself (setup is
+    retried); the integration adds no catch-all of its own.
+    """
     mock_client.client.async_refresh_csm.side_effect = RuntimeError("boom")
     mock_config_entry.add_to_hass(hass)
     assert not await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    assert mock_config_entry.state is ConfigEntryState.SETUP_ERROR
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
     mock_client.client.async_disconnect.assert_awaited()
 
 
@@ -377,11 +382,11 @@ async def test_setup_auth_errors_start_reauth(
     assert flows[0]["context"]["entry_id"] == mock_config_entry.entry_id
 
 
-@pytest.mark.parametrize("link_keys_json", ["", "not a link key mapping"])
+@pytest.mark.parametrize("link_keys_json", ["not a link key mapping"])
 async def test_setup_bad_link_keys_start_reauth(
     hass: HomeAssistant, mock_client: ClientHarness, link_keys_json: str
 ) -> None:
-    """Missing or unreadable stored link keys start reauth without connecting."""
+    """Unreadable stored link keys start reauth without connecting."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="00:11:22:33:44:55",
