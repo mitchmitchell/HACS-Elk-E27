@@ -608,9 +608,8 @@ conditions:
 - **Local push:** the integration holds a persistent, encrypted session with the panel and
   updates entities when the panel reports changes. It doesn't poll on a schedule.
 - **Linking identity:** Home Assistant identifies itself to the panel with a client serial
-  number. The serial is taken from the MAC address of the network interface Home Assistant
-  uses to reach the panel, or randomly generated if that MAC can't be found. It is stored in
-  the config entry, so it stays the same across restarts.
+  number. Setup generates a random 12-digit integration ID for each entry and sends it as
+  that serial. It is stored in the config entry, so it stays the same across restarts.
 - **Reconnects:** if the connection drops, entities become unavailable and the integration
   keeps reconnecting with a delay that starts at 2 seconds and doubles up to 5 minutes between
   attempts, with no limit on attempts. When the

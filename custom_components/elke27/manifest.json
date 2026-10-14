@@ -3,7 +3,6 @@
   "name": "Elk E27 Alarm Engine Integration",
   "codeowners": ["@mitchmitchell"],
   "config_flow": true,
-  "dependencies": ["network"],
   "documentation": "https://github.com/mitchmitchell/HACS-Elk-E27",
   "integration_type": "hub",
   "iot_class": "local_push",
