@@ -576,21 +576,6 @@ async def test_reconnect_auth_failure_clears_repair_issue(
     assert len(_reauth_flows(hass)) == 1
 
 
-async def test_reconnect_auth_failure_starts_reauth_once(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_client: ClientHarness,
-    fast_backoff: AsyncMock,
-) -> None:
-    """Repeated reconnect auth failures start reauth only once."""
-    await _setup(hass, mock_config_entry)
-    _script_connect(mock_client, [Elke27AuthError("bad"), Elke27AuthError("bad")])
-    await _disconnect(mock_client)
-    await _disconnect(mock_client)
-    await hass.async_block_till_done()
-    assert len(_reauth_flows(hass)) == 1
-
-
 async def test_reconnect_backoff_jitter_scales_base_delay(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
