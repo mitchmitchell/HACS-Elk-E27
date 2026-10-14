@@ -153,6 +153,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._stale_since: float | None = None
         self._last_stale_refresh: float | None = None
         self._unsubscribe_stale_timer: Callable[[], None] | None = None
+        self._stale_task: asyncio.Task[None] | None = None
         self._reconnect = ReconnectSupervisor(
             hass,
             entry,
@@ -230,7 +231,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Event unsubscribe failed: %s", err)
             self._unsubscribe = None
-        for task in (self._debounce_task, self._refresh_task):
+        for task in (self._debounce_task, self._refresh_task, self._stale_task):
             if task is not None and not task.done():
                 task.cancel()
                 # Wait for the task to finish without swallowing a cancellation
@@ -238,6 +239,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 await asyncio.wait([task])
         self._debounce_task = None
         self._refresh_task = None
+        self._stale_task = None
         self._stopping = True
         await self._reconnect.async_stop()
         self._reconnect.clear_issue()
@@ -255,7 +257,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         Refresh once when the snapshot has stayed stale too long (ADR Q5).
 
         Reads only, never while reconnecting or disconnected, at most once per
-        STALE_REFRESH_AFTER seconds, through the shared single-flight refresh.
+        STALE_REFRESH_AFTER seconds, in its own task (the refresh lock
+        serializes it with other refreshes).
         """
         snapshot = self.get_snapshot()
         now = _monotonic()
@@ -278,9 +281,17 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             and now - self._last_stale_refresh < STALE_REFRESH_AFTER
         ):
             return
+        if self._refresh_task is not None and not self._refresh_task.done():
+            return
+        if self._stale_task is not None and not self._stale_task.done():
+            return
         self._last_stale_refresh = now
         _LOGGER.debug("Snapshot stale for %.0f s; refreshing", now - self._stale_since)
-        self._schedule_refresh_after_connect()
+        # Its own task, not _refresh_task: a stale refresh in flight must never
+        # suppress the post-reconnect refresh (the refresh lock serializes them).
+        self._stale_task = self._create_background_task(
+            self._async_refresh_after_connect(), f"{DOMAIN} stale refresh"
+        )
 
     def _create_background_task(
         self, coro: Coroutine[Any, Any, None], name: str

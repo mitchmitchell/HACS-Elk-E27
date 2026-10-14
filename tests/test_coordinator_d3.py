@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import importlib.util
 from typing import Any
@@ -185,3 +186,33 @@ def test_background_task_helper_prefers_entry() -> None:
     hass.async_create_background_task.assert_not_called()
     create_background_task(hass, None, coro, "other")
     hass.async_create_background_task.assert_called_once_with(coro, "other")
+
+
+async def test_stale_refresh_does_not_block_reconnect_refresh(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """A Q5 refresh in flight never suppresses the post-reconnect refresh."""
+    coordinator = await _setup(hass, mock_config_entry)
+    mock_client.snapshot = dataclasses.replace(mock_client.snapshot, stale=True)
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def _slow_refresh() -> None:
+        calls.append("refresh")
+        if len(calls) == 1:
+            await release.wait()
+
+    mock_client.client.async_refresh_csm.side_effect = _slow_refresh
+    with patch.object(coordinator_module, "_monotonic", return_value=0.0):
+        coordinator._async_check_stale(MagicMock())
+    with patch.object(coordinator_module, "_monotonic", return_value=61.0):
+        coordinator._async_check_stale(MagicMock())
+    await asyncio.sleep(0)
+    assert calls == ["refresh"]  # stale refresh is in flight
+    coordinator._handle_reconnected()
+    assert coordinator._refresh_task is not None
+    reconnect_task = coordinator._refresh_task
+    assert not reconnect_task.done()
+    release.set()
+    await reconnect_task
+    assert calls == ["refresh", "refresh"]
