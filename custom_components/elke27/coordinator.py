@@ -36,7 +36,6 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
-    ConfigEntryError,
     ConfigEntryNotReady,
     HomeAssistantError,
 )
@@ -129,7 +128,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         )
         self._host: str = entry.data[CONF_HOST]
         self._port: int = entry.data[CONF_PORT]
-        self._link_keys_json: str = entry.data.get(CONF_LINK_KEYS_JSON) or ""
+        self._link_keys_json: str = entry.data[CONF_LINK_KEYS_JSON]
         self._integration_id: str = entry.data.get(CONF_INTEGRATION_ID) or ""
         self._panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
         self._client: Elke27Client | None = None
@@ -179,10 +178,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
 
     async def _async_setup(self) -> None:
         """Connect to the panel and subscribe to its events (first refresh)."""
-        if not self._link_keys_json:
-            raise ConfigEntryAuthFailed(
-                translation_domain=DOMAIN, translation_key="auth_failed"
-            )
         try:
             await self.async_connect()
             if self._unsubscribe is None:
@@ -197,10 +192,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             ) from err
         except SETUP_RETRY_ERRORS as err:
             raise self._setup_failed(err) from err
-        except Exception as err:
-            # Unexpected errors stay a setup error, as before D3 (not a retry).
-            msg = f"Unexpected error setting up the panel: {err}"
-            raise ConfigEntryError(msg) from err
 
     async def _async_update_data(self) -> PanelSnapshot:
         """Read the CSM and the primed domain configs; return the snapshot."""
@@ -213,10 +204,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             ) from err
         except SETUP_RETRY_ERRORS as err:
             raise self._setup_failed(err) from err
-        except Exception as err:
-            # Unexpected errors stay a setup error, as before D3 (not a retry).
-            msg = f"Unexpected error setting up the panel: {err}"
-            raise ConfigEntryError(msg) from err
         return self.get_snapshot() or PanelSnapshot.empty()
 
     def _setup_failed(self, err: BaseException) -> UpdateFailed:
@@ -284,7 +271,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         now = _monotonic()
         if (
             snapshot is None
-            or not getattr(snapshot, "stale", False)
+            or not snapshot.stale
             or not self.is_ready
             or self._stopping
         ):
