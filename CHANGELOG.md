@@ -6,7 +6,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ## [0.1.8.1] - 2026-10-13
 
 ### Added
-- Panel identity from the discovery MAC: the MAC is stored on the entry and used as its unique ID; 0.1.8 entries are filled in place on connect with no re-add (#60).
+- Panel identity from the discovery MAC: the MAC is stored on the entry and used as its unique ID; 0.1.8 entries are filled in place on connect with no re-add, except that entries keyed by a real panel serial keep that unique ID, so an address change for them still means delete and re-add (#60).
 - Repairs issue "Different panel at this address" when the panel's MAC doesn't match the stored one (#60).
 - Diagnostics include `panel_mac`, `panel_mac_filled` and the entry unique ID (#60).
 
