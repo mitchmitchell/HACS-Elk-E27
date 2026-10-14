@@ -99,9 +99,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
         raise ConfigEntryError(
             translation_domain=DOMAIN, translation_key="integration_id_invalid"
         )
-    entry_data = dict(entry.data)
-    if entry_data.pop("pin", None) is not None:
-        hass.config_entries.async_update_entry(entry, data=entry_data)
     coordinator = Elke27DataUpdateCoordinator(hass, entry)
     # Runs on unload, and when setup fails after this point.
     entry.async_on_unload(coordinator.async_shutdown_client)
