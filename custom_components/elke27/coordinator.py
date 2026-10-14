@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 import logging
 import time
-from typing import TYPE_CHECKING, Any, NoReturn, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from elke27_lib import (
     ClientConfig,
@@ -21,7 +21,6 @@ from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
     E27Error,
     Elke27Error,
-    Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27PinRequiredError,
 )
@@ -92,8 +91,6 @@ LIGHT_REFRESH_DELAY = 3.0
 # read-only CSM refresh, at most once per STALE_REFRESH_AFTER seconds.
 STALE_REFRESH_AFTER = 60.0
 STALE_CHECK_INTERVAL = timedelta(seconds=10)
-# Same budget elke27's async_set_zone_bypass gives zone_set_status.
-ZONE_BYPASS_TIMEOUT = 15.0
 _monotonic = time.monotonic
 
 # Domains whose config is read during setup.
@@ -961,9 +958,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         await self._async_after_write("disarm", refresh_ok=refresh_ok, area_id=area_id)
         return True
 
-    # The three writes below take the same arguments as the elke27 public
-    # methods they replace (async_arm_area, async_disarm_area,
-    # async_set_zone_bypass) and send the same request.
+    # D4: the three writes call the elke27 public methods with
+    # return_result=True (elke27 0.3.14 CommandResult) and return its
+    # status_refresh_ok. Failures raise the library's public errors.
 
     async def _async_write_arm(
         self,
@@ -975,16 +972,15 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         auto_stay_cancel: bool,
         exit_delay_cancel: bool,
     ) -> bool | None:
-        return await self._async_send_write(
-            client,
-            "area_set_arm_state",
-            "Failed to arm area.",
-            area_id=_positive_id(area_id, "area_id"),
-            arm_state=str(mode.value).upper(),
-            pin=_wire_pin(pin),
+        result = await client.async_arm_area(
+            area_id,
+            mode=mode,
+            pin=pin,
             auto_stay_cancel=auto_stay_cancel,
             exit_delay_cancel=exit_delay_cancel,
+            return_result=True,
         )
+        return _status_refresh_ok(result)
 
     async def _async_write_disarm(
         self,
@@ -995,52 +991,22 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         auto_stay_cancel: bool,
         exit_delay_cancel: bool,
     ) -> bool | None:
-        return await self._async_send_write(
-            client,
-            "area_set_arm_state",
-            "Failed to disarm area.",
-            area_id=_positive_id(area_id, "area_id"),
-            arm_state="DISARMED",
-            pin=_wire_pin(pin),
+        result = await client.async_disarm_area(
+            area_id,
+            pin=pin,
             auto_stay_cancel=auto_stay_cancel,
             exit_delay_cancel=exit_delay_cancel,
+            return_result=True,
         )
+        return _status_refresh_ok(result)
 
     async def _async_write_zone_bypass(
         self, client: Elke27Client, zone_id: int, *, bypassed: bool, pin: str
     ) -> bool | None:
-        return await self._async_send_write(
-            client,
-            "zone_set_status",
-            "Failed to set zone bypass.",
-            zone_id=_positive_id(zone_id, "zone_id"),
-            pin=_wire_pin(pin),
-            bypassed=bypassed,
-            timeout_s=ZONE_BYPASS_TIMEOUT,
+        result = await client.async_set_zone_bypass(
+            zone_id, bypassed=bypassed, pin=pin, return_result=True
         )
-
-    async def _async_send_write(
-        self,
-        client: Elke27Client,
-        command_key: str,
-        failure_message: str,
-        **params: Any,
-    ) -> bool | None:
-        """
-        Send one arm/disarm/bypass write and return its status_refresh_ok (D4).
-
-        Sends the same request the elke27 public method sends, through
-        async_execute, so the Result's status_refresh_ok is visible. A failed
-        Result is raised as the same typed error the public method raises.
-        The write is sent once and never repeated.
-        """
-        result = await client.async_execute(command_key, **params)
-        if not result.ok:
-            if result.error is not None:
-                _raise_library_error(client, result.error)
-            raise E27Error(failure_message)
-        refresh_ok: bool | None = result.status_refresh_ok
-        return refresh_ok
+        return _status_refresh_ok(result)
 
     async def _async_after_write(
         self,
@@ -1302,34 +1268,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self.async_set_updated_data(snapshot or PanelSnapshot.empty())
 
 
-def _positive_id(value: int, name: str) -> int:
-    """Reject a non-positive id, as the elke27 public methods do."""
-    if value < 1:
-        msg = f"{name} must be a positive integer."
-        raise Elke27InvalidArgument(msg)
-    return value
-
-
-def _wire_pin(pin: str) -> int:
-    """Return the validated digit-string PIN as the JSON integer sent."""
-    value = int(pin)
-    if value <= 0:
-        msg = "PIN must be a positive number (all-zero PINs are invalid)."
-        raise Elke27InvalidArgument(msg)
-    return value
-
-
-def _raise_library_error(client: Elke27Client, err: BaseException) -> NoReturn:
-    """
-    Raise a failed write's error as the elke27 public method would.
-
-    Uses the client's own mapping (elke27==0.3.13) so error handling is the
-    same as before D4; an unmapped error is raised as is.
-    """
-    mapper = getattr(client, "_raise_v2_command_error", None)
-    if callable(mapper):
-        mapper(err)
-    raise err
+def _status_refresh_ok(result: Any) -> bool | None:
+    """Return a CommandResult's status_refresh_ok; None when there is none."""
+    refresh_ok: bool | None = getattr(result, "status_refresh_ok", None)
+    return refresh_ok
 
 
 def _log_command_failure(

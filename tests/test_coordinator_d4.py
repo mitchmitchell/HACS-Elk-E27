@@ -8,33 +8,23 @@ import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-from elke27_lib import ArmMode
-from elke27_lib.client import Elke27Client, Result
-from elke27_lib.errors import (
-    E27PanelErrorResponse,
-    Elke27PanelError,
-    Elke27PinRequiredError,
-)
+from elke27_lib import ArmMode, CommandResult
+from elke27_lib.client import Result
+from elke27_lib.errors import Elke27PanelError, Elke27PinRequiredError
 import pytest
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from tests.conftest import make_coordinator, panel_snapshot
 
-pytestmark = pytest.mark.real_writes
-
-WRITES = {"area_set_arm_state", "zone_set_status"}
+WRITES = {"arm", "disarm", "bypass"}
 READS = {"area_get_status", "zone_get_all_zones_status"}
 
 
 class FakeClient:
-    """A client whose async_execute answers writes with a chosen Result."""
+    """A client whose public arm/disarm/bypass return a chosen CommandResult."""
 
-    # The real client's error mapping, so ok=False is raised as in elke27.
-    _raise_v2_command_error = Elke27Client._raise_v2_command_error
-
-    def __init__(self, write_result: Result[Any]) -> None:
-        self._log = logging.getLogger("fake_elke27")
+    def __init__(self, write_result: CommandResult | BaseException) -> None:
         self.write_result = write_result
         self.read_ok = True
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -43,10 +33,23 @@ class FakeClient:
         self.async_execute = AsyncMock(side_effect=self._execute)
         self.read_gate: asyncio.Event | None = None
 
+    async def _write(self, kind: str, **params: Any) -> CommandResult:
+        self.calls.append((kind, params))
+        if isinstance(self.write_result, BaseException):
+            raise self.write_result
+        return self.write_result
+
+    async def async_arm_area(self, area_id: int, **params: Any) -> CommandResult:
+        return await self._write("arm", area_id=area_id, **params)
+
+    async def async_disarm_area(self, area_id: int, **params: Any) -> CommandResult:
+        return await self._write("disarm", area_id=area_id, **params)
+
+    async def async_set_zone_bypass(self, zone_id: int, **params: Any) -> CommandResult:
+        return await self._write("bypass", zone_id=zone_id, **params)
+
     async def _execute(self, command_key: str, **params: Any) -> Result[Any]:
         self.calls.append((command_key, params))
-        if command_key in WRITES:
-            return self.write_result
         if self.read_gate is not None:
             await self.read_gate.wait()
         if not self.read_ok:
@@ -59,8 +62,8 @@ class FakeClient:
         return [key for key, _ in self.calls if key in kind]
 
 
-def _ok(refresh: bool | None) -> Result[Any]:
-    return Result(ok=True, data={}, error=None, status_refresh_ok=refresh)
+def _ok(refresh: bool | None) -> CommandResult:
+    return CommandResult(route="test", status_refresh_ok=refresh)
 
 
 def _coordinator(hass: HomeAssistant, client: FakeClient) -> Any:
@@ -94,8 +97,8 @@ async def test_refresh_ok_true_or_none_skips_fallback(
     assert coordinator.last_fallback_at is None
 
 
-async def test_write_payloads_match_public_methods(hass: HomeAssistant) -> None:
-    """The writes send what elke27's public methods send (PIN as an int)."""
+async def test_writes_use_public_methods_with_result(hass: HomeAssistant) -> None:
+    """Arm, disarm and bypass call the public methods with return_result=True."""
     client = FakeClient(_ok(True))
     coordinator = _coordinator(hass, client)
     await _run(coordinator, "arm")
@@ -103,30 +106,32 @@ async def test_write_payloads_match_public_methods(hass: HomeAssistant) -> None:
     await _run(coordinator, "bypass")
     assert client.calls == [
         (
-            "area_set_arm_state",
+            "arm",
             {
                 "area_id": 1,
-                "arm_state": "ARMED_AWAY",
-                "pin": 123,
+                "mode": ArmMode.ARMED_AWAY,
+                "pin": "0123",
                 "auto_stay_cancel": False,
                 "exit_delay_cancel": False,
+                "return_result": True,
             },
         ),
         (
-            "area_set_arm_state",
+            "disarm",
             {
                 "area_id": 1,
-                "arm_state": "DISARMED",
-                "pin": 1234,
+                "pin": "1234",
                 "auto_stay_cancel": False,
                 "exit_delay_cancel": False,
+                "return_result": True,
             },
         ),
         (
-            "zone_set_status",
-            {"zone_id": 1, "pin": 1234, "bypassed": True, "timeout_s": 15.0},
+            "bypass",
+            {"zone_id": 1, "bypassed": True, "pin": "1234", "return_result": True},
         ),
     ]
+    client.async_execute.assert_not_called()
 
 
 @pytest.mark.parametrize("kind", ["arm", "disarm"])
@@ -196,11 +201,8 @@ async def test_counter_accumulates(hass: HomeAssistant) -> None:
 
 
 async def test_command_failure_unchanged(hass: HomeAssistant) -> None:
-    """ok=False: mapped panel error, no fallback, no push, no repeat."""
-    err = E27PanelErrorResponse(
-        command_key="area_set_arm_state", panel_error_code=11008
-    )
-    client = FakeClient(Result.failure(err))
+    """A raised panel error: mapped, no fallback, no push, no repeat."""
+    client = FakeClient(Elke27PanelError(11008, "rejected"))
     coordinator = _coordinator(hass, client)
     with pytest.raises(HomeAssistantError) as info:
         await _run(coordinator, "arm")
@@ -211,31 +213,22 @@ async def test_command_failure_unchanged(hass: HomeAssistant) -> None:
     coordinator.async_set_updated_data.assert_not_called()
 
 
-async def test_pin_required_result_is_raised(hass: HomeAssistant) -> None:
-    """A PIN-required Result keeps its own error type."""
-    client = FakeClient(Result.failure(Elke27PinRequiredError("pin")))
+async def test_pin_required_is_raised(hass: HomeAssistant) -> None:
+    """A PIN-required error keeps its own type."""
+    client = FakeClient(Elke27PinRequiredError("pin"))
     coordinator = _coordinator(hass, client)
     with pytest.raises(Elke27PinRequiredError):
         await _run(coordinator, "bypass")
 
 
-async def test_failure_without_error(hass: HomeAssistant) -> None:
-    """ok=False with no error: reported as a failed command."""
-    client = FakeClient(Result(ok=False))
-    coordinator = _coordinator(hass, client)
-    with pytest.raises(HomeAssistantError, match="Failed to disarm area"):
-        await _run(coordinator, "disarm")
-
-
-async def test_all_zero_pin_rejected_before_send(hass: HomeAssistant) -> None:
-    """An all-zero PIN is refused without sending, as elke27 does."""
+async def test_result_without_status_is_no_reread(hass: HomeAssistant) -> None:
+    """A write that returns no CommandResult (None) means no re-read."""
     client = FakeClient(_ok(True))
+    client.write_result = None  # type: ignore[assignment]
     coordinator = _coordinator(hass, client)
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_arm_area(1, ArmMode.ARMED_AWAY, "0000")
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_disarm_area(0, "1234")
-    assert client.calls == []
+    assert await _run(coordinator, "disarm")
+    assert client.keys(READS) == []
+    assert coordinator.fallback_refresh_count == 0
 
 
 async def test_fallback_shares_q5_stale_refresh(hass: HomeAssistant) -> None:

@@ -132,7 +132,10 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
         hub = _hub(client)
         assert await hub.async_set_zone_bypass(5, bypassed=True, pin="0123")
         client.async_set_zone_bypass.assert_awaited_once_with(
-            5, bypassed=True, pin="0123"
+            5,
+            bypassed=True,
+            pin="0123",
+            return_result=True,
         )
         client.async_execute.assert_not_called()
 
