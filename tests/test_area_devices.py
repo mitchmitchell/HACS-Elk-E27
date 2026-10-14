@@ -1,4 +1,4 @@
-# ruff: noqa: S101, TC001, TC002, PLR2004, ARG001
+# ruff: noqa: S101, TC002, PLR2004, ARG001
 """Tests for E2 per-area devices."""
 
 from __future__ import annotations
@@ -25,7 +25,9 @@ from custom_components.elke27.entity import (
     entry_identity_key,
     zone_entity_name,
 )
-from homeassistant.core import HomeAssistant
+from custom_components.elke27.services import _entity_ids_from_service_call
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from tests.conftest import ClientHarness, panel_snapshot
 
@@ -277,3 +279,25 @@ def test_area_identifier_round_trip() -> None:
     assert area_id_from_device_identifier(KEY, f"{KEY}:area:x") is None
     assert area_id_from_device_identifier(KEY, f"{KEY}:area:\u00b2") is None
     assert area_id_from_device_identifier("other", identifier) is None
+
+
+async def test_area_device_service_target_filters_platform(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """An area-device target yields only the service's own platform."""
+    await _setup(hass, mock_config_entry)
+    area = _device(hass, f"{KEY}:area:1")
+    assert area is not None
+    call = ServiceCall(hass, DOMAIN, "zone_bypass", {"device_id": [area.id]})
+    assert _entity_ids_from_service_call(hass, call, Platform.BINARY_SENSOR) == [
+        "binary_sensor.house_front_door"
+    ]
+    assert _entity_ids_from_service_call(hass, call, Platform.ALARM_CONTROL_PANEL) == [
+        "alarm_control_panel.house"
+    ]
+    named = ServiceCall(
+        hass, DOMAIN, "zone_bypass", {"entity_id": ["alarm_control_panel.house"]}
+    )
+    assert _entity_ids_from_service_call(hass, named, Platform.BINARY_SENSOR) == [
+        "alarm_control_panel.house"
+    ]
