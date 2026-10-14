@@ -122,8 +122,10 @@ class Elke27BarrierCover(CoordinatorEntity[Elke27DataUpdateCoordinator], CoverEn
         super().__init__(coordinator)
         self._barrier_id = barrier_id
         self._attr_name = barrier.name or f"Garage door {barrier_id}"
+        # <key>:<N> (decision 16). Future tamper/low-battery binary sensors for a
+        # barrier share binary_sensor with zones, so they must use <key>:<N>:<kind>.
         self._attr_unique_id = build_unique_id(
-            unique_base(coordinator, entry), "barrier", barrier_id
+            unique_base(coordinator, entry), barrier_id
         )
         self._attr_device_info = device_info_for_barrier(coordinator, entry, barrier)
 

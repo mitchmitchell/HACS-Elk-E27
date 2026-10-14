@@ -132,7 +132,8 @@ async def test_setup_creates_one_cover_per_barrier(count: int) -> None:
         assert ent.supported_features == (
             CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
         )
-        assert ":barrier:" in ent.unique_id
+        assert ent.unique_id.endswith(f":{ent._barrier_id}")  # noqa: SLF001
+        assert ":barrier:" not in ent.unique_id
         assert ent.is_opening is False
         assert ent.is_closing is False
 
