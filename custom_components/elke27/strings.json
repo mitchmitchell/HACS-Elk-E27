@@ -10,6 +10,7 @@
       "cannot_connect": "Unable to connect to the panel. Confirm the host is reachable and the panel is online.",
       "invalid_auth": "Unable to authenticate with the panel. Check the access code, passphrase, and network connectivity.",
       "link_required": "The panel requires linking. Enter the access code and passphrase again.",
+      "no_link_slots": "The panel has no room for another linked client. Each Home Assistant setup links with its own client ID, and the panel can only hold a limited number of them. Remove a client you no longer use from the panel, then try again.",
       "no_panels_found": "No panels were discovered. Confirm the panel is online, then try again or set it up manually.",
       "unknown": "Unexpected error"
     },

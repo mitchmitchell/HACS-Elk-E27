@@ -7,7 +7,7 @@ from collections.abc import Generator
 import dataclasses
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import create_autospec, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 from elke27_lib import LinkKeys
 from elke27_lib.client import Elke27Client
@@ -16,6 +16,7 @@ from elke27_lib.errors import (
     Elke27AuthError,
     Elke27ConnectionError,
     Elke27CryptoError,
+    Elke27Error,
     Elke27LinkRequiredError,
     Elke27ProtocolError,
     InvalidCredentials,
@@ -841,3 +842,78 @@ async def test_retry_after_failure_reuses_integration_id(
         for c in flow_client.async_link.await_args_list
     ]
     assert sns == ["314159265358", "314159265358"]
+
+
+def _link_slots_full() -> Elke27Error:
+    """Build the error elke27 0.3.15 raises when the client-link table is full."""
+    return Elke27Error(
+        "The panel has no free client slots.",
+        code="link_slots_full",
+        is_transient=False,
+    )
+
+
+async def test_manual_no_link_slots_then_recover(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """A full panel link table shows no_link_slots; a retry can then succeed."""
+    result = await _start_manual(hass)
+    flow_client.async_link.side_effect = _link_slots_full()
+    user_input = {
+        CONF_HOST: HOST,
+        CONF_ACCESS_CODE: ACCESS_CODE,
+        CONF_PASSPHRASE: PASSPHRASE,
+    }
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "no_link_slots"}
+    flow_client.async_disconnect.assert_awaited()
+    flow_client.async_link.side_effect = None
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_discover_no_link_slots(hass: HomeAssistant, flow_client: Any) -> None:
+    """The discovery step shows no_link_slots on the link form."""
+    panel = SimpleNamespace(
+        panel_host=HOST, port=PORT, panel_name="E27", panel_mac="2c:cf:67:ca:3b:20"
+    )
+    scanner = MagicMock()
+    scanner.async_scan = AsyncMock(return_value=[panel])
+    flow_client.async_link.side_effect = _link_slots_full()
+    with patch(
+        "custom_components.elke27.config_flow.AIOELKDiscovery", return_value=scanner
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SETUP_METHOD: "discover"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+        )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "discover"
+    assert result["errors"] == {"base": "no_link_slots"}
+
+
+async def test_reauth_no_link_slots(
+    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+) -> None:
+    """Relink (reauth) shows no_link_slots too."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    flow_client.async_link.side_effect = _link_slots_full()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "no_link_slots"}
