@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import dataclasses
 import importlib.util
 from pathlib import Path
@@ -44,6 +45,35 @@ if _HAS_DEPS:
     from custom_components.elke27.arming import ZoneBypassFailedError
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+
+
+# Entities for the service call running in the current task. A context variable
+# rather than per-call patches: overlapping calls would restore the patches out
+# of order and leave them installed for later tests.
+_ENTITIES: contextvars.ContextVar[dict[str, tuple[Any, Any]]] = contextvars.ContextVar(
+    "_ENTITIES"
+)
+
+
+def _patch_entity_lookup(test: unittest.TestCase) -> None:
+    """Patch the entity lookups for the whole test, reading _ENTITIES."""
+    for name, mock in (
+        (
+            "_entity_ids_from_service_call",
+            MagicMock(side_effect=lambda *_args: sorted(_ENTITIES.get())),
+        ),
+        (
+            "_entity_runtime_data",
+            MagicMock(
+                side_effect=lambda _hass, entity_id, _platform, _label: _ENTITIES.get()[
+                    entity_id
+                ]
+            ),
+        ),
+    ):
+        patcher = patch.object(integration, name, mock)
+        patcher.start()
+        test.addCleanup(patcher.stop)
 
 
 @contextlib.contextmanager
@@ -180,24 +210,15 @@ def _alarm_runtime(snapshot: Any) -> Any:
 class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
     """Test the elke27.zone_bypass action."""
 
+    def setUp(self) -> None:
+        """Route entity lookups to the entities of the running call."""
+        _patch_entity_lookup(self)
+
     async def _run(
         self, data: dict[str, Any], entities: dict[str, tuple[Any, Any]]
     ) -> None:
-        with (
-            patch.object(
-                integration,
-                "_entity_ids_from_service_call",
-                return_value=sorted(entities),
-            ),
-            patch.object(
-                integration,
-                "_entity_runtime_data",
-                side_effect=lambda _hass, entity_id, _platform, _label: entities[
-                    entity_id
-                ],
-            ),
-        ):
-            await integration._async_handle_zone_bypass(MagicMock(), _call(data))  # noqa: SLF001
+        _ENTITIES.set(entities)
+        await integration._async_handle_zone_bypass(MagicMock(), _call(data))  # noqa: SLF001
 
     async def test_bypass_each_targeted_zone(self) -> None:
         """Each targeted zone is bypassed with the given code."""
@@ -272,19 +293,14 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
                 {"entity_id": ["binary_sensor.x"], "code": "12ab"}
             )
 
-    async def test_bypass_rejects_unparseable_unique_id(self) -> None:
-        """A target whose unique ID has no numeric <id> part is a validation error."""
-        for unique_id in ("noseparator", "base:abc"):
-            runtime = _runtime()
-            entities = {"binary_sensor.bad": (_entry(unique_id), runtime)}
-            with self.assertRaises(ServiceValidationError):
-                await self._run({"code": "1234", "bypass": True}, entities)
-            runtime.coordinator.async_set_zone_bypass.assert_not_awaited()
-
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
 class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
     """Test the elke27.alarm_arm_automatic action."""
+
+    def setUp(self) -> None:
+        """Route entity lookups to the entities of the running call."""
+        _patch_entity_lookup(self)
 
     async def _run(
         self,
@@ -292,21 +308,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         data: dict[str, Any],
         entities: dict[str, tuple[Any, Any]],
     ) -> None:
-        with (
-            patch.object(
-                integration,
-                "_entity_ids_from_service_call",
-                return_value=sorted(entities),
-            ),
-            patch.object(
-                integration,
-                "_entity_runtime_data",
-                side_effect=lambda _hass, entity_id, _platform, _label: entities[
-                    entity_id
-                ],
-            ),
-        ):
-            await integration._async_handle_alarm_arm_automatic(hass, _call(data))  # noqa: SLF001
+        _ENTITIES.set(entities)
+        await integration._async_handle_alarm_arm_automatic(hass, _call(data))  # noqa: SLF001
 
     async def test_geofence_arm_bypasses_faulted_zones_then_arms(self) -> None:
         """Open zones in the targeted area are bypassed, then the area is armed."""

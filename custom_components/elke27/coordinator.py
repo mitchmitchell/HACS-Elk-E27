@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from elke27_lib import (
     ClientConfig,
@@ -80,6 +80,7 @@ if TYPE_CHECKING:
 
     from .models import Elke27ConfigEntry
 
+_T = TypeVar("_T")
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -112,6 +113,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     """Own the Elke27 client: connection, subscriptions, commands and updates."""
 
     config_entry: Elke27ConfigEntry
+    # Set by async_setup_entry before the platforms load.
+    panel_device_id: str
 
     def __init__(
         self,
@@ -135,7 +138,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
         self._client: Elke27Client | None = None
         # Device id of the panel device, set in async_setup_entry (E2 via link).
-        self.panel_device_id: str | None = None
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._connect_lock = asyncio.Lock()
         self._area_arm_locks: dict[int, asyncio.Lock] = {}
@@ -309,8 +311,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         )
 
     def _create_background_task(
-        self, coro: Coroutine[Any, Any, None], name: str
-    ) -> asyncio.Task[None]:
+        self, coro: Coroutine[Any, Any, _T], name: str
+    ) -> asyncio.Task[_T]:
         """Create a task that is cancelled when the config entry unloads."""
         return create_background_task(self.hass, self.config_entry, coro, name)
 
