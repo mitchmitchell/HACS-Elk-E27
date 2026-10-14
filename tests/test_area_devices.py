@@ -75,7 +75,7 @@ async def test_area_device_and_entity_placement(
     registry = er.async_get(hass)
     alarm = registry.async_get("alarm_control_panel.house")
     assert alarm is not None
-    assert alarm.unique_id == f"{KEY}:area:1"
+    assert alarm.unique_id == f"{KEY}:1"
     assert alarm.device_id == area.id
     state = hass.states.get("alarm_control_panel.house")
     assert state is not None
@@ -83,9 +83,9 @@ async def test_area_device_and_entity_placement(
 
     front = registry.async_get("binary_sensor.house_front_door")
     assert front is not None
-    assert front.unique_id == f"{KEY}:zone:1"
+    assert front.unique_id == f"{KEY}:1"
     assert front.device_id == area.id
-    for unique_id in (f"{KEY}:zone:2", f"{KEY}:zone:3"):
+    for unique_id in (f"{KEY}:2", f"{KEY}:3"):
         entity_id = registry.async_get_entity_id("binary_sensor", DOMAIN, unique_id)
         assert entity_id is not None
         entity = registry.async_get(entity_id)

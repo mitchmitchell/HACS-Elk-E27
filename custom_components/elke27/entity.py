@@ -98,7 +98,7 @@ AREA_DEVICE_MODEL = "Area"
 
 def area_device_identifier(key: str, area_id: int) -> str:
     """Return the area device identifier, same shape as the area unique_id."""
-    return build_unique_id(key, "area", area_id)
+    return f"{key}:area:{area_id}"
 
 
 def area_id_from_device_identifier(key: str, identifier: str) -> int | None:
@@ -236,9 +236,15 @@ def unique_base(
     return entry_identity_key(coordinator, entry)
 
 
-def build_unique_id(base: str, domain: str, numeric_id: int | str) -> str:
-    """Build a stable unique ID in <mac>:<domain>:<id> format."""
-    return f"{base}:{domain}:{numeric_id}"
+def build_unique_id(base: str, numeric_id: int | str) -> str:
+    """
+    Build a stable unique ID in <base>:<id> format (0.2.0, ADR-0126 decision).
+
+    No platform segment: HA scopes unique IDs per entity platform, and each
+    platform here has one kind of entity. Device identifiers keep their own
+    `<key>:area:<N>` shape.
+    """
+    return f"{base}:{numeric_id}"
 
 
 def panel_display_name(

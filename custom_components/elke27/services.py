@@ -602,12 +602,16 @@ def _area_id_from_unique_id(unique_id: str) -> int:
 
 
 def _numeric_id_from_unique_id(unique_id: str, domain: str) -> int:
-    """Extract the numeric ID from an Elke27 ``<base>:<domain>:<id>`` unique ID."""
-    prefix = f":{domain}:"
-    if prefix not in unique_id:
+    """
+    Extract the numeric ID from an Elke27 ``<base>:<id>`` unique ID.
+
+    The caller has already checked the entity's platform, so the kind
+    (area or zone) is known; ``domain`` only names it in errors.
+    """
+    if ":" not in unique_id:
         msg = f"Entity unique ID is not a recognized Elke27 {domain} identifier"
         raise ServiceValidationError(msg)
-    id_str = unique_id.rsplit(prefix, 1)[1]
+    id_str = unique_id.rsplit(":", 1)[1]
     try:
         return int(id_str)
     except ValueError as err:

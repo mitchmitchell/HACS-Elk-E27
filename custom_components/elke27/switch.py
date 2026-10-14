@@ -79,7 +79,6 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         self._attr_name = output.name or f"Output {output_id}"
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry),
-            "output",
             output_id,
         )
         self._attr_device_info = device_info_for_entry(coordinator, entry)

@@ -146,7 +146,6 @@ class Elke27ZoneBinarySensor(
         )
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry),
-            "zone",
             zone_id,
         )
         self._attr_device_info = device_info_for_zone(coordinator, entry, zone)
