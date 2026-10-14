@@ -88,7 +88,8 @@ async def test_diagnostics_d5_fields_read_properties_only(
 
     called = [c for c in mock_client.client.mock_calls if not c[0].startswith("__")]
     assert called == []
-    assert result["connected"] is True
+    assert "connected" not in result
+    assert result["client_present"] is True
     assert result["client_ready"] is True
     assert result["last_update_success"] is True
     assert result["reconnect_attempts"] == 0
@@ -103,3 +104,18 @@ async def test_diagnostics_d5_fields_read_properties_only(
     assert result["integration_version"] == "0.2.0"
     assert result["elke27_version"] == package_version("elke27")
     assert result["area_device_count"] == len(mock_client.snapshot.areas)
+
+
+async def test_diagnostics_link_down_with_client_present(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """A client that is not ready reports client_ready False, client_present True."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    mock_client.client.is_ready = False
+
+    result = await async_get_config_entry_diagnostics(hass, mock_config_entry)
+
+    assert result["client_present"] is True
+    assert result["client_ready"] is False

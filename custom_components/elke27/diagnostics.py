@@ -79,7 +79,9 @@ async def async_get_config_entry_diagnostics(
         "link_keys_present": CONF_LINK_KEYS_JSON in entry.data,
         "integration_version": str(integration.version),
         "elke27_version": _elke27_version(),
-        "connected": coordinator.client is not None,
+        # A client object exists (connect done, not torn down). This is not
+        # link state; client_ready is the library's ready signal for that.
+        "client_present": coordinator.client is not None,
         "client_ready": coordinator.is_ready,
         "last_update_success": coordinator.last_update_success,
         "reconnect_attempts": supervisor.attempts,

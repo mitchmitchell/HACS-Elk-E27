@@ -717,7 +717,8 @@ Use **Download diagnostics** on the entry. Useful fields:
 
 | Field | What it tells you |
 |---|---|
-| `connected`, `client_ready`, `last_update_success` | Whether the link is up and the last refresh worked. |
+| `client_ready`, `last_update_success` | Whether the panel session is up and ready (the library's ready state), and whether the last refresh worked. |
+| `client_present` | Whether the integration holds a client object. It can be `true` while the link is down and the client waits to reconnect, so use `client_ready` for link state. |
 | `reconnect_attempts`, `repairs_issue_active`, `reauth_requested` | Reconnect progress after a link drop; a Repairs issue appears only after 3 consecutive non-network failures (a plain network outage raises none), and re-auth when the panel rejects the link keys. |
 | `snapshot_stale`, `stale_area_ids`, `stale_zone_ids` | Whether the library marks panel data stale; a snapshot stale for over 60 s while connected gets one automatic read. |
 | `fallback_refresh_count`, `last_fallback_at`, `stale_auto_refresh_count` | Soak counters: post-command fallback reads and automatic stale reads since the entry loaded. |

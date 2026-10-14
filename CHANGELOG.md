@@ -35,7 +35,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 9. **Requires elke27 0.3.14** (was 0.3.13).
 
 ### Added
-- Diagnostics: `connected`, `client_ready`, `last_update_success`, `reconnect_attempts`,
+- Diagnostics: `client_present`, `client_ready`, `last_update_success`, `reconnect_attempts`,
   `repairs_issue_active`, `reauth_requested`, `snapshot_stale`, `stale_area_ids`,
   `stale_zone_ids`, `fallback_refresh_count`, `last_fallback_at`, `stale_auto_refresh_count`
   (soak counter, pending Mitch's OK), `elke27_version`, `integration_version`,
