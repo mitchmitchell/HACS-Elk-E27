@@ -12,7 +12,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import build_unique_id, device_info_for_entry, unique_base
+from .entity import build_unique_id, device_info_for_zone, unique_base, zone_entity_name
 
 if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot, ZoneDefinition, ZoneState
@@ -134,13 +134,22 @@ class Elke27ZoneBinarySensor(
         super().__init__(coordinator)
         self._entry = entry
         self._zone_id = zone_id
-        self._attr_name = _zone_name(zone, zone_definition) or f"Zone {zone_id}"
+        snapshot = coordinator.data
+        area = (
+            snapshot.areas.get(zone.area_id)
+            if snapshot is not None and zone.area_id is not None
+            else None
+        )
+        self._attr_name = zone_entity_name(
+            _zone_name(zone, zone_definition) or f"Zone {zone_id}",
+            area.name if area is not None else None,
+        )
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry),
             "zone",
             zone_id,
         )
-        self._attr_device_info = device_info_for_entry(coordinator, entry)
+        self._attr_device_info = device_info_for_zone(coordinator, entry, zone)
         self._missing_logged = False
         self._attr_device_class = _zone_device_class(zone_definition)
 

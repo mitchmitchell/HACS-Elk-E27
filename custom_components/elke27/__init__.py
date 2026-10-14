@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 from homeassistant.const import Platform
 from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
-from homeassistant.helpers import config_validation as cv, issue_registry as ir
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    issue_registry as ir,
+)
 
 from .const import (
     CONF_INTEGRATION_ID,
@@ -20,6 +24,11 @@ from .coordinator import (  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re
     PRIMED_DOMAINS,
     SETUP_RETRY_ERRORS,
     Elke27DataUpdateCoordinator,
+)
+from .entity import (
+    area_id_from_device_identifier,
+    device_info_for_entry,
+    entry_identity_key,
 )
 from .identity import is_valid_integration_id
 from .models import Elke27ConfigEntry, Elke27RuntimeData
@@ -39,6 +48,8 @@ from .services import (  # noqa: F401  # re-exported; tests and callers import t
 )
 
 if TYPE_CHECKING:
+    from elke27_lib import PanelSnapshot
+
     from homeassistant.core import HomeAssistant, ServiceCall
     from homeassistant.helpers.typing import ConfigType
 
@@ -107,6 +118,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
     entry.async_on_unload(coordinator.async_shutdown_client)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = Elke27RuntimeData(coordinator=coordinator)
+    # E2: register the panel device first so area devices can link to it.
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, **device_info_for_entry(coordinator, entry)
+    )
+    _async_prune_area_devices(hass, entry, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -121,6 +137,67 @@ async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> b
 async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
     """Clean up integration state when a config entry is removed."""
     _async_delete_entry_issues(hass, entry)
+
+
+def _entry_area_ids(
+    entry: Elke27ConfigEntry,
+    coordinator: Elke27DataUpdateCoordinator,
+    device_entry: dr.DeviceEntry,
+) -> set[int]:
+    """Return the area numbers this device stands for in this entry."""
+    key = entry_identity_key(coordinator, entry)
+    return {
+        area_id
+        for domain, identifier in device_entry.identifiers
+        if domain == DOMAIN
+        and (area_id := area_id_from_device_identifier(key, identifier)) is not None
+    }
+
+
+def _full_snapshot(snapshot: PanelSnapshot | None) -> bool:
+    """Return True when the snapshot can be trusted to list every area."""
+    return snapshot is not None and not snapshot.stale and bool(snapshot.areas)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,  # noqa: ARG001  # Home Assistant signature
+    entry: Elke27ConfigEntry,
+    device_entry: dr.DeviceEntry,
+) -> bool:
+    """Allow deleting an area device the panel no longer reports (E2)."""
+    coordinator = entry.runtime_data.coordinator
+    area_ids = _entry_area_ids(entry, coordinator, device_entry)
+    snapshot = coordinator.data
+    if not area_ids or not _full_snapshot(snapshot):
+        return False
+    return not any(area_id in snapshot.areas for area_id in area_ids)
+
+
+@callback
+def _async_prune_area_devices(
+    hass: HomeAssistant,
+    entry: Elke27ConfigEntry,
+    coordinator: Elke27DataUpdateCoordinator,
+) -> None:
+    """
+    Detach area devices the first full snapshot no longer reports (E2).
+
+    Runs once per setup. A missing, stale or empty snapshot never removes
+    anything, so a disconnect or partial panel read cannot wipe devices.
+    """
+    snapshot = coordinator.data
+    if not _full_snapshot(snapshot):
+        return
+    device_registry = dr.async_get(hass)
+    for device_entry in dr.async_entries_for_config_entry(
+        device_registry, entry.entry_id
+    ):
+        area_ids = _entry_area_ids(entry, coordinator, device_entry)
+        if area_ids and not any(area_id in snapshot.areas for area_id in area_ids):
+            _LOGGER.debug("Removing stale area device %s", device_entry.name)
+            device_registry.async_update_device(
+                device_entry.id, remove_config_entry_id=entry.entry_id
+            )
 
 
 def _duplicate_unique_id_issue_id(entry_id: str) -> str:

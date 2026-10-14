@@ -97,9 +97,7 @@ async def test_disconnect_is_one_listener_update(
     await hass.async_block_till_done()
     remove()
     assert len(calls) == 1
-    assert hass.states.get("alarm_control_panel.test_panel_house").state == (
-        STATE_UNAVAILABLE
-    )
+    assert hass.states.get("alarm_control_panel.house").state == (STATE_UNAVAILABLE)
 
 
 async def test_stale_snapshot_refreshes_once_per_window(

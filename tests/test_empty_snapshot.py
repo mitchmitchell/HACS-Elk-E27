@@ -37,8 +37,8 @@ async def test_setup_with_empty_snapshot_creates_only_panel_sensors(
     assert coordinator.data.areas == {}
     assert coordinator.data.zones == {}
 
-    assert hass.states.get("alarm_control_panel.test_panel_house") is None
-    assert hass.states.get("binary_sensor.test_panel_front_door") is None
+    assert hass.states.get("alarm_control_panel.house") is None
+    assert hass.states.get("binary_sensor.house_front_door") is None
     assert hass.states.get("light.test_panel") is None
     assert hass.states.get("climate.test_panel") is None
     assert hass.states.get("lock.test_panel") is None

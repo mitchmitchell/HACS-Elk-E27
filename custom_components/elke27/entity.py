@@ -17,7 +17,7 @@ from .errors import NOT_ACCEPTED_MESSAGE
 from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
-    from elke27_lib import PanelSnapshot
+    from elke27_lib import AreaState, PanelSnapshot, ZoneState
 
     from .coordinator import Elke27DataUpdateCoordinator
     from .models import Elke27ConfigEntry
@@ -83,6 +83,91 @@ def device_info_for_entry(
         sw_version=firmware,
         serial_number=panel_serial,
     )
+
+
+AREA_DEVICE_MODEL = "Area"
+
+
+def area_device_identifier(key: str, area_id: int) -> str:
+    """Return the area device identifier, same shape as the area unique_id."""
+    return build_unique_id(key, "area", area_id)
+
+
+def area_id_from_device_identifier(key: str, identifier: str) -> int | None:
+    """Return N for an identifier `<key>:area:<N>` of this entry, else None."""
+    prefix = f"{key}:area:"
+    if not identifier.startswith(prefix):
+        return None
+    suffix = identifier[len(prefix) :]
+    if not suffix.isascii() or not suffix.isdecimal():
+        return None
+    return int(suffix)
+
+
+def area_has_device(snapshot: PanelSnapshot | None, area_id: int | None) -> bool:
+    """
+    Return True when this area gets its own device.
+
+    E2 Q2 (Architect default, pending Mitch's OK): every area the library
+    reports in snapshot.areas gets a device, with no zone-count filter. Change
+    this one function to filter areas differently.
+    """
+    if snapshot is None or area_id is None or area_id == 0:
+        return False
+    return area_id in snapshot.areas
+
+
+def area_device_name(area_id: int, area: AreaState | None) -> str:
+    """Return the area device name: the panel's area name or "Area N"."""
+    name = sanitize_name(area.name) if area is not None else None
+    return name or f"Area {area_id}"
+
+
+def zone_entity_name(zone_name: str, area_name: str | None) -> str:
+    """
+    Return the zone entity name shown under its device.
+
+    E2 Q3 (Architect default, pending Mitch's OK): keep the panel's zone name
+    verbatim; a leading area name is not stripped ("Garage Garage door").
+    Change this one function to strip it.
+    """
+    del area_name
+    return zone_name
+
+
+def area_device_info(
+    coordinator: Elke27DataUpdateCoordinator,
+    entry: Elke27ConfigEntry,
+    area_id: int,
+    area: AreaState | None,
+) -> DeviceInfo:
+    """Build device info for an area device linked to the panel device."""
+    key = entry_identity_key(coordinator, entry)
+    return DeviceInfo(
+        identifiers={(DOMAIN, area_device_identifier(key, area_id))},
+        name=area_device_name(area_id, area),
+        model=AREA_DEVICE_MODEL,
+        via_device=(DOMAIN, key),
+    )
+
+
+def device_info_for_zone(
+    coordinator: Elke27DataUpdateCoordinator,
+    entry: Elke27ConfigEntry,
+    zone: ZoneState,
+) -> DeviceInfo:
+    """Return the zone's area device, or the panel device when it has none."""
+    snapshot = coordinator.data
+    area_id = zone.area_id
+    if (
+        snapshot is not None
+        and area_id is not None
+        and area_has_device(snapshot, area_id)
+    ):
+        return area_device_info(
+            coordinator, entry, area_id, snapshot.areas.get(area_id)
+        )
+    return device_info_for_entry(coordinator, entry)
 
 
 def entry_identity_key(

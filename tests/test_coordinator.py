@@ -20,7 +20,7 @@ from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from tests.conftest import ClientHarness
 
-ALARM = "alarm_control_panel.test_panel_house"
+ALARM = "alarm_control_panel.house"
 
 
 def _connection_event(*, connected: bool) -> ConnectionStateChanged:
