@@ -3,6 +3,50 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
+## [Unreleased] - 0.2.0 (draft; D5)
+
+### Breaking
+1. **Delete and re-add required** from any 0.1.x. Each install now has its own 12-digit
+   integration ID sent to the panel (E1), and the device layout changed (E2). There is no
+   automatic migration. Entries created before 0.2.0 fail setup with a message telling you
+   to delete and re-add; no Repairs issue is raised.
+2. **Areas are devices (E2):** each area gets its own device and alarm panel named after the
+   area, with its zones grouped under it. Entity IDs differ after re-add (for example
+   `alarm_control_panel.<panel>_<area>` becomes `alarm_control_panel.<area>`). Update
+   automations, scripts and dashboards. *Pending Mitch's OK (Architect default):* every area
+   the panel reports gets a device, and zone names are used as the panel reports them (no
+   area-prefix stripping), so a name like "Garage Garage door" can appear.
+3. **New integration ID per install (E1):** the panel's Network Devices list shows a new
+   12-digit entry. *Pending Mitch's OK (Architect default):* remove the old 0.1.x entry from
+   the panel's Network Devices list.
+4. **Diagnostics shape changed:** new fields (connection, reconnect, stale snapshot and soak
+   counters, versions); host, MAC, unique ID and integration ID are redacted.
+   `integration_serial` is gone (`snapshot_available` was already removed in 0.1.9).
+5. **Setup errors surface through the coordinator's first refresh (D3):** log and retry
+   wording changed; outcomes (retry vs re-link) are the same.
+6. **Availability (D3):** on connection loss all entities go unavailable together and come
+   back together on reconnect.
+7. **Stale snapshot (D3/D4):** shown in diagnostics only; a snapshot stale for more than
+   60 s while connected triggers one automatic read.
+8. **Internal:** `custom_components.elke27.hub` is removed with no shim; custom scripts or
+   tests importing it break.
+9. **elke27 minimum 0.3.14** (pinned `==0.3.14`; was 0.3.13 in 0.1.8.1 and 0.1.9).
+   <!-- TODO(D5): pin moves to 0.3.14 once it is released (tag needs Mitch). -->
+
+### Added
+- Diagnostics: `connected`, `client_ready`, `last_update_success`, `reconnect_attempts`,
+  `repairs_issue_active`, `reauth_requested`, `snapshot_stale`, `stale_area_ids`,
+  `stale_zone_ids`, `fallback_refresh_count`, `last_fallback_at`, `stale_auto_refresh_count`
+  (soak counter, pending Mitch's OK), `elke27_version`, `integration_version`,
+  `area_device_count` (D5).
+
+### Changed
+- Diagnostics redact host, panel MAC, unique ID and integration ID (D5).
+- Post-command refresh uses the library's public result (D4); reconnect supervisor (D2).
+
+### Removed
+- Diagnostics field `integration_serial` (E1). `custom_components.elke27.hub` (D3).
+
 ## [Unreleased] - 0.1.9 (draft; #50 merged as 139acbe)
 
 ### Changed

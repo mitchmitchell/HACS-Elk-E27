@@ -711,6 +711,20 @@ to retry (see [the example](#retry-automatic-arming-after-a-failure)).
 
 ## Troubleshooting
 
+### Diagnostics fields (0.2.0)
+
+Use **Download diagnostics** on the entry. Useful fields:
+
+| Field | What it tells you |
+|---|---|
+| `connected`, `client_ready`, `last_update_success` | Whether the link is up and the last refresh worked. |
+| `reconnect_attempts`, `repairs_issue_active`, `reauth_requested` | Reconnect progress after a link drop; a Repairs issue appears when reconnect keeps failing, and re-auth when the panel rejects the link keys. |
+| `snapshot_stale`, `stale_area_ids`, `stale_zone_ids` | Whether the library marks panel data stale; a snapshot stale for over 60 s while connected gets one automatic read. |
+| `fallback_refresh_count`, `last_fallback_at`, `stale_auto_refresh_count` | Soak counters: post-command fallback reads and automatic stale reads since the entry loaded. |
+| `elke27_version`, `integration_version` | Installed versions; include them when reporting an issue. |
+
+Host, panel MAC, unique ID and integration ID are redacted; link keys are never included.
+
 ### Setup errors
 
 | Message | What to check |
@@ -881,6 +895,19 @@ whole °F, so setpoints you set in °C are rounded.
 ---
 
 ## Upgrading
+
+### To 0.2.0
+
+> [!WARNING]
+> **Delete and re-add required.** Before installing 0.2.0, delete each Elk E27 entry, then
+> install 0.2.0, restart and add the panel again. Each install now gets its own 12-digit
+> integration ID that is sent to the panel, and every area becomes its own device with its
+> zones grouped under it. Entity IDs and names change (for example
+> `alarm_control_panel.<panel>_<area>` becomes `alarm_control_panel.<area>`), so update
+> automations, scripts and dashboards. Entries left over from 0.1.x fail setup with a
+> message telling you to delete and re-add. Going back to 0.1.x also needs delete and re-add.
+> The panel's Network Devices list shows the new 12-digit entry; remove the old 0.1.x entry
+> there (pending Mitch's OK). See the [0.2.0 release notes](docs/release-notes/v0.2.0.md).
 
 ### To 0.1.9
 

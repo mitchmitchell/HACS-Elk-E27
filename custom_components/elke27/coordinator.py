@@ -163,6 +163,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._fallback_task: asyncio.Task[PanelSnapshot | None] | None = None
         self._fallback_refresh_count = 0
         self._last_fallback_at: datetime | None = None
+        # D5 soak counter (Architect default, pending Mitch's OK): automatic
+        # stale-snapshot reads since this entry loaded.
+        self._stale_auto_refresh_count = 0
         self._reconnect = ReconnectSupervisor(
             hass,
             entry,
@@ -304,6 +307,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             # D4: a post-command fallback read is already in flight.
             return
         self._last_stale_refresh = now
+        self._stale_auto_refresh_count += 1
         _LOGGER.debug("Snapshot stale for %.0f s; refreshing", now - self._stale_since)
         # Its own task, not _refresh_task: a stale refresh in flight must never
         # suppress the post-reconnect refresh (the refresh lock serializes them).
@@ -1127,6 +1131,11 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     def last_fallback_at(self) -> datetime | None:
         """UTC time of the last post-command fallback read, if any."""
         return self._last_fallback_at
+
+    @property
+    def stale_auto_refresh_count(self) -> int:
+        """Automatic stale-snapshot reads since this entry loaded (D5 soak aid)."""
+        return self._stale_auto_refresh_count
 
     @property
     def snapshot_stale(self) -> bool:

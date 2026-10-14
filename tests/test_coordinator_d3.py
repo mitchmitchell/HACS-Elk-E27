@@ -125,6 +125,7 @@ async def test_stale_snapshot_refreshes_once_per_window(
     assert refresh.await_count == 1
     await _check_at(1122.0)
     assert refresh.await_count == 2
+    assert coordinator.stale_auto_refresh_count == 2  # D5 soak counter
     for name in WRITE_METHODS:
         getattr(mock_client.client, name).assert_not_called()
 
