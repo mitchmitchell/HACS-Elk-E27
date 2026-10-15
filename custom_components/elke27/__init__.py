@@ -25,6 +25,7 @@ from .entity import (
     area_id_from_device_identifier,
     device_info_for_entry,
     entry_identity_key,
+    snapshot_is_full,
 )
 from .identity import is_valid_integration_id
 from .models import Elke27ConfigEntry, Elke27RuntimeData
@@ -44,8 +45,6 @@ from .services import (  # noqa: F401  # re-exported; tests and callers import t
 )
 
 if TYPE_CHECKING:
-    from elke27_lib import PanelSnapshot
-
     from homeassistant.core import HomeAssistant, ServiceCall
     from homeassistant.helpers.typing import ConfigType
 
@@ -143,11 +142,6 @@ def _entry_area_ids(
     }
 
 
-def _full_snapshot(snapshot: PanelSnapshot | None) -> bool:
-    """Return True when the snapshot can be trusted to list every area."""
-    return snapshot is not None and not snapshot.stale and bool(snapshot.areas)
-
-
 async def async_remove_config_entry_device(
     hass: HomeAssistant,  # noqa: ARG001  # Home Assistant signature
     entry: Elke27ConfigEntry,
@@ -157,7 +151,7 @@ async def async_remove_config_entry_device(
     coordinator = entry.runtime_data.coordinator
     area_ids = _entry_area_ids(entry, coordinator, device_entry)
     snapshot = coordinator.data
-    if not area_ids or not _full_snapshot(snapshot):
+    if not area_ids or not snapshot_is_full(snapshot):
         return False
     return not any(area_has_device(snapshot, area_id) for area_id in area_ids)
 
