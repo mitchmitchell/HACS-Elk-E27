@@ -714,7 +714,7 @@ to retry (see [the example](#retry-automatic-arming-after-a-failure)).
 
 Planned for Elk E27 Alarm Engine Integration 0.2.1. It requires elke27 0.3.15, which Home Assistant installs for you. This is an added feature: updating from 0.2.0 needs no delete and re-add, and your existing entities don't change.
 
-Each garage door set up on your panel appears in Home Assistant as a garage door cover (named "Garage door" unless the panel gives it a name: TBD). If the panel puts the door in an area, it appears on that area's device; otherwise it appears on the panel device.
+Each garage door set up on your panel appears in Home Assistant as a garage door cover on the panel device. It uses the name set on the panel, or "Garage door <number>" if the panel has none.
 
 **Supported**
 - Open the door.
@@ -740,7 +740,6 @@ Each garage door set up on your panel appears in Home Assistant as a garage door
 **TBD**
 - Whether door changes show up right away or only after a refresh.
 - Hardware confirmation of the error messages and of status after open/close (Tester).
-- Whether a door can belong to an area (the test panel's door has none).
 
 ## Troubleshooting
 
