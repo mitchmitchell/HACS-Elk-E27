@@ -11,28 +11,16 @@ from elke27_lib.errors import (
     Elke27ConnectionError,
     Elke27ProtocolError,
 )
-from elke27_lib.events import ConnectionStateChanged, DomainCsmChanged
+from elke27_lib.events import DomainCsmChanged
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.elke27.const import DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
-from tests.conftest import ClientHarness
+from tests.conftest import ClientHarness, connection_event
 
 ALARM = "alarm_control_panel.house"
-
-
-def _connection_event(*, connected: bool) -> ConnectionStateChanged:
-    return ConnectionStateChanged(
-        kind="connection",
-        at=0.0,
-        seq=None,
-        classification="BROADCAST",
-        route=("system", "connection"),
-        session_id=None,
-        connected=connected,
-    )
 
 
 async def _setup(hass: HomeAssistant, entry: MockConfigEntry) -> None:
@@ -49,7 +37,7 @@ async def test_disconnect_event_updates_entities(
     assert hass.states.get(ALARM).state != STATE_UNAVAILABLE
 
     mock_client.client.is_ready = False
-    mock_client.emit(_connection_event(connected=False))
+    mock_client.emit(connection_event(connected=False))
     await hass.async_block_till_done()
     assert hass.states.get(ALARM).state == STATE_UNAVAILABLE
 
@@ -62,7 +50,7 @@ async def test_connect_event_refreshes_in_entry_task(
     mock_client.client.async_refresh_csm.reset_mock()
     mock_client.client.async_refresh_csm.side_effect = None
 
-    mock_client.emit(_connection_event(connected=True))
+    mock_client.emit(connection_event(connected=True))
     await hass.async_block_till_done()
     mock_client.client.async_refresh_csm.assert_awaited_once()
 
@@ -108,7 +96,7 @@ async def test_auto_reconnect_pushes_update_without_connected_event(
     await _setup(hass, mock_config_entry)
     hub = mock_config_entry.runtime_data.coordinator
     mock_client.client.is_ready = False
-    mock_client.emit(_connection_event(connected=False))
+    mock_client.emit(connection_event(connected=False))
     await hass.async_block_till_done()
     assert hass.states.get(ALARM).state == STATE_UNAVAILABLE
 
@@ -152,7 +140,7 @@ async def test_reconnect_and_connected_event_refresh_once(
     mock_client.client.async_refresh_csm.side_effect = _slow_refresh
 
     coordinator._handle_reconnected()
-    mock_client.emit(_connection_event(connected=True))
+    mock_client.emit(connection_event(connected=True))
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     task = coordinator._refresh_task
