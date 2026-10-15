@@ -26,8 +26,12 @@ from custom_components.elke27.coordinator import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from tests.conftest import ClientHarness, make_coordinator, panel_snapshot
-from tests.test_empty_snapshot import _connection_event
+from tests.conftest import (
+    ClientHarness,
+    connection_event,
+    make_coordinator,
+    panel_snapshot,
+)
 
 if TYPE_CHECKING:
     from freezegun.api import FrozenDateTimeFactory
@@ -461,8 +465,8 @@ async def test_fallback_from_before_disconnect_is_discarded(
     await _settle()
     assert client.keys(READS) == ["area_get_status"]
     # The link drops and comes back while the fallback read is in flight.
-    mock_client.emit(_connection_event(connected=False))
-    mock_client.emit(_connection_event(connected=True))
+    mock_client.emit(connection_event(connected=False))
+    mock_client.emit(connection_event(connected=True))
     await _settle()
     pushes = coordinator.async_set_updated_data.call_count
     client.read_gate.set()
@@ -478,7 +482,7 @@ async def test_fallback_waits_for_reconnect_refresh(
     client = FakeClient(_ok(False))
     coordinator = await setup(client)
     client.csm_gate = asyncio.Event()
-    mock_client.emit(_connection_event(connected=True))
+    mock_client.emit(connection_event(connected=True))
     await _settle()
     assert client.keys({"csm"}) == ["csm"]
     task = hass.async_create_task(_run(coordinator, "arm"))

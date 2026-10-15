@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 import logging
 import time
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from elke27_lib import (
     ClientConfig,
@@ -81,7 +81,6 @@ if TYPE_CHECKING:
 
     from .models import Elke27ConfigEntry
 
-_T = TypeVar("_T")
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -312,9 +311,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._async_refresh_after_connect(), f"{DOMAIN} stale refresh"
         )
 
-    def _create_background_task(
-        self, coro: Coroutine[Any, Any, _T], name: str
-    ) -> asyncio.Task[_T]:
+    def _create_background_task[T](
+        self, coro: Coroutine[Any, Any, T], name: str
+    ) -> asyncio.Task[T]:
         """Create a task that is cancelled when the config entry unloads."""
         return create_background_task(self.hass, self.config_entry, coro, name)
 
@@ -1138,21 +1137,17 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     @property
     def snapshot_stale(self) -> bool:
         """Return the library's snapshot.stale flag (read-only, for D5)."""
-        return self.data is not None and self.data.stale
+        return self.data.stale
 
     @property
     def stale_area_ids(self) -> frozenset[int]:
         """Area ids the library marks stale (read-only, for D5)."""
-        if self.data is None:
-            return frozenset()
-        return frozenset(self.data.stale_area_ids)
+        return self.data.stale_area_ids
 
     @property
     def stale_zone_ids(self) -> frozenset[int]:
         """Zone ids the library marks stale (read-only, for D5)."""
-        if self.data is None:
-            return frozenset()
-        return frozenset(self.data.stale_zone_ids)
+        return self.data.stale_zone_ids
 
     def _handle_connection_event(self, event: Elke27Event) -> None:
         """Handle connection lifecycle events from the client."""
