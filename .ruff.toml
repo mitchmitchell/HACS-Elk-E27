@@ -17,6 +17,8 @@ ignore = [
     "PLR0912", # too-many-branches; upstream Home Assistant permits this
     "PLR0913", # too-many-arguments; upstream Home Assistant permits this
     "PLR0915", # too-many-statements; upstream Home Assistant permits this
+    "CPY001", # missing-copyright-notice; the repo has one LICENSE file, no per-file headers
+    "PLR0917", # too-many-positional-arguments; same reasoning as PLR0913 above
     "S105", # hardcoded-password-string; used for config key constants
 ]
 

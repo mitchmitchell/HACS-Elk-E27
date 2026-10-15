@@ -88,7 +88,7 @@ def is_connection_error(err: BaseException) -> bool:
     )
 
 
-def _error_message(err: Exception) -> str:
+def _error_message(err: BaseException) -> str:
     """Return a user-facing message for a library error."""
     if is_timeout_error(err):
         return TIMEOUT_MESSAGE

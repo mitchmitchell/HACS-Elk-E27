@@ -34,8 +34,9 @@ class _Harness:
         self.entry = MagicMock()
         self.entry.entry_id = "entry1"
         self.entry.title = "Panel"
-        self.entry.async_create_background_task.side_effect = (
-            lambda hass_, coro, name: hass_.async_create_background_task(coro, name)
+        bg_task = self.entry.async_create_background_task
+        bg_task.side_effect = lambda hass_, coro, name: (
+            hass_.async_create_background_task(coro, name)
         )
         self.supervisor = ReconnectSupervisor(
             hass,
