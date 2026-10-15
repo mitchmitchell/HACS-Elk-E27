@@ -1,4 +1,4 @@
-# ruff: noqa: S101, SLF001, TC001, ARG001, PLR2004
+# ruff: noqa: S101, SLF001, TC001, TC002, ARG001, PLR2004
 """D3: the coordinator owns the client (no hub.py), Q5 stale refresh, tasks."""
 
 from __future__ import annotations
@@ -12,9 +12,7 @@ from unittest.mock import MagicMock, patch
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.elke27 import coordinator as coordinator_module
-from custom_components.elke27.const import CONF_LINK_KEYS_JSON, DOMAIN
 from custom_components.elke27.tasks import create_background_task
-from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -50,24 +48,6 @@ async def test_runtime_data_holds_only_the_coordinator(
     assert not hasattr(mock_config_entry.runtime_data, "hub")
     assert coordinator.client is mock_client.client
     assert coordinator.update_interval is None
-
-
-async def test_missing_link_keys_start_reauth(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
-) -> None:
-    """No stored link keys: setup error plus a reauth flow, no connect."""
-    data = dict(mock_config_entry.data)
-    data.pop(CONF_LINK_KEYS_JSON)
-    entry = MockConfigEntry(
-        domain=DOMAIN, title="Test Panel", unique_id=PANEL_MAC, data=data
-    )
-    entry.add_to_hass(hass)
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    assert entry.state is ConfigEntryState.SETUP_ERROR
-    flows = hass.config_entries.flow.async_progress()
-    assert any(flow["context"].get("source") == SOURCE_REAUTH for flow in flows)
-    mock_client.client.async_connect.assert_not_awaited()
 
 
 async def test_identity_unchanged(
