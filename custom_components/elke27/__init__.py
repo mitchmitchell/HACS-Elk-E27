@@ -7,19 +7,14 @@ from typing import TYPE_CHECKING
 
 from homeassistant.const import Platform
 from homeassistant.core import callback
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
+from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
     issue_registry as ir,
 )
 
-from .const import (
-    CONF_INTEGRATION_ID,
-    CONF_LINK_KEYS_JSON,
-    DOMAIN,
-    ISSUE_RECONNECT_FAILED,
-)
+from .const import CONF_INTEGRATION_ID, DOMAIN, ISSUE_RECONNECT_FAILED
 from .coordinator import (  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re-exported
     PRIMED_DOMAINS,
     SETUP_RETRY_ERRORS,
@@ -99,11 +94,6 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Set up Elke27 from a config entry."""
-    link_keys_json = entry.data.get(CONF_LINK_KEYS_JSON)
-    if not link_keys_json:
-        raise ConfigEntryAuthFailed(
-            translation_domain=DOMAIN, translation_key="auth_failed"
-        )
     # E1: the client sn is the flow-generated integration ID. Entries made
     # before E1 have none (the panel bound their link to the old sn), so they
     # must be deleted and added again; there is no migration or backfill.
