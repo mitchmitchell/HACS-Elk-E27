@@ -16,8 +16,7 @@ from custom_components.elke27.tasks import create_background_task
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from tests.conftest import PANEL_MAC, ClientHarness
-from tests.test_empty_snapshot import _connection_event
+from tests.conftest import PANEL_MAC, ClientHarness, connection_event
 
 WRITE_METHODS = (
     "async_arm_area",
@@ -75,7 +74,7 @@ async def test_disconnect_is_one_listener_update(
     calls: list[None] = []
     remove = coordinator.async_add_listener(lambda: calls.append(None))
     mock_client.client.is_ready = False
-    mock_client.emit(_connection_event(connected=False))
+    mock_client.emit(connection_event(connected=False))
     await hass.async_block_till_done()
     remove()
     assert len(calls) == 1
