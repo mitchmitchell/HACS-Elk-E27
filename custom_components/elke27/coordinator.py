@@ -167,6 +167,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         # Bumped on every disconnect. A fallback read that started before a
         # disconnect read the old session, so its result is discarded.
         self._connection_epoch = 0
+        # Bumped on every snapshot push. A fallback result is published only
+        # when nothing newer was pushed since its command's write started.
+        self._snapshot_seq = 0
         self._fallback_refresh_count = 0
         self._last_fallback_at: datetime | None = None
         # D5 soak counter (Architect default, pending Mitch's OK): automatic
@@ -228,6 +231,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         supervisor (awaited), clear its Repairs issue, then disconnect under
         the connect lock so a running connect cannot race the teardown.
         """
+        # Set first, so no callback starts new work while tasks are awaited.
+        self._stopping = True
         if self._unsubscribe_stale_timer is not None:
             self._unsubscribe_stale_timer()
             self._unsubscribe_stale_timer = None
@@ -252,7 +257,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._refresh_task = None
         self._stale_task = None
         self._fallback_tasks.clear()
-        self._stopping = True
         await self._reconnect.async_stop()
         self._reconnect.clear_issue()
         async with self._connect_lock:
@@ -400,6 +404,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._connection_unsubscribe = None
         client = self._client
         self._client = None
+        # Any fallback read in flight belongs to the old session.
+        self._connection_epoch += 1
         if client is not None:
             await self._async_disconnect_client(client)
         self._clear_typed_subscriptions()
@@ -785,6 +791,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             zone_id,
             bypassed,
         )
+        before = self._write_marker()
         try:
             refresh_ok = await self._async_write_zone_bypass(
                 client, zone_id, bypassed=bypassed, pin=pin_value
@@ -799,7 +806,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
-        await self._async_after_write("bypass", refresh_ok=refresh_ok, zone_id=zone_id)
+        await self._async_after_write(
+            "bypass", refresh_ok=refresh_ok, zone_id=zone_id, before=before
+        )
         return True
 
     async def _async_execute(self, command_key: str, **params: Any) -> bool:
@@ -882,6 +891,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             raise Elke27PinRequiredError(msg)
         pin_value = _validated_pin(pin)
         arm_mode = _library_arm_mode(mode)
+        before = self._write_marker()
         try:
             refresh_ok = await self._async_write_arm(
                 client,
@@ -901,7 +911,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
-        await self._async_after_write("arm", refresh_ok=refresh_ok, area_id=area_id)
+        await self._async_after_write(
+            "arm", refresh_ok=refresh_ok, area_id=area_id, before=before
+        )
         return True
 
     def _resubscribe_typed_callbacks(self) -> None:
@@ -938,6 +950,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             msg = "PIN required to disarm areas."
             raise Elke27PinRequiredError(msg)
         pin_value = _validated_pin(pin)
+        before = self._write_marker()
         try:
             refresh_ok = await self._async_write_disarm(
                 client,
@@ -956,7 +969,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
-        await self._async_after_write("disarm", refresh_ok=refresh_ok, area_id=area_id)
+        await self._async_after_write(
+            "disarm", refresh_ok=refresh_ok, area_id=area_id, before=before
+        )
         return True
 
     # D4: the three writes call the elke27 public methods with
@@ -1016,6 +1031,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         refresh_ok: bool | None,
         area_id: int | None = None,
         zone_id: int | None = None,
+        before: tuple[int, int] | None = None,
     ) -> None:
         """
         Push post-command state; fall back to one status read if needed (D4).
@@ -1044,9 +1060,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             zone_id,
             self._fallback_refresh_count,
         )
-        epoch = self._connection_epoch
+        epoch, seq = before if before is not None else self._write_marker()
         snapshot = await self._async_fallback_read(area_id=area_id, zone_id=zone_id)
-        if epoch != self._connection_epoch:
+        if epoch != self._connection_epoch or self._client is None:
             _LOGGER.debug(
                 "Discarding pre-disconnect fallback read (%s area=%s zone=%s)",
                 kind,
@@ -1054,7 +1070,16 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 zone_id,
             )
             return
-        self._set_snapshot(snapshot or self.get_snapshot())
+        if snapshot is None or seq != self._snapshot_seq:
+            # Newer state was pushed while the read ran (a later command or a
+            # panel event): publish the client's live snapshot, not the read.
+            self._set_snapshot(self.get_snapshot())
+            return
+        self._set_snapshot(snapshot)
+
+    def _write_marker(self) -> tuple[int, int]:
+        """Return the connection epoch and snapshot seq before a command's write."""
+        return self._connection_epoch, self._snapshot_seq
 
     async def _async_fallback_read(
         self, *, area_id: int | None, zone_id: int | None
@@ -1197,6 +1222,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """
         if self._refresh_task is not None and not self._refresh_task.done():
             return
+        # A fallback read in flight must not overwrite this refresh's result.
+        self._snapshot_seq += 1
         self._refresh_task = self._create_background_task(
             self._async_refresh_after_connect(), f"{DOMAIN} refresh"
         )
@@ -1305,6 +1332,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
 
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:
         """Update coordinator data and track snapshot version."""
+        self._snapshot_seq += 1
         self.async_set_updated_data(snapshot or PanelSnapshot.empty())
 
 
