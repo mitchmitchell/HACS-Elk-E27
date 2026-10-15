@@ -13,6 +13,10 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
 )
+from pytest_homeassistant_custom_component.components.diagnostics import (
+    get_diagnostics_for_config_entry,
+)
+from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.elke27.const import (
     CONF_INTEGRATION_ID,
@@ -26,8 +30,10 @@ from custom_components.elke27.coordinator import (
 )
 from custom_components.elke27.diagnostics import async_get_config_entry_diagnostics
 from homeassistant.components.diagnostics import REDACTED
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
+from homeassistant.setup import async_setup_component
 from tests.conftest import ClientHarness
 
 
@@ -149,3 +155,32 @@ async def test_diagnostics_link_down_with_client_present(
 
     assert result["client_present"] is True
     assert result["client_ready"] is False
+
+
+async def test_diagnostics_entry_not_loaded(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+) -> None:
+    """A setup_error entry downloads redacted entry data, no runtime fields."""
+    data = dict(mock_config_entry.data)
+    data.pop(CONF_INTEGRATION_ID)
+    mock_config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(mock_config_entry, data=data)
+    assert await async_setup_component(hass, "diagnostics", {})
+    assert not await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert mock_config_entry.state is ConfigEntryState.SETUP_ERROR
+
+    result = await get_diagnostics_for_config_entry(
+        hass, hass_client, mock_config_entry
+    )
+    assert result["entry_id"] == mock_config_entry.entry_id
+    assert result["entry_state"] == ConfigEntryState.SETUP_ERROR.value
+    assert result[CONF_HOST] == REDACTED
+    assert result["unique_id"] == REDACTED
+    assert result["link_keys_present"] is True
+    assert "linkkey" not in repr(result).lower()
+    for runtime_key in ("client_ready", "snapshot", "reconnect_attempts"):
+        assert runtime_key not in result
