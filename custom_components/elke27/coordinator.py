@@ -791,7 +791,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             zone_id,
             bypassed,
         )
-        before = self._connection_epoch
+        epoch = self._connection_epoch
         try:
             refresh_ok = await self._async_write_zone_bypass(
                 client, zone_id, bypassed=bypassed, pin=pin_value
@@ -807,7 +807,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
         await self._async_after_write(
-            "bypass", refresh_ok=refresh_ok, zone_id=zone_id, before=before
+            "bypass", refresh_ok=refresh_ok, zone_id=zone_id, epoch=epoch
         )
         return True
 
@@ -891,7 +891,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             raise Elke27PinRequiredError(msg)
         pin_value = _validated_pin(pin)
         arm_mode = _library_arm_mode(mode)
-        before = self._connection_epoch
+        epoch = self._connection_epoch
         try:
             refresh_ok = await self._async_write_arm(
                 client,
@@ -912,7 +912,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
         await self._async_after_write(
-            "arm", refresh_ok=refresh_ok, area_id=area_id, before=before
+            "arm", refresh_ok=refresh_ok, area_id=area_id, epoch=epoch
         )
         return True
 
@@ -950,7 +950,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             msg = "PIN required to disarm areas."
             raise Elke27PinRequiredError(msg)
         pin_value = _validated_pin(pin)
-        before = self._connection_epoch
+        epoch = self._connection_epoch
         try:
             refresh_ok = await self._async_write_disarm(
                 client,
@@ -970,7 +970,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._note_command_error(err)
             raise HomeAssistantError(_error_message(err)) from err
         await self._async_after_write(
-            "disarm", refresh_ok=refresh_ok, area_id=area_id, before=before
+            "disarm", refresh_ok=refresh_ok, area_id=area_id, epoch=epoch
         )
         return True
 
@@ -1031,7 +1031,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         refresh_ok: bool | None,
         area_id: int | None = None,
         zone_id: int | None = None,
-        before: int | None = None,
+        epoch: int,
     ) -> None:
         """
         Push post-command state; fall back to one status read if needed (D4).
@@ -1060,7 +1060,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             zone_id,
             self._fallback_refresh_count,
         )
-        epoch = before if before is not None else self._connection_epoch
         await self._async_fallback_read(
             kind, area_id=area_id, zone_id=zone_id, epoch=epoch
         )
@@ -1103,27 +1102,18 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             # Taken just before the read: a push while it runs (a panel event,
             # a later command or the reconnect refresh) means the reply may be
             # older than what was pushed, so read once more.
-            snapshot: PanelSnapshot | None = None
-            try:
+            seq = self._snapshot_seq
+            ok, snapshot = await self._async_try_fallback_status(area_id, zone_id)
+            if ok and seq != self._snapshot_seq:
+                _LOGGER.debug("Snapshot pushed during fallback read; reading again")
+                # The first read is older than the push: never publish it,
+                # even when the re-read fails.
                 seq = self._snapshot_seq
-                snapshot = await self._async_fallback_status(
-                    area_id=area_id, zone_id=zone_id
-                )
+                _ok, snapshot = await self._async_try_fallback_status(area_id, zone_id)
                 if seq != self._snapshot_seq:
-                    _LOGGER.debug("Snapshot pushed during fallback read; reading again")
-                    # The first read is older than the push: never publish it,
-                    # even when the re-read fails.
+                    # Pushed again during the re-read: the live snapshot is
+                    # newer than either read.
                     snapshot = None
-                    seq = self._snapshot_seq
-                    snapshot = await self._async_fallback_status(
-                        area_id=area_id, zone_id=zone_id
-                    )
-                    if seq != self._snapshot_seq:
-                        # Pushed again during the re-read: the live snapshot
-                        # is newer than either read.
-                        snapshot = None
-            except COMMAND_ERRORS as err:
-                _LOGGER.debug("Post-command fallback read failed: %s", err)
             if epoch != self._connection_epoch or self._client is None:
                 _LOGGER.debug(
                     "Discarding pre-disconnect fallback read (%s area=%s zone=%s)",
@@ -1133,6 +1123,18 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 )
                 return
             self._set_snapshot(snapshot or self.get_snapshot())
+
+    async def _async_try_fallback_status(
+        self, area_id: int | None, zone_id: int | None
+    ) -> tuple[bool, PanelSnapshot | None]:
+        """Read once; a library error is logged and returns (False, None)."""
+        try:
+            return True, await self._async_fallback_status(
+                area_id=area_id, zone_id=zone_id
+            )
+        except COMMAND_ERRORS as err:
+            _LOGGER.debug("Post-command fallback read failed: %s", err)
+            return False, None
 
     async def _async_fallback_status(
         self, *, area_id: int | None, zone_id: int | None
