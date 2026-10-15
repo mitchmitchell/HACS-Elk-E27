@@ -27,6 +27,7 @@ from custom_components.elke27.coordinator import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from tests.conftest import ClientHarness, make_coordinator, panel_snapshot
+from tests.test_empty_snapshot import _connection_event
 
 if TYPE_CHECKING:
     from freezegun.api import FrozenDateTimeFactory
@@ -447,6 +448,47 @@ async def test_q5_waits_for_all_fallback_reads(
     assert order[:3] == ["area_get_status"] * 3
     assert order[3:]
     assert set(order[3:]) == {"csm"}
+    assert client.max_reads_in_flight == 1
+
+
+async def test_fallback_from_before_disconnect_is_discarded(
+    hass: HomeAssistant, setup: Setup, mock_client: ClientHarness
+) -> None:
+    """A fallback read that spans a disconnect never pushes its result."""
+    client = FakeClient(_ok(False))
+    coordinator = await setup(client)
+    client.read_gate = asyncio.Event()
+    task = hass.async_create_task(_run(coordinator, "arm"))
+    await _settle()
+    assert client.keys(READS) == ["area_get_status"]
+    # The link drops and comes back while the fallback read is in flight.
+    mock_client.emit(_connection_event(connected=False))
+    mock_client.emit(_connection_event(connected=True))
+    await _settle()
+    pushes = coordinator.async_set_updated_data.call_count
+    client.read_gate.set()
+    assert await task
+    await _settle()
+    assert coordinator.async_set_updated_data.call_count == pushes
+
+
+async def test_fallback_waits_for_reconnect_refresh(
+    hass: HomeAssistant, setup: Setup, mock_client: ClientHarness
+) -> None:
+    """A fallback read never overlaps the post-reconnect CSM refresh."""
+    client = FakeClient(_ok(False))
+    coordinator = await setup(client)
+    client.csm_gate = asyncio.Event()
+    mock_client.emit(_connection_event(connected=True))
+    await _settle()
+    assert client.keys({"csm"}) == ["csm"]
+    task = hass.async_create_task(_run(coordinator, "arm"))
+    await _settle()
+    # The reconnect refresh is still running, so the fallback read waits.
+    assert client.keys(READS) == []
+    client.csm_gate.set()
+    assert await task
+    assert client.keys(READS | {"csm"}) == ["csm", "area_get_status"]
     assert client.max_reads_in_flight == 1
 
 
