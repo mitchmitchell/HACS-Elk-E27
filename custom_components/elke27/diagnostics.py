@@ -71,7 +71,7 @@ async def async_get_config_entry_diagnostics(
         "integration_version": str(integration.version),
         "elke27_version": _elke27_version(),
     }
-    if entry.state is not ConfigEntryState.LOADED or not hasattr(entry, "runtime_data"):
+    if entry.state is not ConfigEntryState.LOADED:
         return async_redact_data(data, TO_REDACT)
 
     coordinator = entry.runtime_data.coordinator
