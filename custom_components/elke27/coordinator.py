@@ -164,6 +164,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         # them reads the panel at a time (Q5 also skips while any is running).
         self._fallback_tasks: set[asyncio.Task[PanelSnapshot | None]] = set()
         self._fallback_lock = asyncio.Lock()
+        # Bumped on every disconnect. A fallback read that started before a
+        # disconnect read the old session, so its result is discarded.
+        self._connection_epoch = 0
         self._fallback_refresh_count = 0
         self._last_fallback_at: datetime | None = None
         self._reconnect = ReconnectSupervisor(
@@ -1039,7 +1042,16 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             zone_id,
             self._fallback_refresh_count,
         )
+        epoch = self._connection_epoch
         snapshot = await self._async_fallback_read(area_id=area_id, zone_id=zone_id)
+        if epoch != self._connection_epoch:
+            _LOGGER.debug(
+                "Discarding pre-disconnect fallback read (%s area=%s zone=%s)",
+                kind,
+                area_id,
+                zone_id,
+            )
+            return
         self._set_snapshot(snapshot or self.get_snapshot())
 
     async def _async_fallback_read(
@@ -1068,11 +1080,16 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     async def _async_locked_fallback_status(
         self, *, area_id: int | None, zone_id: int | None
     ) -> PanelSnapshot | None:
-        """Wait for the fallback lock and any Q5 refresh, then read once."""
+        """Wait for the fallback lock and any refresh in flight, then read once."""
         async with self._fallback_lock:
-            stale = self._stale_task
-            if stale is not None and not stale.done():
-                await asyncio.wait([stale])
+            # Never overlap the Q5 stale refresh or the post-reconnect refresh.
+            running = [
+                task
+                for task in (self._stale_task, self._refresh_task)
+                if task is not None and not task.done()
+            ]
+            if running:
+                await asyncio.wait(running)
             return await self._async_fallback_status(area_id=area_id, zone_id=zone_id)
 
     async def _async_fallback_status(
@@ -1129,6 +1146,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             return
         connected = _connection_state(event)
         if connected is False:
+            self._connection_epoch += 1
             _LOGGER.debug("Panel disconnect event received; scheduling reconnect")
             self._log_unavailable()
             self.hass.loop.call_soon_threadsafe(self._reconnect.start)
@@ -1223,6 +1241,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             if event.connected:
                 self._schedule_refresh_after_connect()
             else:
+                self._connection_epoch += 1
                 # Push the snapshot (one listener update): every entity
                 # re-reads is_ready and goes unavailable together, instead of
                 # showing stale state until the next panel event.
