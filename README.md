@@ -756,6 +756,7 @@ Use **Download diagnostics** on the entry. Useful fields:
 | `fallback_refresh_count`, `last_fallback_at`, `stale_auto_refresh_count` | Soak counters: post-command fallback reads and automatic stale reads since the entry loaded. |
 | `elke27_version`, `integration_version` | Installed versions; include them when reporting an issue. |
 | `area_device_count` | How many area devices the integration created. |
+| `entry_state` | The entry's state (for example `loaded` or `setup_error`). An entry that isn't loaded only has the entry fields (versions, link-keys presence, redacted identity), with no session or snapshot fields. |
 
 Host, panel MAC, unique ID and client ID are redacted; link keys are never included.
 

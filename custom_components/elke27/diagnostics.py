@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from elke27_lib import redact_for_diagnostics
 
 from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.loader import async_get_integration
 
@@ -52,7 +53,27 @@ async def async_get_config_entry_diagnostics(
     Return diagnostics for a config entry.
 
     Reads coordinator and supervisor properties only; never calls the client.
+    An entry that is not loaded (e.g. setup_error after an upgrade) has no
+    runtime data, so only the redacted entry fields are returned.
     """
+    integration = await async_get_integration(hass, DOMAIN)
+    data: dict[str, Any] = {
+        "entry_id": entry.entry_id,
+        "entry_state": entry.state.value,
+        "unique_id": entry.unique_id,
+        CONF_PANEL_MAC: entry.data.get(CONF_PANEL_MAC),
+        "panel_mac_filled": entry.data.get(CONF_PANEL_MAC_FILLED, False),
+        CONF_HOST: entry.data.get(CONF_HOST),
+        "port": entry.data.get(CONF_PORT),
+        CONF_INTEGRATION_ID: entry.data.get(CONF_INTEGRATION_ID),
+        "manufacturer_number": MANUFACTURER_NUMBER,
+        "link_keys_present": CONF_LINK_KEYS_JSON in entry.data,
+        "integration_version": str(integration.version),
+        "elke27_version": _elke27_version(),
+    }
+    if entry.state is not ConfigEntryState.LOADED or not hasattr(entry, "runtime_data"):
+        return async_redact_data(data, TO_REDACT)
+
     coordinator = entry.runtime_data.coordinator
     supervisor = coordinator.reconnect
     snapshot = coordinator.data
@@ -65,20 +86,7 @@ async def async_get_config_entry_diagnostics(
             "updated_at": snapshot.updated_at,
         }
     )
-    integration = await async_get_integration(hass, DOMAIN)
-
-    data: dict[str, Any] = {
-        "entry_id": entry.entry_id,
-        "unique_id": entry.unique_id,
-        CONF_PANEL_MAC: entry.data.get(CONF_PANEL_MAC),
-        "panel_mac_filled": entry.data.get(CONF_PANEL_MAC_FILLED, False),
-        CONF_HOST: entry.data.get(CONF_HOST),
-        "port": entry.data.get(CONF_PORT),
-        CONF_INTEGRATION_ID: entry.data.get(CONF_INTEGRATION_ID),
-        "manufacturer_number": MANUFACTURER_NUMBER,
-        "link_keys_present": CONF_LINK_KEYS_JSON in entry.data,
-        "integration_version": str(integration.version),
-        "elke27_version": _elke27_version(),
+    data |= {
         # A client object exists (connect done, not torn down). This is not
         # link state; client_ready is the library's ready signal for that.
         "client_present": coordinator.client is not None,
