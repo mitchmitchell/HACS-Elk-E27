@@ -177,3 +177,36 @@ async def test_failed_reread_publishes_client_snapshot(
     await hass.async_block_till_done()
     assert reads == [1, 1]
     assert _pushes(coordinator)[-1] is newer
+
+
+async def test_push_during_reread_publishes_client_snapshot(
+    hass: HomeAssistant, setup: Setup, mock_client: ClientHarness
+) -> None:
+    """A disarm push during an arm fallback's re-read is not overwritten."""
+    client = FakeClient(_ok(False))
+    coordinator = await setup(client)
+    gates = [asyncio.Event(), asyncio.Event()]
+    reads: list[int] = []
+
+    async def _status(*, area_id: int | None, zone_id: int | None) -> Any:
+        reads.append(1)
+        await gates[len(reads) - 1].wait()
+        return dataclasses.replace(client.snapshot)
+
+    coordinator._async_fallback_status = _status
+    task = hass.async_create_task(_run(coordinator, "arm"))
+    await _settle()
+    mock_client.emit(MagicMock(name="ZoneStatusUpdated"))
+    await _settle()
+    gates[0].set()
+    await _settle()
+    assert reads == [1, 1]
+    # The disarm lands while the re-read is in flight.
+    disarmed = dataclasses.replace(client.snapshot)
+    client.snapshot = disarmed
+    mock_client.emit(MagicMock(name="AreaStatusUpdated"))
+    await _settle()
+    gates[1].set()
+    assert await task
+    await hass.async_block_till_done()
+    assert _pushes(coordinator)[-1] is disarmed

@@ -1114,9 +1114,14 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                     # The first read is older than the push: never publish it,
                     # even when the re-read fails.
                     snapshot = None
+                    seq = self._snapshot_seq
                     snapshot = await self._async_fallback_status(
                         area_id=area_id, zone_id=zone_id
                     )
+                    if seq != self._snapshot_seq:
+                        # Pushed again during the re-read: the live snapshot
+                        # is newer than either read.
+                        snapshot = None
             except COMMAND_ERRORS as err:
                 _LOGGER.debug("Post-command fallback read failed: %s", err)
             if epoch != self._connection_epoch or self._client is None:
