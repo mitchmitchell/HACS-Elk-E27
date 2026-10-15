@@ -84,6 +84,11 @@
         "name": "Zone"
       }
     },
+    "cover": {
+      "garage_door": {
+        "name": "Garage door {barrier_id}"
+      }
+    },
     "climate": {
       "thermostat": {
         "name": "Thermostat"
