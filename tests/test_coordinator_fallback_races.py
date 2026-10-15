@@ -8,7 +8,7 @@ import dataclasses
 from typing import Any
 from unittest.mock import MagicMock
 
-from elke27_lib import PanelSnapshot
+from elke27_lib import ArmMode, PanelSnapshot
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant.core import HomeAssistant
@@ -20,25 +20,64 @@ def _pushes(coordinator: Any) -> list[Any]:
     return [c.args[0] for c in coordinator.async_set_updated_data.call_args_list]
 
 
-async def test_newer_state_during_fallback_is_not_overwritten(
+async def test_event_during_read_triggers_one_reread(
     hass: HomeAssistant, setup: Setup, mock_client: ClientHarness
 ) -> None:
-    """A panel update while the fallback read runs wins over the read's result."""
+    """A push while the read runs (fix 4 overlap) re-reads once, then publishes."""
     client = FakeClient(_ok(False))
     coordinator = await setup(client)
     client.read_gate = asyncio.Event()
     task = hass.async_create_task(_run(coordinator, "arm"))
     await _settle()
     assert client.keys({"area_get_status"}) == ["area_get_status"]
-    # A later disarm lands on the client while the read is in flight.
-    newer = dataclasses.replace(client.snapshot)
-    client.snapshot = newer
-    mock_client.emit(MagicMock(name="AreaStatusUpdated"))
+    # The reconnect refresh (or any panel update) pushes while the read runs.
+    mock_client.emit(connection_event(connected=True))
     await _settle()
     client.read_gate.set()
     assert await task
     await hass.async_block_till_done()
-    assert _pushes(coordinator)[-1] is newer
+    assert client.keys({"area_get_status"}) == ["area_get_status"] * 2
+    assert _pushes(coordinator)[-1].areas[1].arm_mode == ArmMode.DISARMED
+
+
+async def test_unrelated_event_during_write_publishes_read(
+    hass: HomeAssistant, setup: Setup, mock_client: ClientHarness
+) -> None:
+    """An unrelated zone event during the write does not drop the read result."""
+    client = FakeClient(_ok(False))
+    coordinator = await setup(client)
+    write = client._write
+
+    async def _write(kind: str, **params: Any) -> Any:
+        mock_client.emit(MagicMock(name="ZoneStatusUpdated"))
+        await _settle()
+        return await write(kind, **params)
+
+    client._write = _write  # type: ignore[method-assign]
+    assert await _run(coordinator, "arm")
+    await hass.async_block_till_done()
+    assert client.keys({"area_get_status"}) == ["area_get_status"]
+    assert _pushes(coordinator)[-1].areas[1].arm_mode == ArmMode.DISARMED
+
+
+async def test_read_after_awaited_refresh_publishes(
+    hass: HomeAssistant, setup: Setup, mock_client: ClientHarness
+) -> None:
+    """A fallback that waited on the reconnect refresh still publishes its read."""
+    client = FakeClient(_ok(False))
+    coordinator = await setup(client)
+    client.csm_gate = asyncio.Event()
+    mock_client.emit(connection_event(connected=True))
+    await _settle()
+    assert client.keys({"csm"}) == ["csm"]
+    task = hass.async_create_task(_run(coordinator, "arm"))
+    await _settle()
+    assert client.keys({"area_get_status"}) == []
+    client.csm_gate.set()
+    assert await task
+    await hass.async_block_till_done()
+    assert client.keys({"area_get_status"}) == ["area_get_status"]
+    assert _pushes(coordinator)[-1].areas[1].arm_mode == ArmMode.DISARMED
 
 
 async def test_epoch_taken_before_write(

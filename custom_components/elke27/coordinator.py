@@ -167,8 +167,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         # Bumped on every disconnect. A fallback read that started before a
         # disconnect read the old session, so its result is discarded.
         self._connection_epoch = 0
-        # Bumped on every snapshot push. A fallback result is published only
-        # when nothing newer was pushed since its command's write started.
+        # Bumped on every snapshot push. A fallback read that saw a push while
+        # it ran is re-read once, so it never overwrites newer state.
         self._snapshot_seq = 0
         self._fallback_refresh_count = 0
         self._last_fallback_at: datetime | None = None
@@ -791,7 +791,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             zone_id,
             bypassed,
         )
-        before = self._write_marker()
+        before = self._connection_epoch
         try:
             refresh_ok = await self._async_write_zone_bypass(
                 client, zone_id, bypassed=bypassed, pin=pin_value
@@ -891,7 +891,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             raise Elke27PinRequiredError(msg)
         pin_value = _validated_pin(pin)
         arm_mode = _library_arm_mode(mode)
-        before = self._write_marker()
+        before = self._connection_epoch
         try:
             refresh_ok = await self._async_write_arm(
                 client,
@@ -950,7 +950,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             msg = "PIN required to disarm areas."
             raise Elke27PinRequiredError(msg)
         pin_value = _validated_pin(pin)
-        before = self._write_marker()
+        before = self._connection_epoch
         try:
             refresh_ok = await self._async_write_disarm(
                 client,
@@ -1031,7 +1031,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         refresh_ok: bool | None,
         area_id: int | None = None,
         zone_id: int | None = None,
-        before: tuple[int, int] | None = None,
+        before: int | None = None,
     ) -> None:
         """
         Push post-command state; fall back to one status read if needed (D4).
@@ -1060,54 +1060,37 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             zone_id,
             self._fallback_refresh_count,
         )
-        epoch, seq = before if before is not None else self._write_marker()
-        snapshot = await self._async_fallback_read(area_id=area_id, zone_id=zone_id)
-        if epoch != self._connection_epoch or self._client is None:
-            _LOGGER.debug(
-                "Discarding pre-disconnect fallback read (%s area=%s zone=%s)",
-                kind,
-                area_id,
-                zone_id,
-            )
-            return
-        if snapshot is None or seq != self._snapshot_seq:
-            # Newer state was pushed while the read ran (a later command or a
-            # panel event): publish the client's live snapshot, not the read.
-            self._set_snapshot(self.get_snapshot())
-            return
-        self._set_snapshot(snapshot)
-
-    def _write_marker(self) -> tuple[int, int]:
-        """Return the connection epoch and snapshot seq before a command's write."""
-        return self._connection_epoch, self._snapshot_seq
+        epoch = before if before is not None else self._connection_epoch
+        await self._async_fallback_read(
+            kind, area_id=area_id, zone_id=zone_id, epoch=epoch
+        )
 
     async def _async_fallback_read(
-        self, *, area_id: int | None, zone_id: int | None
-    ) -> PanelSnapshot | None:
+        self, kind: str, *, area_id: int | None, zone_id: int | None, epoch: int
+    ) -> None:
         """
         Run one fallback read that starts after this command's write.
 
         The read task is created now, after the write, and then waits for the
         fallback lock and any Q5 refresh in flight, so it never reuses an older
         read and never overlaps another fallback read or Q5. The lock is held
-        by the task itself, so a cancelled caller cannot release it early.
+        by the task itself, so a cancelled caller cannot release it early, and
+        the task publishes under the lock, so the next read starts after it.
         """
         task = self._create_background_task(
-            self._async_locked_fallback_status(area_id=area_id, zone_id=zone_id),
+            self._async_locked_fallback_status(
+                kind, area_id=area_id, zone_id=zone_id, epoch=epoch
+            ),
             f"{DOMAIN} post-command fallback read",
         )
         self._fallback_tasks.add(task)
         task.add_done_callback(self._fallback_tasks.discard)
-        try:
-            return await asyncio.shield(task)
-        except COMMAND_ERRORS as err:
-            _LOGGER.debug("Post-command fallback read failed: %s", err)
-            return None
+        await asyncio.shield(task)
 
     async def _async_locked_fallback_status(
-        self, *, area_id: int | None, zone_id: int | None
-    ) -> PanelSnapshot | None:
-        """Wait for the fallback lock and any refresh in flight, then read once."""
+        self, kind: str, *, area_id: int | None, zone_id: int | None, epoch: int
+    ) -> None:
+        """Wait for the lock and any refresh in flight, read, then publish."""
         async with self._fallback_lock:
             # Never overlap the Q5 stale refresh or the post-reconnect refresh.
             running = [
@@ -1117,7 +1100,31 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             ]
             if running:
                 await asyncio.wait(running)
-            return await self._async_fallback_status(area_id=area_id, zone_id=zone_id)
+            # Taken just before the read: a push while it runs (a panel event,
+            # a later command or the reconnect refresh) means the reply may be
+            # older than what was pushed, so read once more.
+            snapshot: PanelSnapshot | None = None
+            try:
+                seq = self._snapshot_seq
+                snapshot = await self._async_fallback_status(
+                    area_id=area_id, zone_id=zone_id
+                )
+                if seq != self._snapshot_seq:
+                    _LOGGER.debug("Snapshot pushed during fallback read; reading again")
+                    snapshot = await self._async_fallback_status(
+                        area_id=area_id, zone_id=zone_id
+                    )
+            except COMMAND_ERRORS as err:
+                _LOGGER.debug("Post-command fallback read failed: %s", err)
+            if epoch != self._connection_epoch or self._client is None:
+                _LOGGER.debug(
+                    "Discarding pre-disconnect fallback read (%s area=%s zone=%s)",
+                    kind,
+                    area_id,
+                    zone_id,
+                )
+                return
+            self._set_snapshot(snapshot or self.get_snapshot())
 
     async def _async_fallback_status(
         self, *, area_id: int | None, zone_id: int | None
@@ -1222,8 +1229,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """
         if self._refresh_task is not None and not self._refresh_task.done():
             return
-        # A fallback read in flight must not overwrite this refresh's result.
-        self._snapshot_seq += 1
         self._refresh_task = self._create_background_task(
             self._async_refresh_after_connect(), f"{DOMAIN} refresh"
         )
