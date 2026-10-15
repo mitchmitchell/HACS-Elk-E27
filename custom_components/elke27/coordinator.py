@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from elke27_lib import (
     ClientConfig,
+    CommandResult,
     Elke27Event,
     EventType,
     LinkKeys,
@@ -971,7 +972,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         auto_stay_cancel: bool,
         exit_delay_cancel: bool,
     ) -> bool | None:
-        result = await client.async_arm_area(
+        result: CommandResult = await client.async_arm_area(
             area_id,
             mode=mode,
             pin=pin,
@@ -979,7 +980,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             exit_delay_cancel=exit_delay_cancel,
             return_result=True,
         )
-        return _status_refresh_ok(result)
+        return result.status_refresh_ok
 
     async def _async_write_disarm(
         self,
@@ -990,22 +991,22 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         auto_stay_cancel: bool,
         exit_delay_cancel: bool,
     ) -> bool | None:
-        result = await client.async_disarm_area(
+        result: CommandResult = await client.async_disarm_area(
             area_id,
             pin=pin,
             auto_stay_cancel=auto_stay_cancel,
             exit_delay_cancel=exit_delay_cancel,
             return_result=True,
         )
-        return _status_refresh_ok(result)
+        return result.status_refresh_ok
 
     async def _async_write_zone_bypass(
         self, client: Elke27Client, zone_id: int, *, bypassed: bool, pin: str
     ) -> bool | None:
-        result = await client.async_set_zone_bypass(
+        result: CommandResult = await client.async_set_zone_bypass(
             zone_id, bypassed=bypassed, pin=pin, return_result=True
         )
-        return _status_refresh_ok(result)
+        return result.status_refresh_ok
 
     async def _async_after_write(
         self,
@@ -1128,17 +1129,21 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     @property
     def snapshot_stale(self) -> bool:
         """Return the library's snapshot.stale flag (read-only, for D5)."""
-        return bool(getattr(self.data, "stale", False))
+        return self.data is not None and self.data.stale
 
     @property
     def stale_area_ids(self) -> frozenset[int]:
         """Area ids the library marks stale (read-only, for D5)."""
-        return frozenset(getattr(self.data, "stale_area_ids", None) or ())
+        if self.data is None:
+            return frozenset()
+        return frozenset(self.data.stale_area_ids)
 
     @property
     def stale_zone_ids(self) -> frozenset[int]:
         """Zone ids the library marks stale (read-only, for D5)."""
-        return frozenset(getattr(self.data, "stale_zone_ids", None) or ())
+        if self.data is None:
+            return frozenset()
+        return frozenset(self.data.stale_zone_ids)
 
     def _handle_connection_event(self, event: Elke27Event) -> None:
         """Handle connection lifecycle events from the client."""
@@ -1299,12 +1304,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:
         """Update coordinator data and track snapshot version."""
         self.async_set_updated_data(snapshot or PanelSnapshot.empty())
-
-
-def _status_refresh_ok(result: Any) -> bool | None:
-    """Return a CommandResult's status_refresh_ok; None when there is none."""
-    refresh_ok: bool | None = getattr(result, "status_refresh_ok", None)
-    return refresh_ok
 
 
 def _log_command_failure(

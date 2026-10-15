@@ -334,9 +334,8 @@ async def test_pin_required_is_raised(hass: HomeAssistant, setup: Setup) -> None
 async def test_result_without_status_is_no_reread(
     hass: HomeAssistant, setup: Setup
 ) -> None:
-    """A write that returns no CommandResult (None) means no re-read."""
-    client = FakeClient(_ok(True))
-    client.write_result = None  # type: ignore[assignment]
+    """A CommandResult with status_refresh_ok None means no re-read."""
+    client = FakeClient(_ok(None))
     coordinator = await setup(client)
     assert await _run(coordinator, "disarm")
     assert client.keys(READS) == []
