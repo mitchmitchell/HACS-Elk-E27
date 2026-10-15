@@ -28,7 +28,7 @@ if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parents[1]))
     sys.path.insert(0, str(Path(__file__).parent))
 
-    from elke27_lib import AreaState, ArmMode, ZoneState
+    from elke27_lib import AreaState, ArmMode, CommandResult, ZoneState
     from elke27_lib.errors import (
         Elke27ConnectionError,
         Elke27PanelError,
@@ -45,6 +45,9 @@ if _HAS_DEPS:
     from custom_components.elke27.arming import ZoneBypassFailedError
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+
+    # What the panel client's writes return with return_result=True (elke27 0.3.14).
+    _WRITE_OK = CommandResult(route="test", status_refresh_ok=True)
 
 
 # Entities for the service call running in the current task. A context variable
@@ -120,8 +123,8 @@ def _area_status_client(
 
     client.async_execute = AsyncMock(side_effect=_execute)
     client.get_snapshot = MagicMock(return_value=snapshot)
-    client.async_arm_area = AsyncMock(return_value=None)
-    client.async_disarm_area = AsyncMock(return_value=None)
+    client.async_arm_area = AsyncMock(return_value=_WRITE_OK)
+    client.async_disarm_area = AsyncMock(return_value=_WRITE_OK)
     client.async_disconnect = AsyncMock(return_value=None)
     return client
 
@@ -794,11 +797,12 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         first_arm_started = asyncio.Event()
         release_first_arm = asyncio.Event()
 
-        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> CommandResult:
             order.append("arm")
             first_arm_started.set()
             await release_first_arm.wait()
             in_exit_delay["value"] = True
+            return _WRITE_OK
 
         client.async_arm_area = AsyncMock(side_effect=_panel_arm)
         hub._client = client  # noqa: SLF001
@@ -891,8 +895,9 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             area_status_extra=_exit_delay_fields,
         )
 
-        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> CommandResult:
             in_exit_delay["value"] = True
+            return _WRITE_OK
 
         client.async_arm_area = AsyncMock(side_effect=_panel_arm)
         hub._client = client  # noqa: SLF001
@@ -1011,7 +1016,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub = _hub()
         client = MagicMock()
         client.get_snapshot = MagicMock(return_value=stale)
-        client.async_arm_area = AsyncMock(return_value=None)
+        client.async_arm_area = AsyncMock(return_value=_WRITE_OK)
 
         def _execute(command_key: str, **_params: Any) -> Any:
             if command_key == "area_get_status":
@@ -1052,11 +1057,12 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         first_arm_started = asyncio.Event()
         release_first_arm = asyncio.Event()
 
-        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> CommandResult:
             order.append("arm")
             first_arm_started.set()
             await release_first_arm.wait()
             panel_armed["value"] = True
+            return _WRITE_OK
 
         client.async_arm_area = AsyncMock(side_effect=_panel_arm)
         hub._client = client  # noqa: SLF001
@@ -1621,7 +1627,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         client = MagicMock()
         client.async_execute = AsyncMock(side_effect=_execute)
         client.get_snapshot = MagicMock(return_value=before)
-        client.async_arm_area = AsyncMock(return_value=None)
+        client.async_arm_area = AsyncMock(return_value=_WRITE_OK)
         hub._client = client  # noqa: SLF001
         hub.async_set_zone_bypass = AsyncMock(return_value=True)
         runtime = _runtime_for_hub(hub)
@@ -1724,7 +1730,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub = _hub()
         client = MagicMock()
         client.get_snapshot = MagicMock(return_value=armed_cache)
-        client.async_arm_area = AsyncMock(return_value=None)
+        client.async_arm_area = AsyncMock(return_value=_WRITE_OK)
 
         async def _execute(command_key: str, **_params: Any) -> Any:
             if command_key == "area_get_status":
