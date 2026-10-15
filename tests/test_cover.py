@@ -10,7 +10,12 @@ from typing import Any
 from unittest.mock import patch
 
 from elke27_lib import PanelSnapshot
-from elke27_lib.errors import Elke27PermissionError
+from elke27_lib.errors import (
+    Elke27AuthError,
+    Elke27CryptoError,
+    Elke27LinkRequiredError,
+    Elke27PermissionError,
+)
 from elke27_lib.types import BarrierState, barrier_is_open
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -21,8 +26,10 @@ from pytest_homeassistant_custom_component.syrupy import HomeAssistantSnapshotEx
 from syrupy.assertion import SnapshotAssertion
 
 from custom_components.elke27 import cover as cover_mod
+from custom_components.elke27.const import DOMAIN
 from custom_components.elke27.coordinator import BARRIER_PERMISSION_MESSAGE
 from homeassistant.components.cover import DOMAIN as COVER_DOMAIN
+from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     SERVICE_CLOSE_COVER,
@@ -172,6 +179,31 @@ async def test_permission_refusal_message(
     with pytest.raises(HomeAssistantError, match=re.escape(BARRIER_PERMISSION_MESSAGE)):
         await _call(hass, SERVICE_CLOSE_COVER)
     mock_client.client.async_set_barrier.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "error", [Elke27LinkRequiredError, Elke27AuthError, Elke27CryptoError]
+)
+async def test_auth_error_starts_reauth(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    error: type[Exception],
+) -> None:
+    """A link/auth/crypto failure on a garage command starts reauth, not a resend."""
+    await _load(hass, mock_config_entry, mock_client, _barrier(1, "OPEN"))
+    mock_client.client.async_set_barrier.side_effect = error()
+    with pytest.raises(HomeAssistantError):
+        await _call(hass, SERVICE_CLOSE_COVER)
+    await hass.async_block_till_done()
+    mock_client.client.async_set_barrier.assert_awaited_once()
+    mock_client.client.async_refresh_barrier.assert_not_awaited()
+    flows = [
+        flow
+        for flow in hass.config_entries.flow.async_progress()
+        if flow["handler"] == DOMAIN and flow["context"]["source"] == SOURCE_REAUTH
+    ]
+    assert len(flows) == 1
 
 
 async def test_stopped_is_unknown(

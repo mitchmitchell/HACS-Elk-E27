@@ -572,6 +572,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             raise HomeAssistantError(BARRIER_NOT_CONNECTED_MESSAGE)
         try:
             await client.async_set_barrier(barrier_id, open=open_)
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Barrier", barrier_id, "set", err)
+            raise HomeAssistantError(_error_message(err)) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Barrier", barrier_id, "set", err)
             self._note_command_error(err)
