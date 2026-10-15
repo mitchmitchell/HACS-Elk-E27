@@ -7,15 +7,9 @@ from typing import TYPE_CHECKING
 
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import callback
-from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
 
-from .const import (
-    CONF_INTEGRATION_SERIAL,
-    CONF_LINK_KEYS_JSON,
-    DOMAIN,
-    ISSUE_RECONNECT_FAILED,
-)
+from .const import CONF_INTEGRATION_SERIAL, DOMAIN, ISSUE_RECONNECT_FAILED
 from .coordinator import (  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re-exported
     PRIMED_DOMAINS,
     SETUP_RETRY_ERRORS,
@@ -88,11 +82,6 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Set up Elke27 from a config entry."""
     host = entry.data[CONF_HOST]
-    link_keys_json = entry.data.get(CONF_LINK_KEYS_JSON)
-    if not link_keys_json:
-        raise ConfigEntryAuthFailed(
-            translation_domain=DOMAIN, translation_key="auth_failed"
-        )
     integration_serial = entry.data.get(CONF_INTEGRATION_SERIAL)
     entry_data = dict(entry.data)
     pin_removed = entry_data.pop("pin", None)
