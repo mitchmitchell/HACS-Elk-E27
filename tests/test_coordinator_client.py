@@ -82,9 +82,18 @@ class HubConnectTest(unittest.IsolatedAsyncioTestCase):
         client = _client()
         client.wait_ready.return_value = True
         link_keys = LinkKeys(tempkey_hex="00", linkkey_hex="11", linkhmac_hex="22")
-        hub = make_coordinator(MagicMock(), link_keys_json=link_keys.to_json())
+        hass = MagicMock()
+        background: list[Any] = []
+        hass.async_create_background_task.side_effect = (
+            lambda coro, _name: background.append(coro)
+        )
+        hub = make_coordinator(hass, link_keys_json=link_keys.to_json())
         with patch.object(hub_module, "Elke27Client", return_value=client):
             await hub.async_connect()
+        # Connect schedules the panel MAC check; close it so it isn't left
+        # never-awaited (its behaviour is covered in test_panel_mac.py).
+        for coro in background:
+            coro.close()
 
         client.set_client_identity.assert_called_once_with(
             {"mn": "222", "sn": "123456789012"}
