@@ -112,6 +112,11 @@ def area_id_from_device_identifier(key: str, identifier: str) -> int | None:
     return int(suffix)
 
 
+def snapshot_is_full(snapshot: PanelSnapshot | None) -> bool:
+    """Return True when the snapshot can be trusted to list every area."""
+    return snapshot is not None and not snapshot.stale and bool(snapshot.areas)
+
+
 def area_has_device(snapshot: PanelSnapshot | None, area_id: int | None) -> bool:
     """
     Return True when this area gets its own device.

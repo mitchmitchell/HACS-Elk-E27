@@ -103,6 +103,62 @@ async def test_area_device_and_entity_placement(
     assert all(entity.device_id == panel.id for entity in others)
 
 
+async def test_zone_waits_for_its_area_device(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """A zone whose area is missing from a stale snapshot waits for the area."""
+    garage = ZoneState(zone_id=4, name="Garage Door", area_id=2, open=False)
+    mock_client.snapshot = dataclasses.replace(
+        panel_snapshot(),
+        stale=True,
+        zones=MappingProxyType({4: garage}),
+    )
+    await _setup(hass, mock_config_entry)
+    registry = er.async_get(hass)
+    assert registry.async_get_entity_id("binary_sensor", DOMAIN, f"{KEY}:4") is None
+
+    coordinator = mock_config_entry.runtime_data.coordinator
+    snapshot = _with_areas(
+        coordinator.data,
+        {
+            **coordinator.data.areas,
+            2: AreaState(area_id=2, name="Garage"),
+        },
+        stale=False,
+    )
+    coordinator.async_set_updated_data(snapshot)
+    await hass.async_block_till_done()
+
+    entity_id = registry.async_get_entity_id("binary_sensor", DOMAIN, f"{KEY}:4")
+    assert entity_id is not None
+    entity = registry.async_get(entity_id)
+    assert entity is not None
+    area = _device(hass, f"{KEY}:area:2")
+    assert area is not None
+    assert entity.device_id == area.id
+
+
+async def test_zone_on_panel_device_when_snapshot_full(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """A full snapshot without the zone's area puts the zone on the panel device."""
+    mock_client.snapshot = dataclasses.replace(
+        panel_snapshot(),
+        zones=MappingProxyType(
+            {3: ZoneState(zone_id=3, name="Gate", area_id=7, open=False)}
+        ),
+    )
+    await _setup(hass, mock_config_entry)
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("binary_sensor", DOMAIN, f"{KEY}:3")
+    assert entity_id is not None
+    entity = registry.async_get(entity_id)
+    assert entity is not None
+    panel = _device(hass, KEY)
+    assert panel is not None
+    assert entity.device_id == panel.id
+
+
 async def test_new_area_after_setup_creates_device(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
