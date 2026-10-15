@@ -1024,6 +1024,13 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         False: one fallback read via snapshot_with_status, then push. A failed
         fallback pushes the client snapshot as is; the command still succeeded.
         """
+        _LOGGER.debug(
+            "After %s write (area=%s zone=%s): status_refresh_ok=%s",
+            kind,
+            area_id,
+            zone_id,
+            refresh_ok,
+        )
         if refresh_ok is not False:
             self._set_snapshot(self.get_snapshot())
             return

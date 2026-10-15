@@ -7,6 +7,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 import dataclasses
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -289,6 +290,23 @@ async def test_counter_accumulates(hass: HomeAssistant, setup: Setup) -> None:
     client.write_result = _ok(True)
     await _run(coordinator, "disarm")
     assert coordinator.fallback_refresh_count == 2
+
+
+@pytest.mark.parametrize("refresh", [True, False])
+async def test_after_write_logs_status_refresh_ok(
+    hass: HomeAssistant,
+    setup: Setup,
+    caplog: pytest.LogCaptureFixture,
+    refresh: bool,
+) -> None:
+    """Every write logs kind, area/zone and status_refresh_ok at DEBUG."""
+    coordinator = await setup(FakeClient(_ok(refresh)))
+    caplog.set_level(logging.DEBUG)
+    assert await _run(coordinator, "bypass")
+    assert re.search(
+        rf"After \S+ write \(area=\S+ zone=1\): status_refresh_ok={refresh}",
+        caplog.text,
+    )
 
 
 async def test_command_failure_unchanged(hass: HomeAssistant, setup: Setup) -> None:

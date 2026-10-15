@@ -396,9 +396,8 @@ async def test_setup_auth_errors_start_reauth(
     assert flows[0]["context"]["entry_id"] == mock_config_entry.entry_id
 
 
-@pytest.mark.parametrize("link_keys_json", ["not a link key mapping"])
 async def test_setup_bad_link_keys_start_reauth(
-    hass: HomeAssistant, mock_client: ClientHarness, link_keys_json: str
+    hass: HomeAssistant, mock_client: ClientHarness
 ) -> None:
     """Unreadable stored link keys start reauth without connecting."""
     entry = MockConfigEntry(
@@ -407,7 +406,7 @@ async def test_setup_bad_link_keys_start_reauth(
         data={
             "host": "192.0.2.10",
             "port": 2101,
-            CONF_LINK_KEYS_JSON: link_keys_json,
+            CONF_LINK_KEYS_JSON: "not a link key mapping",
             "integration_id": "123456789012",
         },
     )
