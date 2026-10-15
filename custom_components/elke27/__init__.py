@@ -15,11 +15,7 @@ from homeassistant.helpers import (
 )
 
 from .const import CONF_INTEGRATION_ID, DOMAIN, ISSUE_RECONNECT_FAILED
-from .coordinator import (  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re-exported
-    PRIMED_DOMAINS,
-    SETUP_RETRY_ERRORS,
-    Elke27DataUpdateCoordinator,
-)
+from .coordinator import PRIMED_DOMAINS, SETUP_RETRY_ERRORS, Elke27DataUpdateCoordinator  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re-exported
 from .entity import (
     area_has_device,
     area_id_from_device_identifier,

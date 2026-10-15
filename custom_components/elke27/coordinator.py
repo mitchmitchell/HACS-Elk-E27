@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from elke27_lib import (
     ClientConfig,
@@ -131,12 +131,12 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         )
         self._host: str = entry.data[CONF_HOST]
         self._port: int = entry.data[CONF_PORT]
-        self._link_keys_json: str = entry.data[CONF_LINK_KEYS_JSON]
+        self._link_keys_json: dict[str, str] = entry.data[CONF_LINK_KEYS_JSON]
         self._integration_id: str = entry.data.get(CONF_INTEGRATION_ID) or ""
         self._panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
         self._client: Elke27Client | None = None
         # Device id of the panel device, set in async_setup_entry (E2 via link).
-        self._connection_unsubscribe: Callable[[], None] | None = None
+        self._connection_unsubscribe: Callable[[], object] | None = None
         self._connect_lock = asyncio.Lock()
         self._area_arm_locks: dict[int, asyncio.Lock] = {}
         self._arm_automatic_tasks: dict[int, set[asyncio.Task[Any]]] = {}
@@ -146,7 +146,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._stopping = False
         self._unavailable_logged = False
         self._typed_callbacks: dict[
-            Callable[[Any], None], Callable[[], None] | None
+            Callable[[Any], None], Callable[[], object] | None
         ] = {}
         self._debounce_seconds = debounce_seconds
         self._pending_domains: set[str] = set()
@@ -509,8 +509,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
 
     def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], bool]:
         """Subscribe to client events."""
-        # Temporary until elke27_lib ships py.typed (untyped client API).
-        return cast("Callable[[], bool]", self._require_client().subscribe(listener))
+        return self._require_client().subscribe(listener)
 
     def subscribe_typed(self, listener: Callable[[Any], None]) -> Callable[[], None]:
         """Subscribe to typed client events."""
@@ -535,8 +534,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         client = self._client
         if client is None:
             return False
-        # Temporary until elke27_lib ships py.typed (untyped client API).
-        return cast("bool", client.unsubscribe_typed(listener))
+        return client.unsubscribe_typed(listener)
 
     async def async_set_output(self, output_id: int, *, state: bool) -> bool:
         """Turn an output on or off."""

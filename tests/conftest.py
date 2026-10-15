@@ -142,9 +142,7 @@ def make_coordinator(
     Background tasks go to ``hass.async_create_background_task``, as the hub
     did without an entry, so tests can capture them there.
     """
-    from custom_components.elke27.coordinator import (  # noqa: PLC0415
-        Elke27DataUpdateCoordinator,
-    )
+    from custom_components.elke27.coordinator import Elke27DataUpdateCoordinator  # noqa: PLC0415
 
     entry = MagicMock()
     entry.entry_id = "test-entry"
@@ -156,8 +154,8 @@ def make_coordinator(
         CONF_INTEGRATION_ID: INTEGRATION_ID,
         "panel": {"panel_name": panel_name} if panel_name else None,
     }
-    entry.async_create_background_task.side_effect = (
-        lambda hass_, coro, name: hass_.async_create_background_task(coro, name)
+    entry.async_create_background_task.side_effect = lambda hass_, coro, name: (
+        hass_.async_create_background_task(coro, name)
     )
     coordinator = Elke27DataUpdateCoordinator(hass, entry)
     # async_setup_entry sets this before the platforms load.
