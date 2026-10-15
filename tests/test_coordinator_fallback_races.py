@@ -146,3 +146,34 @@ async def test_shutdown_sets_stopping_before_waiting(
     await _settle()
     await coordinator.async_shutdown_client()
     assert seen == [True]
+
+
+async def test_failed_reread_publishes_client_snapshot(
+    hass: HomeAssistant, setup: Setup, mock_client: ClientHarness
+) -> None:
+    """If the re-read fails, the stale first read is never published."""
+    client = FakeClient(_ok(False))
+    coordinator = await setup(client)
+    gate = asyncio.Event()
+    reads: list[int] = []
+    stale = dataclasses.replace(client.snapshot)
+
+    async def _status(*, area_id: int | None, zone_id: int | None) -> Any:
+        reads.append(1)
+        if len(reads) == 1:
+            await gate.wait()
+            return stale
+        raise TimeoutError
+
+    coordinator._async_fallback_status = _status
+    task = hass.async_create_task(_run(coordinator, "arm"))
+    await _settle()
+    newer = dataclasses.replace(client.snapshot)
+    client.snapshot = newer
+    mock_client.emit(MagicMock(name="AreaStatusUpdated"))
+    await _settle()
+    gate.set()
+    assert await task
+    await hass.async_block_till_done()
+    assert reads == [1, 1]
+    assert _pushes(coordinator)[-1] is newer

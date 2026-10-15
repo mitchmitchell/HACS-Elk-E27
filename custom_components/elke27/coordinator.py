@@ -1111,6 +1111,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 )
                 if seq != self._snapshot_seq:
                     _LOGGER.debug("Snapshot pushed during fallback read; reading again")
+                    # The first read is older than the push: never publish it,
+                    # even when the re-read fails.
+                    snapshot = None
                     snapshot = await self._async_fallback_status(
                         area_id=area_id, zone_id=zone_id
                     )
