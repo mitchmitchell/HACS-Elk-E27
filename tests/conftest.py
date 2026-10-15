@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 from elke27_lib import AreaState, LinkKeys, PanelInfo, PanelSnapshot, ZoneState
 from elke27_lib.client import Elke27Client
+from elke27_lib.events import ConnectionStateChanged
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -162,3 +163,16 @@ def make_coordinator(
     # async_setup_entry sets this before the platforms load.
     coordinator.panel_device_id = "panel-device-id"
     return coordinator
+
+
+def connection_event(*, connected: bool) -> ConnectionStateChanged:
+    """Return a library connection event (connected or disconnected)."""
+    return ConnectionStateChanged(
+        kind="connection",
+        at=0.0,
+        seq=None,
+        classification="BROADCAST",
+        route=("system", "connection"),
+        session_id=None,
+        connected=connected,
+    )

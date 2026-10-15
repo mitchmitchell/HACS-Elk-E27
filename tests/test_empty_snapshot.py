@@ -4,23 +4,10 @@
 from __future__ import annotations
 
 from elke27_lib import PanelSnapshot
-from elke27_lib.events import ConnectionStateChanged
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant.core import HomeAssistant
-from tests.conftest import ClientHarness
-
-
-def _connection_event(*, connected: bool) -> ConnectionStateChanged:
-    return ConnectionStateChanged(
-        kind="connection",
-        at=0.0,
-        seq=None,
-        classification="BROADCAST",
-        route=("system", "connection"),
-        session_id=None,
-        connected=connected,
-    )
+from tests.conftest import ClientHarness, connection_event
 
 
 async def test_setup_with_empty_snapshot_creates_only_panel_sensors(
@@ -91,7 +78,7 @@ async def test_disconnect_uses_empty_snapshot_when_client_has_none(
     coordinator = mock_config_entry.runtime_data.coordinator
     mock_client.client.is_ready = False
     mock_client.snapshot = PanelSnapshot.empty()
-    mock_client.emit(_connection_event(connected=False))
+    mock_client.emit(connection_event(connected=False))
     await hass.async_block_till_done()
     assert coordinator.data.areas == {}
     assert coordinator.data.zones == {}
