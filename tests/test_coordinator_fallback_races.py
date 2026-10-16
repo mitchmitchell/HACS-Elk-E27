@@ -216,3 +216,21 @@ async def test_unload_ignores_link_events_while_tasks_stop(
     with contextlib.suppress(asyncio.CancelledError):
         await task
     assert mock_client.client.async_connect.call_count == connects
+
+
+async def test_disconnect_during_read_skips_reread(
+    hass: HomeAssistant, setup: Setup, mock_client: ClientHarness
+) -> None:
+    """A disconnect during the first read discards it without a second read."""
+    client = FakeClient(command_result(refresh=False))
+    coordinator = await setup(client)
+    client.read_gate = asyncio.Event()
+    task = hass.async_create_task(run_command(coordinator, "arm"))
+    await settle()
+    assert client.keys(AREA_READ) == ["area_get_status"]
+    mock_client.emit(connection_event(connected=False))
+    await settle()
+    client.read_gate.set()
+    assert await task
+    await settle()
+    assert client.keys(AREA_READ) == ["area_get_status"]
