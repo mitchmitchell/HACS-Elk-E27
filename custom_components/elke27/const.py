@@ -22,3 +22,6 @@ INTEGRATION_ID_LENGTH = 12
 
 ISSUE_RECONNECT_FAILED = "reconnect_failed"
 RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD = 3
+# Reconnect backoff: 2**n seconds, capped here before jitter (x0.8-1.2), so
+# the panel is retried at least about every 72 s during a long outage (#79).
+RECONNECT_BACKOFF_MAX = 60

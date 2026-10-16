@@ -757,14 +757,14 @@ async def test_reconnect_transport_failures_never_raise_issue(
     issue_registry: ir.IssueRegistry,
     fast_backoff: AsyncMock,
 ) -> None:
-    """Ten transport failures in a row raise no Repairs issue; backoff caps at 300 s."""
+    """Ten transport failures in a row raise no Repairs issue; backoff caps at 60 s."""
     await _setup(hass, mock_config_entry)
     _script_connect(mock_client, [Elke27ConnectionError("down")] * 10)
     await _disconnect(mock_client)
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
     delays = _backoff_delays(fast_backoff)
-    assert delays == [min(300, 2**n) for n in range(1, 11)]
+    assert delays == [min(60, 2**n) for n in range(1, 11)]
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
