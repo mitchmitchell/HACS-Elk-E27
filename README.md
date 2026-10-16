@@ -612,7 +612,7 @@ conditions:
   stored in the config entry, so it stays the same across restarts. It is the integration's
   own ID, not a panel serial number.
 - **Reconnects:** if the connection drops, entities become unavailable and the integration
-  keeps reconnecting with a delay that starts at 2 seconds and doubles up to 5 minutes between
+  keeps reconnecting with a delay that starts at 2 seconds and doubles up to 60 seconds (about 72 s with jitter) between
   attempts, with no limit on attempts. When the
   connection comes back, it refreshes everything from the panel. If the panel rejects the link
   keys, it stops retrying without showing a notice. Reload the integration (or restart Home
@@ -681,7 +681,7 @@ The integration handles connection problems and panel refusals differently.
 
 **Connection drops are retried automatically.** If the connection to the panel drops, the
 integration reconnects with a growing delay: it starts at 2 seconds and doubles after each
-failed attempt, up to 5 minutes (300 seconds) between attempts. There is no limit on the
+failed attempt, up to 60 seconds between attempts (about 72 s with jitter). There is no limit on the
 number of attempts. It only stops if the panel requires re-linking (see
 [Re-linking](#re-linking-reauthentication)). Entities are unavailable while it reconnects.
 
@@ -774,7 +774,7 @@ reachable on the network. Brief drops during thermostat changes are a
 [known issue](#known-issues) and recover by themselves.
 
 The integration reconnects automatically, with a delay that starts at 2 seconds and doubles up
-to 300 seconds (5 minutes) between attempts. It refreshes everything from the panel, and
+to 60 seconds (about 72 s with jitter) between attempts. It refreshes everything from the panel, and
 entities come back shortly after the panel reconnects.
 
 While entities are unavailable, Home Assistant itself skips them when you call an entity
