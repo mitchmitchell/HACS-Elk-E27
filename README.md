@@ -620,7 +620,7 @@ conditions:
 - **Detecting a dropped connection:** a dead connection is usually noticed within about
   35 seconds for an idle link (30 seconds without traffic, plus a 5-second probe). If a command
   is in flight, the integration first waits for that command's timeout, then probes. *"Panel connection lost"* is
-  logged once when it happens. Until it's noticed, commands fail with *"The panel did not
+  logged once at WARNING when it happens. Until it's noticed, commands fail with *"The panel did not
   respond in time; the command may not have been applied."* This disconnect handling may
   still change in later releases.
 - **New items:** areas, zones, lights, locks, thermostats and outputs that show up after setup
@@ -784,6 +784,12 @@ core behavior for every integration, not something this integration can change. 
 automations, check the entity's state first (or use a condition on it) if you need to know
 the action ran. The integration's own actions, `elke27.alarm_arm_automatic` and
 `elke27.zone_bypass`, do report an error when the panel is not connected.
+
+To trace a call that seemed to do nothing, look in the Home Assistant log. When the link
+drops, the integration logs one `WARNING` line, `Panel connection lost`, and Home Assistant
+logs that the referenced entities are not currently available. A disarm or other entity
+action sent during that window returns success (HTTP 200 from the REST API) without reaching
+the panel.
 
 If a command fails with *"The panel did not respond in time; the command may not have been
 applied."* or *"Lost connection to the panel; the command may not have been applied."*, the
