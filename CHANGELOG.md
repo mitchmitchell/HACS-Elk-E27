@@ -3,6 +3,54 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
+## [Unreleased] - 0.2.0 (draft)
+
+### Breaking
+1. **Delete and re-add required** from any 0.1.x. Each install gets its own client ID, a
+   random 12-digit number sent to the panel, and the device layout changed. There is no
+   automatic migration and no Repairs issue; old entries fail setup with
+   "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
+2. **Entity IDs and names change.** Unique IDs have a new format, and each area the panel
+   reports gets a device named after it; its alarm panel is named after the area and its
+   zones sit under it. Zones with no area and panel-wide entities stay on the panel device.
+   After the re-add, Home Assistant creates new entity IDs from the new names, for example
+   `alarm_control_panel.<panel>_<area>` → `alarm_control_panel.<area>` and
+   `binary_sensor.<panel>_<zone>` → `binary_sensor.<area>_<zone>`. Identical names get `_2`
+   IDs. Update automations, dashboards and scripts. Zone names are used as the panel reports
+   them, so "Garage Garage door" can appear.
+   <!-- PENDING MITCH: E2 Q2/Q3 defaults -->
+3. **New client ID per install:** the panel's Network Devices list shows a new 12-digit
+   entry. <!-- PENDING MITCH: tell users to remove the old 0.1.x entry -->
+4. **Diagnostics changed:** new connection, reconnect, out-of-date-status, version and area
+   device fields; `integration_serial` removed. Host, panel MAC, unique ID and client ID are
+   redacted; link keys are never included.
+5. **Setup errors** are reported through Home Assistant's first refresh: the same retry or
+   re-link outcome, different log text. Reconnect log lines move from logger `elke27.hub`
+   to `elke27.coordinator`; update log filters.
+6. **Availability:** on connection loss all entities go unavailable together and recover
+   together on reconnect.
+7. **Out-of-date status** is shown in diagnostics only; status out of date for more than
+   60 s while connected is read again once automatically (never a command).
+8. **Internal:** `custom_components.elke27.hub` is removed; scripts or tests importing it break.
+9. **Requires elke27 0.3.14** (was 0.3.13).
+
+### Added
+- Diagnostics: `client_present`, `client_ready`, `last_update_success`, `reconnect_attempts`,
+  `repairs_issue_active`, `reauth_requested`, `snapshot_stale`, `stale_area_ids`,
+  `stale_zone_ids`, `fallback_refresh_count`, `last_fallback_at`, `stale_auto_refresh_count`
+  (soak counter, pending Mitch's OK), `elke27_version`, `integration_version`,
+  `area_device_count`.
+- Area devices the panel no longer reports can be deleted from the device page; setup doesn't remove them.
+
+### Changed
+- Unique IDs change from `<key>:<type>:<N>` to `<key>:<N>` on every platform; panel sensors become `<key>:panel_name` and `<key>:panel_ready`. Area device identifiers stay `<key>:area:<N>`. Entity IDs change after the re-add.
+- Diagnostics redact host, panel MAC, unique ID and client ID.
+- After arm, disarm or bypass the integration uses the library's refreshed status and reads once more only if that failed; each command is sent once.
+- Reconnect handling moved into its own component; backoff, Repairs and re-link behave as in 0.1.x. A Repairs issue appears only after 3 consecutive non-network failures; a plain network outage raises none.
+
+### Removed
+- Diagnostics field `integration_serial`. `custom_components.elke27.hub`.
+
 ## [Unreleased] - 0.1.9 (draft; #50 merged as 139acbe)
 
 ### Changed

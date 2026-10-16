@@ -21,12 +21,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .arming import ZoneBypassFailedError, area_faulted_zones, is_definitive_refusal
 from .const import DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import (
-    build_unique_id,
-    device_info_for_entry,
-    raise_if_not_sent,
-    unique_base,
-)
+from .entity import area_device_info, build_unique_id, raise_if_not_sent, unique_base
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -97,13 +92,13 @@ class Elke27AreaAlarmControlPanel(
         super().__init__(coordinator)
         self._entry = entry
         self._area_id = area_id
-        self._attr_name = area.name or f"Area {area_id}"
+        # E2: the area device carries the name; this is its main entity.
+        self._attr_name = None
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry),
-            "area",
             area_id,
         )
-        self._attr_device_info = device_info_for_entry(coordinator, entry)
+        self._attr_device_info = area_device_info(coordinator, entry, area_id, area)
         self._missing_logged = False
 
     @property

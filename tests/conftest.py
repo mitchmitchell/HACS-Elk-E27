@@ -12,11 +12,12 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 from elke27_lib import AreaState, LinkKeys, PanelInfo, PanelSnapshot, ZoneState
 from elke27_lib.client import Elke27Client
+from elke27_lib.events import ConnectionStateChanged
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.elke27.const import (
-    CONF_INTEGRATION_SERIAL,
+    CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     DOMAIN,
 )
@@ -28,7 +29,7 @@ PANEL_SERIAL_2 = "elk-panel-serial-002"
 HOST = "192.0.2.10"
 HOST_2 = "192.0.2.20"
 PORT = 2101
-INTEGRATION_SERIAL = "123456789012"
+INTEGRATION_ID = "123456789012"
 LINK_KEYS_JSON = LinkKeys(
     tempkey_hex="00", linkkey_hex="11", linkhmac_hex="22"
 ).to_json()
@@ -86,7 +87,7 @@ def mock_config_entry() -> MockConfigEntry:
             CONF_HOST: HOST,
             CONF_PORT: PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
 
@@ -141,9 +142,7 @@ def make_coordinator(
     Background tasks go to ``hass.async_create_background_task``, as the hub
     did without an entry, so tests can capture them there.
     """
-    from custom_components.elke27.coordinator import (  # noqa: PLC0415
-        Elke27DataUpdateCoordinator,
-    )
+    from custom_components.elke27.coordinator import Elke27DataUpdateCoordinator  # noqa: PLC0415
 
     entry = MagicMock()
     entry.entry_id = "test-entry"
@@ -152,10 +151,26 @@ def make_coordinator(
         CONF_HOST: host,
         CONF_PORT: port,
         CONF_LINK_KEYS_JSON: link_keys_json,
-        CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+        CONF_INTEGRATION_ID: INTEGRATION_ID,
         "panel": {"panel_name": panel_name} if panel_name else None,
     }
-    entry.async_create_background_task.side_effect = (
-        lambda hass_, coro, name: hass_.async_create_background_task(coro, name)
+    entry.async_create_background_task.side_effect = lambda hass_, coro, name: (
+        hass_.async_create_background_task(coro, name)
     )
-    return Elke27DataUpdateCoordinator(hass, entry)
+    coordinator = Elke27DataUpdateCoordinator(hass, entry)
+    # async_setup_entry sets this before the platforms load.
+    coordinator.panel_device_id = "panel-device-id"
+    return coordinator
+
+
+def connection_event(*, connected: bool) -> ConnectionStateChanged:
+    """Return a library connection event (connected or disconnected)."""
+    return ConnectionStateChanged(
+        kind="connection",
+        at=0.0,
+        seq=None,
+        classification="BROADCAST",
+        route=("system", "connection"),
+        session_id=None,
+        connected=connected,
+    )

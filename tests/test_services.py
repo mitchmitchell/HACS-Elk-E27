@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import dataclasses
 import importlib.util
 from pathlib import Path
@@ -27,7 +28,7 @@ if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parents[1]))
     sys.path.insert(0, str(Path(__file__).parent))
 
-    from elke27_lib import AreaState, ArmMode, ZoneState
+    from elke27_lib import AreaState, ArmMode, CommandResult, ZoneState
     from elke27_lib.errors import (
         Elke27ConnectionError,
         Elke27PanelError,
@@ -44,6 +45,38 @@ if _HAS_DEPS:
     from custom_components.elke27.arming import ZoneBypassFailedError
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+
+    # What the panel client's writes return with return_result=True (elke27 0.3.14).
+    _WRITE_OK = CommandResult(route="test", status_refresh_ok=True)
+
+
+# Entities for the service call running in the current task. A context variable
+# rather than per-call patches: overlapping calls would restore the patches out
+# of order and leave them installed for later tests.
+_ENTITIES: contextvars.ContextVar[dict[str, tuple[Any, Any]]] = contextvars.ContextVar(
+    "_ENTITIES"
+)
+
+
+def _patch_entity_lookup(test: unittest.TestCase) -> None:
+    """Patch the entity lookups for the whole test, reading _ENTITIES."""
+    for name, mock in (
+        (
+            "_entity_ids_from_service_call",
+            MagicMock(side_effect=lambda *_args: sorted(_ENTITIES.get())),
+        ),
+        (
+            "_entity_runtime_data",
+            MagicMock(
+                side_effect=lambda _hass, entity_id, _platform, _label: _ENTITIES.get()[
+                    entity_id
+                ]
+            ),
+        ),
+    ):
+        patcher = patch.object(integration, name, mock)
+        patcher.start()
+        test.addCleanup(patcher.stop)
 
 
 @contextlib.contextmanager
@@ -90,8 +123,8 @@ def _area_status_client(
 
     client.async_execute = AsyncMock(side_effect=_execute)
     client.get_snapshot = MagicMock(return_value=snapshot)
-    client.async_arm_area = AsyncMock(return_value=None)
-    client.async_disarm_area = AsyncMock(return_value=None)
+    client.async_arm_area = AsyncMock(return_value=_WRITE_OK)
+    client.async_disarm_area = AsyncMock(return_value=_WRITE_OK)
     client.async_disconnect = AsyncMock(return_value=None)
     return client
 
@@ -180,31 +213,22 @@ def _alarm_runtime(snapshot: Any) -> Any:
 class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
     """Test the elke27.zone_bypass action."""
 
+    def setUp(self) -> None:
+        """Route entity lookups to the entities of the running call."""
+        _patch_entity_lookup(self)
+
     async def _run(
         self, data: dict[str, Any], entities: dict[str, tuple[Any, Any]]
     ) -> None:
-        with (
-            patch.object(
-                integration,
-                "_entity_ids_from_service_call",
-                return_value=sorted(entities),
-            ),
-            patch.object(
-                integration,
-                "_entity_runtime_data",
-                side_effect=lambda _hass, entity_id, _platform, _label: entities[
-                    entity_id
-                ],
-            ),
-        ):
-            await integration._async_handle_zone_bypass(MagicMock(), _call(data))  # noqa: SLF001
+        _ENTITIES.set(entities)
+        await integration._async_handle_zone_bypass(MagicMock(), _call(data))  # noqa: SLF001
 
     async def test_bypass_each_targeted_zone(self) -> None:
         """Each targeted zone is bypassed with the given code."""
         runtime = _runtime()
         entities = {
-            "binary_sensor.front": (_entry("aa:bb:cc:dd:ee:ff:zone:3"), runtime),
-            "binary_sensor.rear": (_entry("aa:bb:cc:dd:ee:ff:zone:12"), runtime),
+            "binary_sensor.front": (_entry("aa:bb:cc:dd:ee:ff:3"), runtime),
+            "binary_sensor.rear": (_entry("aa:bb:cc:dd:ee:ff:12"), runtime),
         }
         data = integration.SERVICE_ZONE_BYPASS_SCHEMA(
             {"entity_id": list(entities), "code": "1234"}
@@ -230,9 +254,7 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
         hub.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
         runtime = MagicMock()
         runtime.coordinator = hub
-        entities = {
-            "binary_sensor.garage": (_entry("aa:bb:cc:dd:ee:ff:zone:4"), runtime)
-        }
+        entities = {"binary_sensor.garage": (_entry("aa:bb:cc:dd:ee:ff:4"), runtime)}
         await self._run({"code": "1234", "bypass": False}, entities)
         assert held == [True]
         assert not lock.locked()
@@ -240,9 +262,7 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_unbypass(self) -> None:
         """bypass: false removes the bypass."""
         runtime = _runtime()
-        entities = {
-            "binary_sensor.front": (_entry("aa:bb:cc:dd:ee:ff:zone:3"), runtime)
-        }
+        entities = {"binary_sensor.front": (_entry("aa:bb:cc:dd:ee:ff:3"), runtime)}
         await self._run({"code": "1234", "bypass": False}, entities)
         runtime.coordinator.async_set_zone_bypass.assert_awaited_once_with(
             3, bypassed=False, pin="1234"
@@ -252,7 +272,7 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
         """No client (not acknowledged) is reported as an error."""
         entities = {
             "binary_sensor.front": (
-                _entry("aa:bb:cc:dd:ee:ff:zone:3"),
+                _entry("aa:bb:cc:dd:ee:ff:3"),
                 _runtime(acknowledged=False),
             )
         }
@@ -276,20 +296,14 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
                 {"entity_id": ["binary_sensor.x"], "code": "12ab"}
             )
 
-    def test_numeric_id_from_unique_id(self) -> None:
-        """IDs are parsed from <base>:<domain>:<id> unique IDs."""
-        parse = integration._numeric_id_from_unique_id  # noqa: SLF001
-        assert parse("aa:bb:cc:dd:ee:ff:zone:7", "zone") == 7
-        assert integration._area_id_from_unique_id("x:area:2") == 2  # noqa: SLF001
-        with self.assertRaises(ServiceValidationError):
-            parse("aa:bb:cc:dd:ee:ff:area:7", "zone")
-        with self.assertRaises(ServiceValidationError):
-            parse("base:zone:abc", "zone")
-
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
 class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
     """Test the elke27.alarm_arm_automatic action."""
+
+    def setUp(self) -> None:
+        """Route entity lookups to the entities of the running call."""
+        _patch_entity_lookup(self)
 
     async def _run(
         self,
@@ -297,21 +311,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         data: dict[str, Any],
         entities: dict[str, tuple[Any, Any]],
     ) -> None:
-        with (
-            patch.object(
-                integration,
-                "_entity_ids_from_service_call",
-                return_value=sorted(entities),
-            ),
-            patch.object(
-                integration,
-                "_entity_runtime_data",
-                side_effect=lambda _hass, entity_id, _platform, _label: entities[
-                    entity_id
-                ],
-            ),
-        ):
-            await integration._async_handle_alarm_arm_automatic(hass, _call(data))  # noqa: SLF001
+        _ENTITIES.set(entities)
+        await integration._async_handle_alarm_arm_automatic(hass, _call(data))  # noqa: SLF001
 
     async def test_geofence_arm_bypasses_faulted_zones_then_arms(self) -> None:
         """Open zones in the targeted area are bypassed, then the area is armed."""
@@ -319,7 +320,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime = _alarm_runtime(_two_area_snapshot())
         entities = {
             "alarm_control_panel.house": (
-                _entry("aa:bb:cc:dd:ee:ff:area:1"),
+                _entry("aa:bb:cc:dd:ee:ff:1"),
                 runtime,
             )
         }
@@ -346,7 +347,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime = _alarm_runtime(_two_area_snapshot())
         entities = {
             "alarm_control_panel.garage": (
-                _entry("aa:bb:cc:dd:ee:ff:area:2"),
+                _entry("aa:bb:cc:dd:ee:ff:2"),
                 runtime,
             )
         }
@@ -372,7 +373,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime = _alarm_runtime(snapshot)
         entities = {
             "alarm_control_panel.house": (
-                _entry("aa:bb:cc:dd:ee:ff:area:1"),
+                _entry("aa:bb:cc:dd:ee:ff:1"),
                 runtime,
             )
         }
@@ -400,7 +401,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime.coordinator.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
         entities = {
             "alarm_control_panel.house": (
-                _entry("aa:bb:cc:dd:ee:ff:area:1", config_entry_id="entry-abc"),
+                _entry("aa:bb:cc:dd:ee:ff:1", config_entry_id="entry-abc"),
                 runtime,
             )
         }
@@ -457,7 +458,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime = _alarm_runtime(_two_area_snapshot())
         runtime.coordinator.async_set_zone_bypass = AsyncMock(return_value=False)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create"),
@@ -482,11 +483,11 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         entities = {
             "alarm_control_panel.a_house": (
-                _entry("aa:bb:cc:dd:ee:ff:area:1", config_entry_id="entry-abc"),
+                _entry("aa:bb:cc:dd:ee:ff:1", config_entry_id="entry-abc"),
                 house,
             ),
             "alarm_control_panel.b_garage": (
-                _entry("aa:bb:cc:dd:ee:ff:area:2", config_entry_id="entry-abc"),
+                _entry("aa:bb:cc:dd:ee:ff:2", config_entry_id="entry-abc"),
                 garage,
             ),
         }
@@ -541,9 +542,9 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             side_effect=HomeAssistantError("nope")
         )
         entities = {
-            "alarm_control_panel.a_house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), house),
+            "alarm_control_panel.a_house": (_entry("aa:bb:cc:dd:ee:ff:1"), house),
             "alarm_control_panel.b_garage": (
-                _entry("aa:bb:cc:dd:ee:ff:area:2"),
+                _entry("aa:bb:cc:dd:ee:ff:2"),
                 garage,
             ),
         }
@@ -573,7 +574,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
 
         runtime.coordinator.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(
@@ -613,7 +614,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             side_effect=HomeAssistantError("area not ready (error 11015)")
         )
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create"),
@@ -638,7 +639,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime = _alarm_runtime(_two_area_snapshot())
         runtime.coordinator.async_arm_area = AsyncMock(return_value=False)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create") as note,
@@ -667,7 +668,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         timeout.__cause__ = Elke27TimeoutError("timeout")
         runtime.coordinator.async_arm_area = AsyncMock(side_effect=timeout)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create") as note,
@@ -702,7 +703,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         refusal.__cause__ = Elke27PanelError(11015, "area not ready")
         runtime.coordinator.async_arm_area = AsyncMock(side_effect=refusal)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create"),
@@ -746,7 +747,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime.coordinator.async_set_zone_bypass = AsyncMock(side_effect=_bypass)
         runtime.coordinator.async_arm_area = AsyncMock(side_effect=_arm)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with patch.object(integration.persistent_notification, "async_create"):
             first = asyncio.create_task(
@@ -796,18 +797,19 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         first_arm_started = asyncio.Event()
         release_first_arm = asyncio.Event()
 
-        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> CommandResult:
             order.append("arm")
             first_arm_started.set()
             await release_first_arm.wait()
             in_exit_delay["value"] = True
+            return _WRITE_OK
 
         client.async_arm_area = AsyncMock(side_effect=_panel_arm)
         hub._client = client  # noqa: SLF001
         hub.async_set_zone_bypass = AsyncMock(return_value=True)
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             _fast_arm_status_poll(),
@@ -850,7 +852,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub.async_set_zone_bypass = AsyncMock(return_value=True)
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         lock = hub.area_arm_lock(1)
         await lock.acquire()
@@ -893,8 +895,9 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             area_status_extra=_exit_delay_fields,
         )
 
-        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> CommandResult:
             in_exit_delay["value"] = True
+            return _WRITE_OK
 
         client.async_arm_area = AsyncMock(side_effect=_panel_arm)
         hub._client = client  # noqa: SLF001
@@ -902,7 +905,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime = _runtime_for_hub(hub)
         entities.clear()
         entities["alarm_control_panel.house"] = (
-            _entry("aa:bb:cc:dd:ee:ff:area:1"),
+            _entry("aa:bb:cc:dd:ee:ff:1"),
             runtime,
         )
         with patch.object(integration.persistent_notification, "async_create"):
@@ -980,7 +983,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
 
         entities = {
             "alarm_control_panel.house": (
-                _entry("aa:bb:cc:dd:ee:ff:area:1"),
+                _entry("aa:bb:cc:dd:ee:ff:1"),
                 runtime,
             )
         }
@@ -1013,7 +1016,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub = _hub()
         client = MagicMock()
         client.get_snapshot = MagicMock(return_value=stale)
-        client.async_arm_area = AsyncMock(return_value=None)
+        client.async_arm_area = AsyncMock(return_value=_WRITE_OK)
 
         def _execute(command_key: str, **_params: Any) -> Any:
             if command_key == "area_get_status":
@@ -1029,7 +1032,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         runtime = _runtime_for_hub(hub)
         entities = {
             "alarm_control_panel.house": (
-                _entry("aa:bb:cc:dd:ee:ff:area:1"),
+                _entry("aa:bb:cc:dd:ee:ff:1"),
                 runtime,
             )
         }
@@ -1054,18 +1057,19 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         first_arm_started = asyncio.Event()
         release_first_arm = asyncio.Event()
 
-        async def _panel_arm(_area_id: int, **_kwargs: Any) -> None:
+        async def _panel_arm(_area_id: int, **_kwargs: Any) -> CommandResult:
             order.append("arm")
             first_arm_started.set()
             await release_first_arm.wait()
             panel_armed["value"] = True
+            return _WRITE_OK
 
         client.async_arm_area = AsyncMock(side_effect=_panel_arm)
         hub._client = client  # noqa: SLF001
         hub.async_set_zone_bypass = AsyncMock(return_value=True)
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             _fast_arm_status_poll(),
@@ -1107,7 +1111,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             side_effect=HomeAssistantError("area not ready (error 11015)")
         )
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create"),
@@ -1125,7 +1129,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hass = MagicMock()
         runtime = _alarm_runtime(_armed_after_first_call(_two_area_snapshot()))
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         await self._run(hass, {"mode": "home", "code": "1234"}, entities)
         runtime.coordinator.async_set_zone_bypass.assert_not_called()
@@ -1140,7 +1144,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         refusal.__cause__ = Elke27PanelError(11028, "not allowed when armed")
         runtime.coordinator.async_arm_area = AsyncMock(side_effect=refusal)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create"),
@@ -1160,7 +1164,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hass = MagicMock()
         runtime = _alarm_runtime(None)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create"),
@@ -1196,7 +1200,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         entity = _area_entity(snapshot, hub)
         entities = {
             "alarm_control_panel.house": (
-                _entry("aa:bb:cc:dd:ee:ff:area:1", config_entry_id="entry-abc"),
+                _entry("aa:bb:cc:dd:ee:ff:1", config_entry_id="entry-abc"),
                 runtime,
             )
         }
@@ -1246,7 +1250,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub = runtime.coordinator
         entity = _area_entity(snapshot, hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         lock = hub.area_arm_lock(1)
         await lock.acquire()  # e.g. a manual arm in progress
@@ -1306,7 +1310,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         refusal.__cause__ = Elke27PanelError(11028, "not allowed when armed")
         hub.async_set_zone_bypass = AsyncMock(side_effect=refusal)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create") as note,
@@ -1339,7 +1343,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         stale = _two_area_snapshot()
         hub.async_poll_until_area_armed = AsyncMock(return_value=(stale, False))
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create"),
@@ -1367,7 +1371,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
 
         hub.async_refresh_area_state = AsyncMock(side_effect=_arm_check)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         assert held == [True]
@@ -1420,7 +1424,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub.async_disarm_area = AsyncMock(side_effect=_disarm)
         entity = _area_entity(snapshot, hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         automatic = asyncio.create_task(
             self._run(hass, {"mode": "away", "code": "1234"}, entities)
@@ -1514,7 +1518,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub.async_disarm_area = AsyncMock(side_effect=_disarm)
         entity = _area_entity(snapshot, hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with patch.object(integration.persistent_notification, "async_create"):
             automatic = asyncio.create_task(
@@ -1538,7 +1542,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             side_effect=Elke27PinRequiredError("PIN required to bypass zones.")
         )
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(
@@ -1567,7 +1571,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             side_effect=Elke27PinRequiredError("PIN required to arm areas.")
         )
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(
@@ -1623,12 +1627,12 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         client = MagicMock()
         client.async_execute = AsyncMock(side_effect=_execute)
         client.get_snapshot = MagicMock(return_value=before)
-        client.async_arm_area = AsyncMock(return_value=None)
+        client.async_arm_area = AsyncMock(return_value=_WRITE_OK)
         hub._client = client  # noqa: SLF001
         hub.async_set_zone_bypass = AsyncMock(return_value=True)
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
 
         async def _forbidden_sleep(*_args: Any, **_kwargs: Any) -> None:
@@ -1660,7 +1664,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         client.async_arm_area.reset_mock()
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             _fast_arm_status_poll(),
@@ -1684,7 +1688,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         panel["armed"] = False
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             _fast_arm_status_poll(),
@@ -1710,7 +1714,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub.async_set_zone_bypass = AsyncMock(return_value=True)
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             _fast_arm_status_poll(),
@@ -1726,7 +1730,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub = _hub()
         client = MagicMock()
         client.get_snapshot = MagicMock(return_value=armed_cache)
-        client.async_arm_area = AsyncMock(return_value=None)
+        client.async_arm_area = AsyncMock(return_value=_WRITE_OK)
 
         async def _execute(command_key: str, **_params: Any) -> Any:
             if command_key == "area_get_status":
@@ -1741,7 +1745,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub.async_set_zone_bypass = AsyncMock(return_value=True)
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             _fast_arm_status_poll(),
@@ -1763,7 +1767,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub.async_poll_until_area_armed = AsyncMock(return_value=(stale, False))
         hub.async_refresh_area_state = AsyncMock(return_value=(armed, True))
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         area_lock = hub.area_arm_lock(1)
         with (
@@ -1789,7 +1793,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             return_value=(_two_area_snapshot(), False)
         )
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             patch.object(integration.persistent_notification, "async_create"),
@@ -1808,7 +1812,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hub.async_set_zone_bypass = AsyncMock(return_value=True)
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             _fast_arm_status_poll(),
@@ -1839,7 +1843,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         client.async_arm_area.reset_mock()
         runtime = _runtime_for_hub(hub)
         entities = {
-            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:area:1"), runtime)
+            "alarm_control_panel.house": (_entry("aa:bb:cc:dd:ee:ff:1"), runtime)
         }
         with (
             _fast_arm_status_poll(),

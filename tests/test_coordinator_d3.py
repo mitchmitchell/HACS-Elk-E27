@@ -16,8 +16,7 @@ from custom_components.elke27.tasks import create_background_task
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from tests.conftest import PANEL_MAC, ClientHarness
-from tests.test_empty_snapshot import _connection_event
+from tests.conftest import PANEL_MAC, ClientHarness, connection_event
 
 WRITE_METHODS = (
     "async_arm_area",
@@ -53,15 +52,17 @@ async def test_runtime_data_holds_only_the_coordinator(
 async def test_identity_unchanged(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
-    """Unique IDs keep the pre-D3 <mac>:<domain>:<id> form."""
+    """Unique IDs are <mac>:<id> (ADR-0126 decision 16); sensors use their key."""
     await _setup(hass, mock_config_entry)
     registry = er.async_get(hass)
     unique_ids = {
         e.unique_id
         for e in er.async_entries_for_config_entry(registry, mock_config_entry.entry_id)
     }
-    assert f"{PANEL_MAC}:area:1" in unique_ids
-    assert f"{PANEL_MAC}:zone:1" in unique_ids
+    assert f"{PANEL_MAC}:1" in unique_ids
+    assert f"{PANEL_MAC}:panel_name" in unique_ids
+    assert f"{PANEL_MAC}:panel_ready" in unique_ids
+    assert not any(":area:" in u or ":zone:" in u for u in unique_ids)
     assert all(uid.startswith(f"{PANEL_MAC}:") for uid in unique_ids)
 
 
@@ -73,13 +74,11 @@ async def test_disconnect_is_one_listener_update(
     calls: list[None] = []
     remove = coordinator.async_add_listener(lambda: calls.append(None))
     mock_client.client.is_ready = False
-    mock_client.emit(_connection_event(connected=False))
+    mock_client.emit(connection_event(connected=False))
     await hass.async_block_till_done()
     remove()
     assert len(calls) == 1
-    assert hass.states.get("alarm_control_panel.test_panel_house").state == (
-        STATE_UNAVAILABLE
-    )
+    assert hass.states.get("alarm_control_panel.house").state == (STATE_UNAVAILABLE)
 
 
 async def test_stale_snapshot_refreshes_once_per_window(
@@ -107,6 +106,7 @@ async def test_stale_snapshot_refreshes_once_per_window(
     assert refresh.await_count == 1
     await _check_at(1122.0)
     assert refresh.await_count == 2
+    assert coordinator.stale_auto_refresh_count == 2  # D5 soak counter
     for name in WRITE_METHODS:
         getattr(mock_client.client, name).assert_not_called()
 

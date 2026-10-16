@@ -1,3 +1,10 @@
+> **Historical document.** This is the original adaptation plan and no longer describes the
+> code. Since 0.2.0 the coordinator owns the panel client (there is no hub), and entity
+> unique IDs are `<key>:<N>` (panel sensors `<key>:panel_name` / `<key>:panel_ready`; area
+> devices `<key>:area:<N>`), where `<key>` is the panel MAC, then a real panel serial, then
+> the entry ID. The client ID sent to the panel is a random 12-digit number generated at
+> setup. See README.md and docs/developer/architecture.md for current behaviour.
+
 Change Order Plan: Adapt elkm1 Integration into elke27 (E27 + elke27_lib)
 
 Goal

@@ -35,7 +35,7 @@ from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.selector import selector
 
 from .const import (
-    CONF_INTEGRATION_SERIAL,
+    CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     CONF_PANEL,
     CONF_PANEL_MAC,
@@ -44,9 +44,10 @@ from .const import (
     READY_TIMEOUT,
 )
 from .identity import (
-    async_get_integration_serial,
     build_client_identity,
     config_entry_unique_id,
+    generate_integration_id,
+    is_valid_integration_id,
     panel_identity_matches,
     panel_mac_from_info,
     panel_serial_tier,
@@ -152,6 +153,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._selected_panel: Any | None = None
         self._selected_host: str | None = None
         self._selected_port: int | None = None
+        # Drawn once per flow, so a retried link reuses the same client sn.
+        self._integration_id: str | None = None
         self._discovered_panels: list[Any] | None = None
 
     async def async_step_user(
@@ -321,6 +324,21 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    def _flow_integration_id(self, entry: ConfigEntry | None) -> str:
+        """
+        Return the client sn for this link.
+
+        Reauth keeps the entry's integration ID (the panel binds the link to
+        it). A new entry, or one without a valid ID, gets one fresh ID per
+        flow, so a retried link reuses the same sn.
+        """
+        existing_id = entry.data.get(CONF_INTEGRATION_ID) if entry is not None else None
+        if is_valid_integration_id(existing_id):
+            return existing_id
+        if self._integration_id is None:
+            self._integration_id = generate_integration_id()
+        return self._integration_id
+
     async def _async_link_and_create_entry(
         self,
         access_code: str,
@@ -341,12 +359,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors=errors,
             )
 
-        integration_serial = await async_get_integration_serial(
-            self.hass,
-            host,
-            entry.data.get(CONF_INTEGRATION_SERIAL) if entry is not None else None,
-        )
-        client_identity = build_client_identity(integration_serial)
+        integration_id = self._flow_integration_id(entry)
+        client_identity = build_client_identity(integration_id)
         client = _create_client()
         link_keys: LinkKeys | None = None
         panel_info: dict[str, Any] = {}
@@ -411,7 +425,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_HOST: host,
             CONF_PORT: port,
             CONF_LINK_KEYS_JSON: link_keys_json,
-            CONF_INTEGRATION_SERIAL: integration_serial,
+            CONF_INTEGRATION_ID: integration_id,
         }
 
         panel = self._selected_panel

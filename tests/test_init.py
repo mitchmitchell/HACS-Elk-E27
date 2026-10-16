@@ -27,7 +27,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.elke27 import async_remove_entry
 from custom_components.elke27.alarm_control_panel import _normalize_code
 from custom_components.elke27.const import (
-    CONF_INTEGRATION_SERIAL,
+    CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     DOMAIN,
     ISSUE_RECONNECT_FAILED,
@@ -44,7 +44,7 @@ from homeassistant.helpers import (
 from tests.conftest import (
     HOST,
     HOST_2,
-    INTEGRATION_SERIAL,
+    INTEGRATION_ID,
     LINK_KEYS_JSON,
     PANEL_SERIAL,
     PANEL_SERIAL_2,
@@ -91,7 +91,7 @@ async def test_two_macless_entries_have_separate_devices_and_entity_ids(
             "host": HOST,
             "port": PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     entry_a.add_to_hass(hass)
@@ -113,7 +113,7 @@ async def test_two_macless_entries_have_separate_devices_and_entity_ids(
             "host": HOST_2,
             "port": PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     entry_b.add_to_hass(hass)
@@ -126,8 +126,15 @@ async def test_two_macless_entries_have_separate_devices_and_entity_ids(
         for device in device_registry.devices.values()
         if device.identifiers
         and any(identifier[0] == DOMAIN for identifier in device.identifiers)
+        and device.via_device_id is None
     ]
     assert len(elke27_devices) == 2  # noqa: PLR2004
+    # E2: each panel also has one area device linked to it.
+    assert {
+        device.via_device_id
+        for device in device_registry.devices.values()
+        if device.via_device_id is not None
+    } == {device.id for device in elke27_devices}
     device_keys = {next(iter(device.identifiers))[1] for device in elke27_devices}
     assert device_keys == {PANEL_SERIAL, PANEL_SERIAL_2}
 
@@ -169,7 +176,7 @@ async def test_two_panels_without_mac_or_serial_use_entry_id_identity(
             "host": HOST,
             "port": PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     entry_a.add_to_hass(hass)
@@ -191,7 +198,7 @@ async def test_two_panels_without_mac_or_serial_use_entry_id_identity(
             "host": HOST_2,
             "port": PORT,
             CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-            CONF_INTEGRATION_SERIAL: INTEGRATION_SERIAL,
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
         },
     )
     entry_b.add_to_hass(hass)
@@ -207,8 +214,15 @@ async def test_two_panels_without_mac_or_serial_use_entry_id_identity(
         for device in device_registry.devices.values()
         if device.identifiers
         and any(identifier[0] == DOMAIN for identifier in device.identifiers)
+        and device.via_device_id is None
     ]
     assert len(elke27_devices) == 2  # noqa: PLR2004
+    # E2: each panel also has one area device linked to it.
+    assert {
+        device.via_device_id
+        for device in device_registry.devices.values()
+        if device.via_device_id is not None
+    } == {device.id for device in elke27_devices}
     device_keys = {next(iter(device.identifiers))[1] for device in elke27_devices}
     assert device_keys == {entry_a.entry_id, entry_b.entry_id}
 
@@ -239,7 +253,7 @@ async def test_setup_and_unload(
     await hass.async_block_till_done()
     assert mock_config_entry.state is ConfigEntryState.LOADED
     mock_client.client.async_connect.assert_awaited_once()
-    assert hass.states.get("alarm_control_panel.test_panel_house") is not None
+    assert hass.states.get("alarm_control_panel.house") is not None
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
@@ -393,7 +407,7 @@ async def test_setup_bad_link_keys_start_reauth(
             "host": "192.0.2.10",
             "port": 2101,
             CONF_LINK_KEYS_JSON: "not a link key mapping",
-            "integration_serial": "123456789012",
+            "integration_id": "123456789012",
         },
     )
     entry.add_to_hass(hass)

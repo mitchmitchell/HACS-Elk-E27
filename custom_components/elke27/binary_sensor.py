@@ -12,7 +12,14 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
-from .entity import build_unique_id, device_info_for_entry, unique_base
+from .entity import (
+    area_has_device,
+    build_unique_id,
+    device_info_for_zone,
+    snapshot_is_full,
+    unique_base,
+    zone_entity_name,
+)
 
 if TYPE_CHECKING:
     from elke27_lib import PanelSnapshot, ZoneDefinition, ZoneState
@@ -78,6 +85,7 @@ async def async_setup_entry(
             return
         added = 0
         skipped = 0
+        deferred = 0
         for zone_id, zone in snapshot.zones.items():
             zone_definition = snapshot.zone_definitions.get(zone_id)
             definition = _zone_definition_value(zone_definition)
@@ -94,6 +102,16 @@ async def async_setup_entry(
             skipped_zone_ids.discard(zone_id)
             if zone_id in known_ids:
                 continue
+            # The device is fixed at creation. A zone whose area is not in this
+            # snapshot waits until the area appears or the snapshot is full;
+            # otherwise it would stay on the panel device until a reload.
+            if (
+                zone.area_id
+                and not area_has_device(snapshot, zone.area_id)
+                and not snapshot_is_full(snapshot)
+            ):
+                deferred += 1
+                continue
             known_ids.add(zone_id)
             entities.append(
                 Elke27ZoneBinarySensor(
@@ -102,9 +120,10 @@ async def async_setup_entry(
             )
             added += 1
         _LOGGER.debug(
-            "Adding %s zone entities (skipped %s UNDEFINED)",
+            "Adding %s zone entities (skipped %s UNDEFINED, deferred %s)",
             added,
             skipped,
+            deferred,
         )
         if entities:
             async_add_entities(entities)
@@ -134,13 +153,21 @@ class Elke27ZoneBinarySensor(
         super().__init__(coordinator)
         self._entry = entry
         self._zone_id = zone_id
-        self._attr_name = _zone_name(zone, zone_definition) or f"Zone {zone_id}"
+        snapshot = coordinator.data
+        area = (
+            snapshot.areas.get(zone.area_id)
+            if snapshot is not None and zone.area_id is not None
+            else None
+        )
+        self._attr_name = zone_entity_name(
+            _zone_name(zone, zone_definition) or f"Zone {zone_id}",
+            area.name if area is not None else None,
+        )
         self._attr_unique_id = build_unique_id(
             unique_base(coordinator, entry),
-            "zone",
             zone_id,
         )
-        self._attr_device_info = device_info_for_entry(coordinator, entry)
+        self._attr_device_info = device_info_for_zone(coordinator, entry, zone)
         self._missing_logged = False
         self._attr_device_class = _zone_device_class(zone_definition)
 

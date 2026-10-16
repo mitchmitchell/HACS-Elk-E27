@@ -141,6 +141,9 @@
     "code_not_numeric": {
       "message": "The code must be numeric."
     },
+    "integration_id_invalid": {
+      "message": "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
+    },
     "panel_not_ready": {
       "message": "The client did not become ready before timeout."
     }

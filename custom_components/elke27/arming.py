@@ -302,7 +302,7 @@ def _library_arm_mode(mode: Any) -> ArmMode:
     """Map an integration arm request to the elke27 arm mode."""
     # The E27 has Away and Stay arming only; it has no Night mode.
     if mode in (ArmMode.ARMED_STAY, ArmMode.ARMED_AWAY):
-        return mode
+        return ArmMode(mode)
     # Custom bypass: the entity bypasses open zones first, then arms away.
     if isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS":
         return ArmMode.ARMED_AWAY

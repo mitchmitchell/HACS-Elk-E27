@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
     DeviceInfo,
@@ -17,10 +19,16 @@ from .errors import NOT_ACCEPTED_MESSAGE
 from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
-    from elke27_lib import PanelSnapshot
+    from elke27_lib import AreaState, PanelSnapshot, ZoneState
 
     from .coordinator import Elke27DataUpdateCoordinator
     from .models import Elke27ConfigEntry
+
+# HA 2026.8+ accepts via_device_id; the pinned HA only has the identifier form.
+SUPPORTS_VIA_DEVICE_ID = (
+    "via_device_id"
+    in inspect.signature(dr.DeviceRegistry.async_get_or_create).parameters
+)
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9 _-]")
 
@@ -85,6 +93,119 @@ def device_info_for_entry(
     )
 
 
+AREA_DEVICE_MODEL = "Area"
+
+
+def area_device_identifier(key: str, area_id: int) -> str:
+    """Return the area device identifier, same shape as the area unique_id."""
+    return f"{key}:area:{area_id}"
+
+
+def area_id_from_device_identifier(key: str, identifier: str) -> int | None:
+    """Return N for an identifier `<key>:area:<N>` of this entry, else None."""
+    prefix = f"{key}:area:"
+    if not identifier.startswith(prefix):
+        return None
+    suffix = identifier[len(prefix) :]
+    if not suffix.isascii() or not suffix.isdecimal():
+        return None
+    return int(suffix)
+
+
+def snapshot_is_full(snapshot: PanelSnapshot | None) -> bool:
+    """Return True when the snapshot can be trusted to list every area."""
+    return snapshot is not None and not snapshot.stale and bool(snapshot.areas)
+
+
+def area_has_device(snapshot: PanelSnapshot | None, area_id: int | None) -> bool:
+    """
+    Return True when this area gets its own device.
+
+    E2 Q2 (Architect default, pending Mitch's OK): every area the library
+    reports in snapshot.areas gets a device, with no zone-count filter. Change
+    this one function to filter areas differently.
+    """
+    if snapshot is None or area_id is None or area_id == 0:
+        return False
+    return area_id in snapshot.areas
+
+
+def area_device_name(area_id: int, area: AreaState | None) -> str:
+    """Return the area device name: the panel's area name or "Area N"."""
+    name = sanitize_name(area.name) if area is not None else None
+    return name or f"Area {area_id}"
+
+
+def zone_entity_name(zone_name: str, area_name: str | None) -> str:
+    """
+    Return the zone entity name shown under its device.
+
+    E2 Q3 (Architect default, pending Mitch's OK): keep the panel's zone name
+    verbatim; a leading area name is not stripped ("Garage Garage door").
+    Change this one function to strip it.
+    """
+    del area_name
+    return zone_name
+
+
+def area_device_info(
+    coordinator: Elke27DataUpdateCoordinator,
+    entry: Elke27ConfigEntry,
+    area_id: int,
+    area: AreaState | None,
+) -> DeviceInfo:
+    """
+    Build device info for an area device; entity registration creates it.
+
+    The panel device is registered once in async_setup_entry and its id kept on
+    the coordinator. Newer Home Assistant gets a ChildDeviceInfo (the area is a
+    logical part of the panel), else DeviceInfo with via_device_id. The pinned
+    Home Assistant has neither, so it gets the identifier form of via_device
+    (deprecated, removed in HA 2027.8, but the only option there).
+    """
+    key = entry_identity_key(coordinator, entry)
+    identifiers = {(DOMAIN, area_device_identifier(key, area_id))}
+    name = area_device_name(area_id, area)
+    panel_device_id = coordinator.panel_device_id
+    child_info = getattr(dr, "ChildDeviceInfo", None)
+    if child_info is not None:
+        return child_info(  # type: ignore[no-any-return]
+            identifiers=identifiers, name=name, parent_device_id=panel_device_id
+        )
+    if SUPPORTS_VIA_DEVICE_ID:
+        return DeviceInfo(  # type: ignore[typeddict-unknown-key]
+            identifiers=identifiers,
+            name=name,
+            model=AREA_DEVICE_MODEL,
+            via_device_id=panel_device_id,
+        )
+    return DeviceInfo(
+        identifiers=identifiers,
+        name=name,
+        model=AREA_DEVICE_MODEL,
+        via_device=(DOMAIN, key),
+    )
+
+
+def device_info_for_zone(
+    coordinator: Elke27DataUpdateCoordinator,
+    entry: Elke27ConfigEntry,
+    zone: ZoneState,
+) -> DeviceInfo:
+    """Return the zone's area device, or the panel device when it has none."""
+    snapshot = coordinator.data
+    area_id = zone.area_id
+    if (
+        snapshot is not None
+        and area_id is not None
+        and area_has_device(snapshot, area_id)
+    ):
+        return area_device_info(
+            coordinator, entry, area_id, snapshot.areas.get(area_id)
+        )
+    return device_info_for_entry(coordinator, entry)
+
+
 def entry_identity_key(
     coordinator: Elke27DataUpdateCoordinator,
     entry: Elke27ConfigEntry,
@@ -119,9 +240,15 @@ def unique_base(
     return entry_identity_key(coordinator, entry)
 
 
-def build_unique_id(base: str, domain: str, numeric_id: int | str) -> str:
-    """Build a stable unique ID in <mac>:<domain>:<id> format."""
-    return f"{base}:{domain}:{numeric_id}"
+def build_unique_id(base: str, numeric_id: int | str) -> str:
+    """
+    Build a stable unique ID in <base>:<id> format (0.2.0, ADR-0126 decision).
+
+    No platform segment: HA scopes unique IDs per entity platform, and each
+    platform here has one kind of entity. Device identifiers keep their own
+    `<key>:area:<N>` shape.
+    """
+    return f"{base}:{numeric_id}"
 
 
 def panel_display_name(
