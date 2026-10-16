@@ -47,7 +47,7 @@ jobs:
       # only and is out of the HA library contract. Fail if the integration uses it.
       - name: Block async_raw_request / enable_raw_passthrough
         run: |
-          if grep -rnE "async_raw_request|enable_raw_passthrough|_raw_passthrough" custom_components/; then
+          if grep -rnE "async_raw_request|_raw_passthrough" custom_components/; then
             echo "::error::The HA integration must not use the elke27 raw pass-through."
             exit 1
           fi
