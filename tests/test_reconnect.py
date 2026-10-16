@@ -106,7 +106,7 @@ async def test_start_while_stopping_does_nothing(hass: HomeAssistant) -> None:
 
 
 async def test_backoff_bounds_and_cap(hass: HomeAssistant, ir_mock: MagicMock) -> None:
-    """Base delay is min(300, 2**n), jitter scales it, the cap is 300 * 1.2."""
+    """Base delay is min(60, 2**n), jitter scales it, the cap is 60 * 1.2 (#79)."""
     h = _Harness(hass, [])
     # Ten transport failures, then success.
     h.connect.side_effect = [Elke27ConnectionError("down")] * 10 + [None]
@@ -114,9 +114,9 @@ async def test_backoff_bounds_and_cap(hass: HomeAssistant, ir_mock: MagicMock) -
         await _run(h)
     uniform.assert_called_with(0.8, 1.2)
     delays = [c.args[0] for c in ir_mock.sleep.await_args_list]
-    expected = [min(300, 2**n) * 1.2 for n in range(1, 11)]
+    expected = [min(60, 2**n) * 1.2 for n in range(1, 11)]
     assert delays == pytest.approx(expected)
-    assert max(delays) == pytest.approx(300 * 1.2)
+    assert max(delays) == pytest.approx(60 * 1.2)
     assert h.supervisor.attempts == 0
 
 
