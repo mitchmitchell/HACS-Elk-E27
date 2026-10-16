@@ -786,8 +786,10 @@ the action ran. The integration's own actions, `elke27.alarm_arm_automatic` and
 `elke27.zone_bypass`, do report an error when the panel is not connected.
 
 To trace a call that seemed to do nothing, look in the Home Assistant log. When the link
-drops, the integration logs one `WARNING` line, `Panel connection lost`, and Home Assistant
-logs that the referenced entities are not currently available. A disarm or other entity
+drops, the integration logs one `WARNING` line, `Panel connection lost`; that is the line to
+look for. Home Assistant *may* also log "Referenced entities … are missing or not currently
+available", but it does not always: in Home Assistant 2026.1.3, `entity_service_call`
+silently skips entities that are registered but unavailable. A disarm or other entity
 action sent during that window returns success (HTTP 200 from the REST API) without reaching
 the panel.
 
