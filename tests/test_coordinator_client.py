@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from datetime import UTC, datetime
 import importlib.util
@@ -82,9 +83,21 @@ class HubConnectTest(unittest.IsolatedAsyncioTestCase):
         client = _client()
         client.wait_ready.return_value = True
         link_keys = LinkKeys(tempkey_hex="00", linkkey_hex="11", linkhmac_hex="22")
-        hub = make_coordinator(MagicMock(), link_keys_json=link_keys.to_json())
-        with patch.object(hub_module, "Elke27Client", return_value=client):
+        hass = MagicMock()
+        # Run background work as plain loop tasks, as HA would.
+        hass.async_create_background_task.side_effect = lambda coro, _name: (
+            asyncio.get_running_loop().create_task(coro)
+        )
+        hub = make_coordinator(hass, link_keys_json=link_keys.to_json())
+        # The panel MAC check is stubbed (autospec; its behaviour is covered in
+        # test_panel_mac.py), so this test only checks that connect starts it.
+        with (
+            patch.object(hub_module, "Elke27Client", return_value=client),
+            patch.object(hub_module, "async_verify_panel_mac", autospec=True) as verify,
+        ):
             await hub.async_connect()
+            await asyncio.sleep(0)
+        verify.assert_awaited_once_with(hass, hub.config_entry)
 
         client.set_client_identity.assert_called_once_with(
             {"mn": "222", "sn": "123456789012"}

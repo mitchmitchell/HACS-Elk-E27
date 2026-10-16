@@ -914,6 +914,13 @@ whole °F, so setpoints you set in °C are rounded.
 > Entries left over from 0.1.x fail setup with:
 > "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
 
+> [!IMPORTANT]
+> **Upgrade step: delete and re-add the integration.**
+> Home Assistant will **not** show a Repairs notice for this upgrade. After updating, the old entry
+> simply fails setup with: "This entry was created before the client ID existed, or its client ID is
+> invalid. Delete the integration and add it again." To upgrade, delete the Elk E27 Alarm Engine
+> Integration and add it again (see the upgrade steps below).
+
 1. Make a Home Assistant backup.
 2. Note the entity IDs your automations, dashboards and scripts use.
 3. Delete the integration: Settings → Devices & services → Elk E27 Alarm Engine Integration → ⋮ → Delete.
