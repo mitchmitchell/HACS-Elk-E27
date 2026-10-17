@@ -844,6 +844,23 @@ async def test_reconnect_listener_removed_on_unload(
     assert hub.reconnect.task is None or hub.reconnect.task.done()
 
 
+async def test_link_drop_logs_warning_once(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    fast_backoff: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A link drop is logged once at WARNING, so silent skips can be traced (#80)."""
+    await _setup(hass, mock_config_entry)
+    _script_connect(mock_client, [Elke27ConnectionError("down")] * 2)
+    await _disconnect(mock_client)
+    await _disconnect(mock_client)
+    lost = [r for r in caplog.records if r.getMessage() == "Panel connection lost"]
+    assert [r.levelno for r in lost] == [logging.WARNING]
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
 async def test_unload_does_not_log_connection_lost(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,

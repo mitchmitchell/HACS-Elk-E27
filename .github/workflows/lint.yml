@@ -35,3 +35,19 @@ jobs:
 
       - name: Mypy
         run: python3 -m mypy custom_components/elke27
+
+  no-raw-passthrough:
+    name: "No raw pass-through"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # elke27's raw API pass-through (decision 34) is for external test tools
+      # only and is out of the HA library contract. Fail if the integration uses it.
+      - name: Block async_raw_request / enable_raw_passthrough
+        run: |
+          if grep -rnE "async_raw_request|_raw_passthrough" custom_components/; then
+            echo "::error::The HA integration must not use the elke27 raw pass-through."
+            exit 1
+          fi

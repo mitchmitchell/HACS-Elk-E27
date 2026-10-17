@@ -1219,7 +1219,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Log the panel as unavailable once."""
         if self._unavailable_logged:
             return
-        _LOGGER.info("Panel connection lost")
+        _LOGGER.warning("Panel connection lost")
         self._unavailable_logged = True
 
     def start_reauth_once(self) -> None:

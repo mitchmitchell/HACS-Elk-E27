@@ -30,7 +30,9 @@ rules:
   docs-installation-parameters: todo
   entity-unavailable: done
   integration-owner: done
-  log-when-unavailable: done
+  log-when-unavailable:
+    status: done
+    comment: "Logged once per drop at WARNING (not info) so link drops show at HA's default log level; see #80."
   parallel-updates: done
   reauthentication-flow: done
   test-coverage: todo
