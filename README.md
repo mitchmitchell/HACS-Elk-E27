@@ -60,10 +60,12 @@ through the [`elke27`](https://github.com/mitchmitchell/elke27) Python library
 
 ## Features
 
-The integration creates one **device** for the panel, showing the panel's name, model, firmware
-version, serial number and MAC address. All entities belong to that device. Entities are named
-after the names programmed into the panel. If an item has no name, a fallback such as `Area 1`
-or `Zone 12` is used.
+The integration creates a **panel device**, showing the panel's name, model, firmware
+version, serial number and MAC address, and (since 0.2.0) one **area device** per area, linked
+to the panel device. Each area's alarm control panel and its zones belong to that area's
+device. Zones with no area and panel-wide entities (outputs, lights, locks, thermostats, panel
+status) belong to the panel device. Entities are named after the names programmed into the
+panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Platform | One entity per | What you can do |
 |---|---|---|
