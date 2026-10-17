@@ -925,3 +925,20 @@ def test_all_zero_alarm_code_is_validation_error(code: str) -> None:
 def test_code_with_zeros_but_not_all_zero_is_kept() -> None:
     """Leading or embedded zeros alone are not refused here."""
     assert _normalize_code("1000") == "1000"
+
+
+@pytest.mark.parametrize(
+    ("code", "key"),
+    [
+        ("\u00b2", "code_not_numeric"),
+        ("\uff11\uff12\uff13\uff14", "code_not_numeric"),
+        ("0" * 5000, "code_all_zero"),
+    ],
+)
+def test_non_ascii_or_huge_zero_alarm_code_is_validation_error(
+    code: str, key: str
+) -> None:
+    """Non-ASCII digits and a 5,000-zero code are clean 400 input errors."""
+    with pytest.raises(ServiceValidationError) as err:
+        _normalize_code(code)
+    assert err.value.translation_key == key

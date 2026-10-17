@@ -297,6 +297,14 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
                     {"entity_id": ["binary_sensor.x"], "code": code}
                 )
 
+    def test_schema_rejects_non_ascii_and_huge_zero_codes(self) -> None:
+        """Non-ASCII digits and a 5,000-zero code are refused cleanly (#94 review)."""
+        for code in ["\u00b2", "\uff11\uff12\uff13\uff14", "0" * 5000]:
+            with self.assertRaises(integration.vol.Invalid):
+                integration.SERVICE_ZONE_BYPASS_SCHEMA(
+                    {"entity_id": ["binary_sensor.x"], "code": code}
+                )
+
     def test_schema_rejects_non_numeric_code(self) -> None:
         """The code must be numeric."""
         with self.assertRaises(integration.vol.Invalid):
