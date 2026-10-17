@@ -46,14 +46,13 @@ if _HAS_DEPS:
         device_info_for_entry,
         panel_display_name,
     )
-    from custom_components.elke27.light import Elke27Light, _level_from_kwargs
+    from custom_components.elke27.light import Elke27Light
     from homeassistant.components.alarm_control_panel import (
         AlarmControlPanelEntity,
         AlarmControlPanelEntityFeature,
         AlarmControlPanelState,
     )
     from homeassistant.components.binary_sensor import BinarySensorDeviceClass
-    from homeassistant.components.light import ATTR_BRIGHTNESS
     from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, format_mac
 
 
@@ -322,18 +321,31 @@ class LightEntityTest(unittest.TestCase):
         over = self._light(LightState(light_id=1, state=True, level=150))
         assert over.brightness == 255
 
-    def test_level_from_ha_brightness(self) -> None:
-        """HA brightness maps to panel level 0-100; on with no brightness is 100."""
+    def _sent_level(self, **kwargs: Any) -> int:
+        """Turn the light on through the entity; return the level it sent."""
+        hub = _hub()
+        hub.async_set_light = AsyncMock(return_value=True)
+        snapshot = _snapshot(lights={1: LightState(light_id=1, state=False, level=0)})
+        light = Elke27Light(_bound(hub, snapshot), _entry(), 1, snapshot.lights[1])
+        asyncio.run(light.async_turn_on(**kwargs))
+        hub.async_set_light.assert_awaited_once()
+        assert hub.async_set_light.await_args.kwargs["state"] is True
+        return hub.async_set_light.await_args.kwargs["level"]
+
+    def test_turn_on_sends_panel_level(self) -> None:
+        """HA brightness maps to panel level 0-100 (#91)."""
         for brightness, level in ((255, 100), (128, 50), (26, 10), (1, 1)):
-            assert _level_from_kwargs({ATTR_BRIGHTNESS: brightness}) == level
-        assert _level_from_kwargs({}) == 100
+            assert self._sent_level(brightness=brightness) == level, brightness
+
+    def test_turn_on_without_brightness_sends_full(self) -> None:
+        """On with no brightness sends full, level 100 (#91)."""
+        assert self._sent_level() == 100
 
     def test_every_level_round_trips(self) -> None:
-        """Level -> brightness -> level is the identity for every panel level."""
+        """Panel level -> HA brightness -> turn_on sends the same level, for 1-100."""
         for level in range(1, 101):
             light = self._light(LightState(light_id=1, state=True, level=level))
-            brightness = light.brightness
-            assert _level_from_kwargs({ATTR_BRIGHTNESS: brightness}) == level
+            assert self._sent_level(brightness=light.brightness) == level, level
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
