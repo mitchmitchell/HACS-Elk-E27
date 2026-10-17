@@ -1242,13 +1242,18 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """
         End this drop when the client recovers on its own (raw READY, #97).
 
-        Clears the per-drop flag so the next drop pushes again, and pushes the
-        snapshot so entities that were written 'unavailable' come back.
+        Does what a supervisor reconnect does: logs "Panel connection
+        restored" once (so the next drop warns again), clears the per-drop
+        flag, pushes the snapshot so entities come back, and refreshes the
+        CSM for anything missed while the link was down.
         """
-        if not self._unavailable_pushed:
+        if not (self._unavailable_pushed or self._unavailable_logged):
             return
+        if self._unavailable_logged:
+            _LOGGER.info("Panel connection restored")
+            self._unavailable_logged = False
         self._unavailable_pushed = False
-        self._set_snapshot(self.get_snapshot())
+        self._handle_reconnected()
 
     @callback
     def _schedule_panel_mac_check(self) -> None:
