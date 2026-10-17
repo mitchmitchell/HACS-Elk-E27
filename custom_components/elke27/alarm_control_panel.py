@@ -258,4 +258,10 @@ def _normalize_code(code: str | None) -> str | None:
         raise ServiceValidationError(
             translation_domain=DOMAIN, translation_key="code_not_numeric"
         )
+    if int(normalized) == 0:
+        # The panel never accepts an all-zero code; elke27 refuses it before
+        # sending. Report it as input error (HTTP 400), not a server error (#90).
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="code_all_zero"
+        )
     return normalized

@@ -92,10 +92,13 @@ ARM_NOT_SENT_REASON = "the arm command was not sent (the panel is not connected)
 
 
 def _numeric_service_code(value: str) -> str:
-    """Validate a service user code is numeric."""
+    """Validate a service user code is numeric and not all zeros."""
     code = cv.string(value).strip()
     if not code.isdigit():
         msg = "Code must be numeric"
+        raise vol.Invalid(msg)
+    if int(code) == 0:
+        msg = "Code must not be all zeros"
         raise vol.Invalid(msg)
     return code
 

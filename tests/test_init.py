@@ -912,3 +912,16 @@ def test_non_numeric_alarm_code_is_validation_error(code: str) -> None:
 def test_numeric_alarm_code_is_stripped() -> None:
     """Surrounding whitespace is removed from a numeric code."""
     assert _normalize_code(" 1234 ") == "1234"
+
+
+@pytest.mark.parametrize("code", ["0", "0000", " 000000 "])
+def test_all_zero_alarm_code_is_validation_error(code: str) -> None:
+    """An all-zero code is a 400 input error with its own message, not a 500 (#90)."""
+    with pytest.raises(ServiceValidationError) as err:
+        _normalize_code(code)
+    assert err.value.translation_key == "code_all_zero"
+
+
+def test_code_with_zeros_but_not_all_zero_is_kept() -> None:
+    """Leading or embedded zeros alone are not refused here."""
+    assert _normalize_code("1000") == "1000"

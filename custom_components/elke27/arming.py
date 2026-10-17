@@ -289,11 +289,15 @@ def zone_bypass_label(zone: ZoneState) -> str:
 
 
 def _validated_pin(pin: str) -> str:
-    """Return the user code as a digit string, or raise if it is not numeric."""
+    """Return the user code as a digit string; raise if not numeric or all zeros."""
     value = str(pin).strip()
     if not value.isdigit():
         raise ServiceValidationError(
             translation_domain=DOMAIN, translation_key="code_not_numeric"
+        )
+    if int(value) == 0:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="code_all_zero"
         )
     return value
 
