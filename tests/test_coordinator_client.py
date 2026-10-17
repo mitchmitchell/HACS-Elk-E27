@@ -218,7 +218,7 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
         await hub.async_set_light(2, state=False, level=80)
         sets = [item for item in sent if item[0] == "light_set_status"]
         assert sets == [
-            ("light_set_status", {"light_id": 2, "status": "ON", "level": 99}),
+            ("light_set_status", {"light_id": 2, "status": "ON", "level": 100}),
             ("light_set_status", {"light_id": 2, "status": "ON", "level": 50}),
             ("light_set_status", {"light_id": 2, "status": "OFF", "level": 0}),
         ]

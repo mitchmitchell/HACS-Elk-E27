@@ -568,7 +568,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if not state:
             level = 0
         elif level is None:
-            level = 99
+            level = 100
         ok = await self._async_execute(
             "light_set_status",
             light_id=light_id,
