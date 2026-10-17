@@ -1219,6 +1219,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self.hass.loop.call_soon_threadsafe(self._reconnect.start)
         elif connected is True:
             self.hass.loop.call_soon_threadsafe(self._reconnect.cancel)
+            self.hass.loop.call_soon_threadsafe(self._push_ready)
 
     @callback
     def _push_unavailable(self, epoch: int | None = None) -> None:
@@ -1234,6 +1235,19 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if self._unavailable_pushed or (epoch is not None and self.is_ready):
             return
         self._unavailable_pushed = True
+        self._set_snapshot(self.get_snapshot())
+
+    @callback
+    def _push_ready(self) -> None:
+        """
+        End this drop when the client recovers on its own (raw READY, #97).
+
+        Clears the per-drop flag so the next drop pushes again, and pushes the
+        snapshot so entities that were written 'unavailable' come back.
+        """
+        if not self._unavailable_pushed:
+            return
+        self._unavailable_pushed = False
         self._set_snapshot(self.get_snapshot())
 
     @callback
