@@ -136,9 +136,9 @@ or `Zone 12` is used.
 
 ### Lights
 
-- On/off with brightness. The panel's 0–99 level is mapped to Home Assistant's brightness
-  scale.
-- Turning a light on without a brightness value sets it to full (level 99).
+- On/off with brightness. The panel's 0–100 level is mapped to Home Assistant's 0–255
+  brightness scale (for example 50 ↔ 128).
+- Turning a light on without a brightness value sets it to full (level 100).
 - After a change, the integration asks the panel for the light's status right away and
   again about 3 seconds later, because some (Z-Wave) dimmers report their new state late.
   A short delay before the state updates is normal.

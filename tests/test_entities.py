@@ -46,13 +46,14 @@ if _HAS_DEPS:
         device_info_for_entry,
         panel_display_name,
     )
-    from custom_components.elke27.light import Elke27Light
+    from custom_components.elke27.light import Elke27Light, _level_from_kwargs
     from homeassistant.components.alarm_control_panel import (
         AlarmControlPanelEntity,
         AlarmControlPanelEntityFeature,
         AlarmControlPanelState,
     )
     from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+    from homeassistant.components.light import ATTR_BRIGHTNESS
     from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, format_mac
 
 
@@ -312,6 +313,27 @@ class LightEntityTest(unittest.TestCase):
         assert self._light(LightState(light_id=1, level=30)).is_on is True
         assert self._light(LightState(light_id=1, level=0)).is_on is False
         assert self._light(LightState(light_id=1)).is_on is None
+
+    def test_brightness_from_panel_level(self) -> None:
+        """Panel level 0-100 maps to HA brightness 0-255 (#91: full is 100)."""
+        for level, brightness in ((100, 255), (50, 128), (10, 26), (1, 3), (0, 0)):
+            light = self._light(LightState(light_id=1, state=True, level=level))
+            assert light.brightness == brightness, level
+        over = self._light(LightState(light_id=1, state=True, level=150))
+        assert over.brightness == 255
+
+    def test_level_from_ha_brightness(self) -> None:
+        """HA brightness maps to panel level 0-100; on with no brightness is 100."""
+        for brightness, level in ((255, 100), (128, 50), (26, 10), (1, 1)):
+            assert _level_from_kwargs({ATTR_BRIGHTNESS: brightness}) == level
+        assert _level_from_kwargs({}) == 100
+
+    def test_every_level_round_trips(self) -> None:
+        """Level -> brightness -> level is the identity for every panel level."""
+        for level in range(1, 101):
+            light = self._light(LightState(light_id=1, state=True, level=level))
+            brightness = light.brightness
+            assert _level_from_kwargs({ATTR_BRIGHTNESS: brightness}) == level
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
