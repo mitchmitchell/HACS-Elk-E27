@@ -145,6 +145,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._disarm_clear: dict[int, asyncio.Event] = {}
         self._stopping = False
         self._unavailable_logged = False
+        # True once this drop has pushed the unavailable state to entities;
+        # cleared on the next successful connect (#97).
+        self._unavailable_pushed = False
         self._typed_callbacks: dict[
             Callable[[Any], None], Callable[[], object] | None
         ] = {}
@@ -377,6 +380,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 )
                 self._resubscribe_typed_callbacks()
                 self._schedule_panel_mac_check()
+                self._unavailable_pushed = False
                 if self._unavailable_logged:
                     _LOGGER.info("Panel connection restored")
                     self._unavailable_logged = False
@@ -1206,9 +1210,31 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._connection_epoch += 1
             _LOGGER.debug("Panel disconnect event received; scheduling reconnect")
             self._log_unavailable()
+            # Entities already report unavailable (client not ready), but only
+            # a listener update makes HA write that state (#97). Queued before
+            # the reconnect so it runs before the reconnect's own epoch bump.
+            self.hass.loop.call_soon_threadsafe(
+                self._push_unavailable, self._connection_epoch
+            )
             self.hass.loop.call_soon_threadsafe(self._reconnect.start)
         elif connected is True:
             self.hass.loop.call_soon_threadsafe(self._reconnect.cancel)
+
+    @callback
+    def _push_unavailable(self, epoch: int | None = None) -> None:
+        """
+        Push the snapshot once per drop so entities write 'unavailable' (#97).
+
+        A disconnect arrives on two paths (the link listener and the typed
+        ConnectionStateChanged); together they give one listener update. A
+        push scheduled before a newer disconnect or a reconnect is dropped.
+        """
+        if epoch is not None and epoch != self._connection_epoch:
+            return
+        if self._unavailable_pushed or (epoch is not None and self.is_ready):
+            return
+        self._unavailable_pushed = True
+        self._set_snapshot(self.get_snapshot())
 
     @callback
     def _schedule_panel_mac_check(self) -> None:
@@ -1296,13 +1322,14 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             )
         if isinstance(event, ConnectionStateChanged):
             if event.connected:
+                self._unavailable_pushed = False
                 self._schedule_refresh_after_connect()
             else:
                 self._connection_epoch += 1
-                # Push the snapshot (one listener update): every entity
-                # re-reads is_ready and goes unavailable together, instead of
-                # showing stale state until the next panel event.
-                self._set_snapshot(self.get_snapshot())
+                # Push the snapshot (one listener update per drop, shared with
+                # the link listener): every entity re-reads is_ready and goes
+                # unavailable together, instead of showing stale state.
+                self._push_unavailable()
             return
         if isinstance(event, CsmSnapshotUpdated):
             self._set_snapshot(self.get_snapshot())
