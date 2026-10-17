@@ -313,6 +313,40 @@ class LightEntityTest(unittest.TestCase):
         assert self._light(LightState(light_id=1, level=0)).is_on is False
         assert self._light(LightState(light_id=1)).is_on is None
 
+    def test_brightness_from_panel_level(self) -> None:
+        """Panel level 0-100 maps to HA brightness 0-255 (#91: full is 100)."""
+        for level, brightness in ((100, 255), (50, 128), (10, 26), (1, 3), (0, 0)):
+            light = self._light(LightState(light_id=1, state=True, level=level))
+            assert light.brightness == brightness, level
+        over = self._light(LightState(light_id=1, state=True, level=150))
+        assert over.brightness == 255
+
+    def _sent_level(self, **kwargs: Any) -> int:
+        """Turn the light on through the entity; return the level it sent."""
+        hub = _hub()
+        hub.async_set_light = AsyncMock(return_value=True)
+        snapshot = _snapshot(lights={1: LightState(light_id=1, state=False, level=0)})
+        light = Elke27Light(_bound(hub, snapshot), _entry(), 1, snapshot.lights[1])
+        asyncio.run(light.async_turn_on(**kwargs))
+        hub.async_set_light.assert_awaited_once()
+        assert hub.async_set_light.await_args.kwargs["state"] is True
+        return hub.async_set_light.await_args.kwargs["level"]
+
+    def test_turn_on_sends_panel_level(self) -> None:
+        """HA brightness maps to panel level 0-100 (#91)."""
+        for brightness, level in ((255, 100), (128, 50), (26, 10), (1, 1)):
+            assert self._sent_level(brightness=brightness) == level, brightness
+
+    def test_turn_on_without_brightness_sends_full(self) -> None:
+        """On with no brightness sends full, level 100 (#91)."""
+        assert self._sent_level() == 100
+
+    def test_every_level_round_trips(self) -> None:
+        """Panel level -> HA brightness -> turn_on sends the same level, for 1-100."""
+        for level in range(1, 101):
+            light = self._light(LightState(light_id=1, state=True, level=level))
+            assert self._sent_level(brightness=light.brightness) == level, level
+
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
 class ClimateEntityTest(unittest.TestCase):
