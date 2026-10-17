@@ -50,6 +50,9 @@ from tests.conftest import (
     PANEL_SERIAL_2,
     PORT,
     ClientHarness,
+    FakeClient,
+    Setup,
+    command_result,
     panel_snapshot,
 )
 
@@ -914,31 +917,48 @@ def test_numeric_alarm_code_is_stripped() -> None:
     assert _normalize_code(" 1234 ") == "1234"
 
 
-@pytest.mark.parametrize("code", ["0", "0000", " 000000 "])
-def test_all_zero_alarm_code_is_validation_error(code: str) -> None:
-    """An all-zero code is a 400 input error with its own message, not a 500 (#90)."""
-    with pytest.raises(ServiceValidationError) as err:
-        _normalize_code(code)
-    assert err.value.translation_key == "code_all_zero"
+ALARM = "alarm_control_panel.house"
 
 
-def test_code_with_zeros_but_not_all_zero_is_kept() -> None:
-    """Leading or embedded zeros alone are not refused here."""
-    assert _normalize_code("1000") == "1000"
+async def _disarm(hass: HomeAssistant, code: str) -> None:
+    await hass.services.async_call(
+        "alarm_control_panel",
+        "alarm_disarm",
+        {"entity_id": ALARM, "code": code},
+        blocking=True,
+    )
 
 
 @pytest.mark.parametrize(
     ("code", "key"),
     [
+        ("0", "code_all_zero"),
+        ("0000", "code_all_zero"),
+        (" 000000 ", "code_all_zero"),
+        ("0" * 5000, "code_all_zero"),
         ("\u00b2", "code_not_numeric"),
         ("\uff11\uff12\uff13\uff14", "code_not_numeric"),
-        ("0" * 5000, "code_all_zero"),
     ],
 )
-def test_non_ascii_or_huge_zero_alarm_code_is_validation_error(
-    code: str, key: str
+async def test_disarm_service_refuses_invalid_code_before_sending(
+    hass: HomeAssistant, setup: Setup, code: str, key: str
 ) -> None:
-    """Non-ASCII digits and a 5,000-zero code are clean 400 input errors."""
+    """An all-zero or non-ASCII code is a 400 validation error, never sent (#90)."""
+    client = FakeClient(command_result(refresh=True))
+    await setup(client)
     with pytest.raises(ServiceValidationError) as err:
-        _normalize_code(code)
+        await _disarm(hass, code)
     assert err.value.translation_key == key
+    assert client.keys({"disarm"}) == []
+
+
+async def test_disarm_service_sends_code_with_zeros_but_not_all_zero(
+    hass: HomeAssistant, setup: Setup
+) -> None:
+    """Leading or embedded zeros alone are not refused: "1000" reaches the client."""
+    client = FakeClient(command_result(refresh=True))
+    await setup(client)
+    await _disarm(hass, "1000")
+    assert [(key, params.get("pin")) for key, params in client.calls] == [
+        ("disarm", "1000")
+    ]
