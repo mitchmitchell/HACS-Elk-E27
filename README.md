@@ -140,7 +140,9 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 - On/off with brightness. The panel's 0–100 level is mapped to Home Assistant's 0–255
   brightness scale (for example 50 ↔ 128).
-- Turning a light on without a brightness value sets it to full (level 100).
+- Turning a light on without a brightness value sets it to full. Full is sent as level
+  99, because the panel treats a command of 100 as "on at the previous level"; the panel
+  then reports the light at 100, shown as brightness 255.
 - After a change, the integration asks the panel for the light's status right away and
   again about 3 seconds later, because some (Z-Wave) dimmers report their new state late.
   A short delay before the state updates is normal.

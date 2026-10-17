@@ -32,8 +32,11 @@ _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
 # Panel light level is 0-100 (Dealer API light.set_status/get_status; elke27
-# validates 0..100). Full brightness is level 100.
+# validates 0..100). The panel reports full as 100, but a *command* of 100
+# means "on at the previous level" (TEST panel, #99): full is commanded as 99,
+# which the panel then reports back as 100.
 _ELK_MAX_DIM_LEVEL = 100
+_ELK_MAX_COMMAND_LEVEL = 99
 
 
 async def async_setup_entry(
@@ -130,7 +133,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
                 raise_if_not_sent(sent=sent, coordinator=self.coordinator)
             else:
                 sent = await self.coordinator.async_set_light(
-                    self._light_id, state=True, level=_ELK_MAX_DIM_LEVEL
+                    self._light_id, state=True, level=_ELK_MAX_COMMAND_LEVEL
                 )
                 raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
@@ -172,18 +175,25 @@ def _brightness_from_level(level: int) -> int:
 
 
 def _level_from_brightness(brightness: int) -> int:
-    """Map Home Assistant brightness (0-255) to an Elk level (0-100), half up."""
+    """
+    Map Home Assistant brightness (0-255) to an Elk command level (0-99), half up.
+
+    The 0-100 scale is kept so levels 1-99 round-trip with
+    _brightness_from_level; only the top is capped at 99, because a command
+    of 100 means "previous level" to the panel (#99).
+    """
     bounded = max(0, min(255, brightness))
-    return (bounded * _ELK_MAX_DIM_LEVEL + 127) // 255
+    level = (bounded * _ELK_MAX_DIM_LEVEL + 127) // 255
+    return min(_ELK_MAX_COMMAND_LEVEL, level)
 
 
 def _level_from_kwargs(kwargs: dict[str, Any]) -> int:
-    """Map Home Assistant brightness kwargs to Elk level (0-100)."""
+    """Map Home Assistant brightness kwargs to an Elk command level (1-99)."""
     brightness = kwargs.get(ATTR_BRIGHTNESS)
     if isinstance(brightness, int):
         # Keep minimum 1 for ON requests with brightness set.
         return max(1, _level_from_brightness(brightness))
-    return _ELK_MAX_DIM_LEVEL
+    return _ELK_MAX_COMMAND_LEVEL
 
 
 def _get_light(snapshot: PanelSnapshot, light_id: int) -> LightState | None:
