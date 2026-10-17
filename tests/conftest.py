@@ -68,6 +68,18 @@ def auto_enable_custom_integrations(
     return
 
 
+def snapshot_with(snapshot: Any, **maps: Any) -> Any:
+    """Return `snapshot` with the given domain maps replaced (read-only views)."""
+    return dataclasses.replace(
+        snapshot, **{k: MappingProxyType(v) for k, v in maps.items()}
+    )
+
+
+def entity_ids(hass: HomeAssistant, domain: str) -> list[str]:
+    """Return the entity ids currently in the state machine for `domain`."""
+    return [s.entity_id for s in hass.states.async_all(domain)]
+
+
 def panel_snapshot() -> PanelSnapshot:
     """Return a small snapshot: one area with one closed zone."""
     return dataclasses.replace(

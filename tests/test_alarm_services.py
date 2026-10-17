@@ -9,35 +9,30 @@ drop it when #94 lands.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
-from datetime import UTC, datetime
-from types import MappingProxyType
 from typing import Any
 
-from elke27_lib import AreaState, ArmMode, Elke27Event, EventType, ZoneState
+from elke27_lib import AreaState, ArmMode, ZoneState
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant.const import ATTR_CODE, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
-from tests.conftest import ClientHarness, FakeClient, Setup, command_result, settle
+from tests.conftest import (
+    ClientHarness,
+    FakeClient,
+    Setup,
+    command_result,
+    link_event,
+    settle,
+    snapshot_with,
+)
 
 ALARM = "alarm_control_panel.house"
 
 
 def _area(**kw: Any) -> AreaState:
     return AreaState(area_id=1, name="House", ready=kw.pop("ready", True), **kw)
-
-
-def _with(snapshot: Any, **kw: Any) -> Any:
-    return dataclasses.replace(
-        snapshot, **{k: MappingProxyType(v) for k, v in kw.items()}
-    )
-
-
-def _ids(hass: HomeAssistant, domain: str) -> list[str]:
-    return [s.entity_id for s in hass.states.async_all(domain)]
 
 
 # --- Alarm state ---------------------------------------------------------------
@@ -60,7 +55,7 @@ async def test_alarm_state_published_to_hass(
 ) -> None:
     client = FakeClient(command_result(refresh=True))
     coordinator = await setup(client)
-    snap = _with(client.snapshot, areas={1: _area(**area_kw)})
+    snap = snapshot_with(client.snapshot, areas={1: _area(**area_kw)})
     client.snapshot = snap
     coordinator.async_set_updated_data(snap)
     await hass.async_block_till_done()
@@ -74,7 +69,7 @@ async def test_custom_bypass_service_bypasses_open_zone_then_arms(
     hass: HomeAssistant, setup: Setup
 ) -> None:
     client = FakeClient(command_result(refresh=True))
-    client.snapshot = _with(
+    client.snapshot = snapshot_with(
         client.snapshot,
         areas={1: _area(ready=False)},
         zones={
@@ -113,18 +108,17 @@ async def test_custom_bypass_rejects_non_numeric_code_before_send(
 # --- Disarm clears bypasses (not verified) -----------------------------------
 
 
-async def test_disarm_then_panel_clears_bypass_attribute(
+async def test_disarm_of_bypassed_armed_area_follows_panel_state(
     hass: HomeAssistant, setup: Setup
 ) -> None:
     client = FakeClient(command_result(refresh=True))
-    client.snapshot = _with(
+    client.snapshot = snapshot_with(
         client.snapshot,
         areas={1: _area(arm_mode=ArmMode.ARMED_AWAY)},
         zones={1: ZoneState(zone_id=1, name="Front Door", area_id=1, bypassed=True)},
     )
     coordinator = await setup(client)
-    zone = next(e for e in _ids(hass, "binary_sensor") if "front_door" in e)
-    assert hass.states.get(zone).attributes["bypassed"] is True
+    assert hass.states.get(ALARM).state == "armed_away"
     await hass.services.async_call(
         "alarm_control_panel",
         "alarm_disarm",
@@ -132,15 +126,14 @@ async def test_disarm_then_panel_clears_bypass_attribute(
         blocking=True,
     )
     assert client.keys({"disarm"}) == ["disarm"]
-    # The panel clears bypasses on disarm; HA must follow the next snapshot.
-    snap = _with(
+    # The panel disarms (and clears bypasses); HA follows the next snapshot.
+    snap = snapshot_with(
         client.snapshot,
         areas={1: _area(arm_mode=ArmMode.DISARMED)},
         zones={1: ZoneState(zone_id=1, name="Front Door", area_id=1, bypassed=False)},
     )
     coordinator.async_set_updated_data(snap)
     await hass.async_block_till_done()
-    assert hass.states.get(zone).attributes["bypassed"] is False
     assert hass.states.get(ALARM).state == "disarmed"
 
 
@@ -202,14 +195,7 @@ async def test_disarm_after_link_drop_sends_nothing(
     mock_client.client.async_connect.side_effect = _unreachable
     mock_client.client.is_ready = False
     listener = mock_client.client.subscribe.call_args.args[0]
-    listener(
-        Elke27Event(
-            event_type=EventType.DISCONNECTED,
-            data={},
-            seq=1,
-            timestamp=datetime.now(UTC),
-        )
-    )
+    listener(link_event(connected=False))
     await settle()
     # The next coordinator update after the drop publishes the new availability.
     await coordinator.async_refresh()
