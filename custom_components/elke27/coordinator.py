@@ -577,9 +577,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         )
         if ok:
             # The set_status ack may not carry the new state (Z-Wave devices
-            # report it later), so ask the panel for the light's status now and
-            # once more after a short delay.
-            await self._async_refresh_light(light_id)
+            # report it later). Re-read only after a short delay: an immediate
+            # light_get_status can return level 0 before the panel has applied
+            # the change, which HA shows as a brief false "off" (#89). The panel's
+            # status broadcast usually updates the light before the re-read.
             self._create_background_task(
                 self._async_refresh_light_later(light_id),
                 f"elke27 light {light_id} status refresh",

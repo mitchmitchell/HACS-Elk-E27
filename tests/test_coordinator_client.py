@@ -1,4 +1,4 @@
-# ruff: noqa: S101, PT027, SLF001, PLR2004
+# ruff: noqa: S101, PT027, SLF001
 """Tests for Elke27 hub use of the elke27 0.3.8 client API."""
 
 from __future__ import annotations
@@ -225,20 +225,39 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
         for task in hub.background_tasks:
             task.close()
 
-    async def test_light_set_requests_status_now_and_later(self) -> None:
-        """A light change is followed by light_get_status, now and after a delay."""
+    async def test_light_set_requests_status_only_after_a_delay(self) -> None:
+        """A light change is followed by one delayed light_get_status only (#89)."""
         sent: list[tuple[str, dict[str, Any]]] = []
         hub = _hub(_executing_client(sent))
         with patch.object(hub_module, "LIGHT_REFRESH_DELAY", 0):
             assert await hub.async_set_light(3, state=True, level=50)
             assert sent == [
                 ("light_set_status", {"light_id": 3, "status": "ON", "level": 50}),
-                ("light_get_status", {"light_id": 3}),
             ]
             assert len(hub.background_tasks) == 1
             await hub.background_tasks[0]
+        assert sent == [
+            ("light_set_status", {"light_id": 3, "status": "ON", "level": 50}),
+            ("light_get_status", {"light_id": 3}),
+        ]
+
+    async def test_light_set_waits_before_rereading(self) -> None:
+        """The re-read waits LIGHT_REFRESH_DELAY, so no early level-0 reply is read."""
+        sent: list[tuple[str, dict[str, Any]]] = []
+        hub = _hub(_executing_client(sent))
+        sleeps: list[float] = []
+
+        async def _sleep(delay: float) -> None:
+            sleeps.append(delay)
+            assert sent == [
+                ("light_set_status", {"light_id": 3, "status": "ON", "level": 10}),
+            ]
+
+        with patch.object(hub_module.asyncio, "sleep", _sleep):
+            assert await hub.async_set_light(3, state=True, level=10)
+            await hub.background_tasks[0]
+        assert sleeps == [hub_module.LIGHT_REFRESH_DELAY]
         assert sent[-1] == ("light_get_status", {"light_id": 3})
-        assert len(sent) == 3
 
     async def test_light_status_refresh_failure_is_ignored(self) -> None:
         """A failing status refresh doesn't fail the light command."""
@@ -253,11 +272,21 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
 
         client.async_execute.side_effect = _execute
         hub = _hub(client)
-        assert await hub.async_set_light(3, state=False)
+        with patch.object(hub_module, "LIGHT_REFRESH_DELAY", 0):
+            assert await hub.async_set_light(3, state=False)
+            assert calls == ["light_set_status"]
+            await hub.background_tasks[0]
         assert calls == ["light_set_status", "light_get_status"]
-        hub._stopping = True
-        await hub.background_tasks[0]
-        assert calls == ["light_set_status", "light_get_status"]
+
+    async def test_light_reread_skipped_when_stopping(self) -> None:
+        """No delayed re-read once the hub is stopping."""
+        sent: list[tuple[str, dict[str, Any]]] = []
+        hub = _hub(_executing_client(sent))
+        with patch.object(hub_module, "LIGHT_REFRESH_DELAY", 0):
+            assert await hub.async_set_light(3, state=False)
+            hub._stopping = True
+            await hub.background_tasks[0]
+        assert [c for c, _ in sent] == ["light_set_status"]
 
     async def test_failed_light_set_does_not_refresh(self) -> None:
         """No status refresh when the set command fails."""
