@@ -31,7 +31,9 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
-_ELK_MAX_DIM_LEVEL = 99
+# Panel light level is 0-100 (Dealer API light.set_status/get_status; elke27
+# validates 0..100). Full brightness is level 100.
+_ELK_MAX_DIM_LEVEL = 100
 
 
 async def async_setup_entry(
@@ -115,8 +117,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
             return None
         # elke27_lib has no py.typed yet; narrow Any snapshot fields until typed.
         level_int = int(level) if not isinstance(level, int) else level
-        bounded = max(0, min(_ELK_MAX_DIM_LEVEL, level_int))
-        return round(bounded * 255 / _ELK_MAX_DIM_LEVEL)
+        return _brightness_from_level(level_int)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on if supported by the client."""
@@ -164,13 +165,24 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         _LOGGER.debug("Light %s missing from snapshot", self._light_id)
 
 
+def _brightness_from_level(level: int) -> int:
+    """Map an Elk level (0-100) to Home Assistant brightness (0-255), half up."""
+    bounded = max(0, min(_ELK_MAX_DIM_LEVEL, level))
+    return (bounded * 255 + _ELK_MAX_DIM_LEVEL // 2) // _ELK_MAX_DIM_LEVEL
+
+
+def _level_from_brightness(brightness: int) -> int:
+    """Map Home Assistant brightness (0-255) to an Elk level (0-100), half up."""
+    bounded = max(0, min(255, brightness))
+    return (bounded * _ELK_MAX_DIM_LEVEL + 127) // 255
+
+
 def _level_from_kwargs(kwargs: dict[str, Any]) -> int:
     """Map Home Assistant brightness kwargs to Elk level (0-100)."""
     brightness = kwargs.get(ATTR_BRIGHTNESS)
     if isinstance(brightness, int):
-        bounded = max(0, min(255, brightness))
         # Keep minimum 1 for ON requests with brightness set.
-        return max(1, round(bounded * _ELK_MAX_DIM_LEVEL / 255))
+        return max(1, _level_from_brightness(brightness))
     return _ELK_MAX_DIM_LEVEL
 
 
