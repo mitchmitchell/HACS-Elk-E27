@@ -132,7 +132,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._host: str = entry.data[CONF_HOST]
         self._port: int = entry.data[CONF_PORT]
         self._link_keys_json: dict[str, str] = entry.data[CONF_LINK_KEYS_JSON]
-        self._integration_id: str = entry.data.get(CONF_INTEGRATION_ID) or ""
+        self._integration_id: str = entry.data[CONF_INTEGRATION_ID]
         self._panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
         self._client: Elke27Client | None = None
         # Device id of the panel device, set in async_setup_entry (E2 via link).
