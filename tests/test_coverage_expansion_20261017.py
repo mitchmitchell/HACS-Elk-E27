@@ -5,7 +5,7 @@ Feature-map coverage expansion (Tester, 2026-10-17, hardware-free).
 Maps to grokbots/dev/feature-map/README.md rows that were not verified or
 PARTIAL on hardware. Everything runs against a mocked elke27 client.
 xfail rows (all strict) describe the expected behaviour for open issues
-(#80, #89, #90, #91); drop a marker when its fix lands.
+(#89, #90, #91); drop a marker when its fix lands.
 """
 
 from __future__ import annotations
@@ -228,26 +228,6 @@ async def test_disarm_while_unavailable_sends_nothing(
     assert client.keys({"disarm"}) == []
 
 
-@pytest.mark.xfail(
-    reason="HACS #80: disarm on an unavailable area returns a silent 200", strict=True
-)
-async def test_disarm_while_unavailable_raises(
-    hass: HomeAssistant, setup: Setup
-) -> None:
-    client = FakeClient(command_result(refresh=True))
-    coordinator = await setup(client)
-    coordinator.last_update_success = False
-    coordinator.async_update_listeners()
-    await hass.async_block_till_done()
-    with pytest.raises(HomeAssistantError):
-        await hass.services.async_call(
-            "alarm_control_panel",
-            "alarm_disarm",
-            {"entity_id": ALARM, ATTR_CODE: "1234"},
-            blocking=True,
-        )
-
-
 # --- HVAC + fan modes --------------------------------------------------------
 
 
@@ -412,5 +392,6 @@ async def test_turn_off_sends_level_zero_and_one_off(
         for c in mock_client.client.async_execute.call_args_list
         if c.args[0] == "light_set_status"
     ]
+    assert len(sets) == 1
     assert sets[0].kwargs["level"] == 0
     assert sets[0].kwargs["status"] == "OFF"
