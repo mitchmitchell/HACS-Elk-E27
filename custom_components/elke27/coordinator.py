@@ -1219,34 +1219,42 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self.hass.loop.call_soon_threadsafe(self._reconnect.start)
         elif connected is True:
             self.hass.loop.call_soon_threadsafe(self._reconnect.cancel)
-            self.hass.loop.call_soon_threadsafe(self._push_ready)
+            self.hass.loop.call_soon_threadsafe(
+                self._push_ready, self._connection_epoch
+            )
 
     @callback
-    def _push_unavailable(self, epoch: int | None = None) -> None:
+    def _push_unavailable(self, epoch: int) -> None:
         """
         Push the snapshot once per drop so entities write 'unavailable' (#97).
 
         A disconnect arrives on two paths (the link listener and the typed
         ConnectionStateChanged); together they give one listener update. A
-        push scheduled before a newer disconnect or a reconnect is dropped.
+        push from an older epoch (a newer disconnect or a reconnect came
+        since), or one that runs while the client is ready again, is dropped
+        without touching the per-drop flag, so the next real drop still pushes.
         """
-        if epoch is not None and epoch != self._connection_epoch:
+        if epoch != self._connection_epoch or self.is_ready:
             return
-        if self._unavailable_pushed or (epoch is not None and self.is_ready):
+        if self._unavailable_pushed:
             return
         self._unavailable_pushed = True
         self._set_snapshot(self.get_snapshot())
 
     @callback
-    def _push_ready(self) -> None:
+    def _push_ready(self, epoch: int) -> None:
         """
         End this drop when the client recovers on its own (raw READY, #97).
 
         Does what a supervisor reconnect does: logs "Panel connection
         restored" once (so the next drop warns again), clears the per-drop
         flag, pushes the snapshot so entities come back, and refreshes the
-        CSM for anything missed while the link was down.
+        CSM for anything missed while the link was down. A READY queued before
+        a newer disconnect (epoch moved on), or one that runs while the client
+        is not ready, is stale and does nothing.
         """
+        if epoch != self._connection_epoch or not self.is_ready:
+            return
         if not (self._unavailable_pushed or self._unavailable_logged):
             return
         if self._unavailable_logged:
@@ -1348,7 +1356,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 # Push the snapshot (one listener update per drop, shared with
                 # the link listener): every entity re-reads is_ready and goes
                 # unavailable together, instead of showing stale state.
-                self._push_unavailable()
+                self._push_unavailable(self._connection_epoch)
             return
         if isinstance(event, CsmSnapshotUpdated):
             self._set_snapshot(self.get_snapshot())

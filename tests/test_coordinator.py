@@ -318,13 +318,34 @@ async def test_full_refresh_waits_for_domain_refresh(
 # --- #97: entities go unavailable on a link-only drop ---------------------
 
 _REAL_SLEEP = asyncio.sleep
-ALARM = "alarm_control_panel.house"
 ZONE = "binary_sensor.house_front_door"
 
 
 async def _settle() -> None:
     for _ in range(50):
         await _REAL_SLEEP(0)
+
+
+def _supervisor_held() -> Any:
+    """
+    Keep the reconnect supervisor from starting (it would replace the client).
+
+    A raw READY can only end a drop while the dropped client is still the
+    coordinator's client: once the supervisor's first attempt runs, the old
+    client is torn down (and a failed attempt leaves no client during the
+    backoff), so its READY is ignored. Holding the supervisor in its backoff
+    would therefore never reach the raw-READY path.
+    """
+    return patch("custom_components.elke27.reconnect.ReconnectSupervisor.start")
+
+
+async def _block_connect(mock_client: ClientHarness) -> None:
+    """Make the supervisor's reconnects hang (panel unreachable)."""
+
+    async def _connect_blocks(*_args: object, **_kwargs: object) -> None:
+        await asyncio.Event().wait()
+
+    mock_client.client.async_connect.side_effect = _connect_blocks
 
 
 async def _setup_blocked(
@@ -336,10 +357,7 @@ async def _setup_blocked(
     await hass.async_block_till_done()
     assert hass.states.get(ALARM).state == "disarmed"
 
-    async def _connect_blocks(*_args: object, **_kwargs: object) -> None:
-        await asyncio.Event().wait()
-
-    mock_client.client.async_connect.side_effect = _connect_blocks
+    await _block_connect(mock_client)
 
 
 async def _setup_and_drop(
@@ -442,7 +460,7 @@ async def test_push_queued_before_a_recovery_and_new_drop_is_superseded(
     mock_client.client.is_ready = False
     live = _live_link_listener(mock_client)
     # Keep the supervisor out (it would replace the client mid-test).
-    with patch.object(coordinator._reconnect, "start"):
+    with _supervisor_held():
         live(link_event(connected=False))
         mock_client.emit(connection_event(connected=True))
         live(link_event(connected=False))
@@ -480,15 +498,6 @@ async def test_warning_once_per_drop_with_push(
 def _live_link_listener(mock_client: ClientHarness) -> Callable[[Any], None]:
     """Return the most recent client.subscribe listener (the live session)."""
     return mock_client.client.subscribe.call_args.args[0]
-
-
-async def _block_connect(mock_client: ClientHarness) -> None:
-    """Make the supervisor's reconnects hang (panel unreachable)."""
-
-    async def _connect_blocks(*_args: object, **_kwargs: object) -> None:
-        await asyncio.Event().wait()
-
-    mock_client.client.async_connect.side_effect = _connect_blocks
 
 
 @pytest.mark.usefixtures("no_backoff_sleep")
@@ -548,10 +557,9 @@ async def test_raw_ready_restores_and_rearms_drop_push(
 ) -> None:
     """A raw READY alone brings entities back, and the next drop pushes (#97)."""
     await _setup_blocked(hass, mock_config_entry, mock_client)
-    coordinator = mock_config_entry.runtime_data.coordinator
     # The existing client recovers by itself; keep the supervisor out of it
     # (it would replace the client) so only the raw READY can end the drop.
-    with patch.object(coordinator._reconnect, "start"):
+    with _supervisor_held():
         mock_client.client.is_ready = False
         mock_client.emit_link(link_event(connected=False))
         await _settle()
@@ -584,9 +592,8 @@ async def test_raw_ready_recovery_refreshes_csm(
 ) -> None:
     """Self-recovery re-reads the panel, like a supervisor reconnect (#97)."""
     await _setup_blocked(hass, mock_config_entry, mock_client)
-    coordinator = mock_config_entry.runtime_data.coordinator
     refresh = mock_client.client.async_refresh_csm
-    with patch.object(coordinator._reconnect, "start"):
+    with _supervisor_held():
         refresh.reset_mock()
         await _drop_then_raw_ready(hass, mock_client)
         assert refresh.await_count == 1
@@ -603,8 +610,7 @@ async def test_raw_ready_recovery_logs_restored_and_next_drop_warns(
     """Self-recovery logs "restored" once, so the next drop warns again (#83, #97)."""
     caplog.set_level(logging.DEBUG, logger="custom_components.elke27")
     await _setup_blocked(hass, mock_config_entry, mock_client)
-    coordinator = mock_config_entry.runtime_data.coordinator
-    with patch.object(coordinator._reconnect, "start"):
+    with _supervisor_held():
         await _drop_then_raw_ready(hass, mock_client)
         mock_client.client.is_ready = False
         mock_client.emit_link(link_event(connected=False))
@@ -620,4 +626,80 @@ async def test_raw_ready_recovery_logs_restored_and_next_drop_warns(
         (logging.INFO, "Panel connection restored"),
         (logging.WARNING, "Panel connection lost"),
     ]
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
+@pytest.mark.usefixtures("no_backoff_sleep")
+async def test_late_typed_disconnect_after_reconnect_does_not_block_next_drop(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """
+    A stale typed disconnect from the old session must not re-arm the guard.
+
+    It lands while the supervisor reconnects and is processed once the client
+    is ready again; the next real drop must still write 'unavailable' (#97).
+    """
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    async def _connect_with_late_event(*_args: object, **_kwargs: object) -> None:
+        mock_client.emit(connection_event(connected=False))  # old session, late
+        mock_client.client.is_ready = True
+
+    mock_client.client.async_connect.side_effect = _connect_with_late_event
+    mock_client.client.is_ready = False
+    _live_link_listener(mock_client)(link_event(connected=False))
+    await _settle()
+    await hass.async_block_till_done()
+    assert hass.states.get(ALARM).state == "disarmed"
+    await _block_connect(mock_client)
+    mock_client.client.is_ready = False
+    _live_link_listener(mock_client)(link_event(connected=False))
+    await _settle()
+    assert hass.states.get(ALARM).state == STATE_UNAVAILABLE
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
+@pytest.mark.parametrize(
+    "after_ready", ["newer-drop", "newer-drop-ready-again", "not-ready"]
+)
+@pytest.mark.usefixtures("no_backoff_sleep")
+async def test_stale_raw_ready_does_not_restore(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    caplog: pytest.LogCaptureFixture,
+    after_ready: str,
+) -> None:
+    """
+    A raw READY that is stale when it runs does not restore or refresh (#97).
+
+    newer-drop: a new drop arrives before the READY's callback runs (older
+    epoch, client down). newer-drop-ready-again: same, but the client reads
+    ready again by then (only the epoch shows it is stale). not-ready: no new
+    drop, but the client is not ready when the callback runs.
+    """
+    caplog.set_level(logging.DEBUG, logger="custom_components.elke27")
+    await _setup_blocked(hass, mock_config_entry, mock_client)
+    refresh = mock_client.client.async_refresh_csm
+    with _supervisor_held():
+        mock_client.client.is_ready = False
+        mock_client.emit_link(link_event(connected=False))
+        await _settle()
+        assert hass.states.get(ALARM).state == STATE_UNAVAILABLE
+        refresh.reset_mock()
+        mock_client.client.is_ready = True
+        mock_client.emit_link(link_event(connected=True))
+        if after_ready != "not-ready":
+            mock_client.client.is_ready = False
+            mock_client.emit_link(link_event(connected=False))
+        mock_client.client.is_ready = after_ready == "newer-drop-ready-again"
+        await _settle()
+        await hass.async_block_till_done()
+    restored = [
+        r for r in caplog.records if r.getMessage() == "Panel connection restored"
+    ]
+    assert restored == []
+    assert refresh.await_count == 0
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
