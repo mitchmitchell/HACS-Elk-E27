@@ -182,7 +182,7 @@ async def test_disarm_after_link_drop_sends_nothing(
     mock_config_entry: MockConfigEntry,
 ) -> None:
     client = FakeClient(command_result(refresh=True))
-    coordinator = await setup(client)
+    await setup(client)
 
     async def _unreachable(*_args: object, **_kwargs: object) -> None:
         await asyncio.Event().wait()
@@ -194,8 +194,7 @@ async def test_disarm_after_link_drop_sends_nothing(
     listener = mock_client.client.subscribe.call_args.args[0]
     listener(link_event(connected=False))
     await settle()
-    # The next coordinator update after the drop publishes the new availability.
-    await coordinator.async_refresh()
+    # The drop alone publishes the new availability (#97); no refresh needed.
     await hass.async_block_till_done()
     assert hass.states.get(ALARM).state == STATE_UNAVAILABLE
     await hass.services.async_call(
