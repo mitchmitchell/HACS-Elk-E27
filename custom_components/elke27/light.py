@@ -31,12 +31,12 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
-# Panel light level is 0-100 (Dealer API light.set_status/get_status; elke27
-# validates 0..100). The panel reports full as 100, but a *command* of 100
-# means "on at the previous level" (TEST panel, #99): full is commanded as 99,
-# which the panel then reports back as 100.
+# Panel light levels (confirmed by Elk, #99): a command level is 1-99, where
+# 99 is full brightness; a command of 100 means "on at the last level". The
+# panel reports full as 100, so readback stays on the 0-100 scale.
 _ELK_MAX_DIM_LEVEL = 100
 _ELK_MAX_COMMAND_LEVEL = 99
+_ELK_RESTORE_LAST_LEVEL = 100
 
 
 async def async_setup_entry(
@@ -132,8 +132,9 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
                 )
                 raise_if_not_sent(sent=sent, coordinator=self.coordinator)
             else:
+                # No brightness: turn on at the light's last level.
                 sent = await self.coordinator.async_set_light(
-                    self._light_id, state=True, level=_ELK_MAX_COMMAND_LEVEL
+                    self._light_id, state=True, level=_ELK_RESTORE_LAST_LEVEL
                 )
                 raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
@@ -179,8 +180,8 @@ def _level_from_brightness(brightness: int) -> int:
     Map Home Assistant brightness (0-255) to an Elk command level (0-99), half up.
 
     The 0-100 scale is kept so levels 1-99 round-trip with
-    _brightness_from_level; only the top is capped at 99, because a command
-    of 100 means "previous level" to the panel (#99).
+    _brightness_from_level; only the top is capped at 99 (full), because a
+    command of 100 means "on at the last level" to the panel (#99).
     """
     bounded = max(0, min(255, brightness))
     level = (bounded * _ELK_MAX_DIM_LEVEL + 127) // 255

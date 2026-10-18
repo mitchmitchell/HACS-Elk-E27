@@ -15,7 +15,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.core import HomeAssistant
 from tests.conftest import ClientHarness
 
-PANEL_FULL = 99  # highest level sent; 100 means "previous level" to the panel
+PANEL_FULL = 99  # highest explicit level; the panel reports it back as 100
+PANEL_RESTORE_LAST = 100  # sent only for "on" with no brightness
 HA_FULL = 255
 
 
@@ -53,12 +54,12 @@ async def _turn_on_levels(
 @pytest.mark.parametrize(
     ("service_data", "level"),
     [
-        ({}, 99),
-        ({"brightness": 255}, 99),
-        ({"brightness": 254}, 99),
-        ({"brightness": 253}, 99),
-        ({"brightness": 252}, 99),
-        ({"brightness_pct": 100}, 99),
+        ({}, PANEL_RESTORE_LAST),
+        ({"brightness": 255}, PANEL_FULL),
+        ({"brightness": 254}, PANEL_FULL),
+        ({"brightness": 253}, PANEL_FULL),
+        ({"brightness": 252}, PANEL_FULL),
+        ({"brightness_pct": 100}, PANEL_FULL),
         ({"brightness": 128}, 50),
         ({"brightness_pct": 50}, 50),
         ({"brightness": 1}, 1),
@@ -82,7 +83,7 @@ async def test_turn_on_level_sent_to_panel(
     service_data: dict[str, Any],
     level: int,
 ) -> None:
-    """Full brightness is sent as 99: the panel treats 100 as 'previous level'."""
+    """No brightness restores the last level (100); explicit brightness is 1-99."""
     entity = await _load_light(
         hass,
         mock_config_entry,
@@ -96,7 +97,7 @@ async def test_turn_on_level_sent_to_panel(
 async def test_turn_on_never_sends_100(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
-    """No HA brightness ever sends 100, the panel's 'previous level' value (#99)."""
+    """No explicit brightness ever sends 100, the panel's 'last level' value (#99)."""
     entity = await _load_light(
         hass,
         mock_config_entry,
@@ -126,6 +127,6 @@ async def test_full_read_back_resends_99(
     brightness = hass.states.get(entity).attributes["brightness"]
     assert brightness == HA_FULL
     assert await _turn_on_levels(hass, mock_client, entity, brightness=brightness) == [
-        99
+        PANEL_FULL
     ]
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
