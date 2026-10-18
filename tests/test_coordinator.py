@@ -24,7 +24,7 @@ from homeassistant.core import HomeAssistant
 from tests.conftest import ClientHarness, connection_event, link_event
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable
 
 ALARM = "alarm_control_panel.house"
 
@@ -339,7 +339,7 @@ def _supervisor_held() -> Any:
     return patch("custom_components.elke27.reconnect.ReconnectSupervisor.start")
 
 
-async def _block_connect(mock_client: ClientHarness) -> None:
+def _block_connect(mock_client: ClientHarness) -> None:
     """Make the supervisor's reconnects hang (panel unreachable)."""
 
     async def _connect_blocks(*_args: object, **_kwargs: object) -> None:
@@ -357,7 +357,7 @@ async def _setup_blocked(
     await hass.async_block_till_done()
     assert hass.states.get(ALARM).state == "disarmed"
 
-    await _block_connect(mock_client)
+    _block_connect(mock_client)
 
 
 async def _setup_and_drop(
@@ -370,18 +370,8 @@ async def _setup_and_drop(
     await _settle()
 
 
-@pytest.fixture
-def no_backoff_sleep() -> Iterator[None]:
-    """Skip reconnect backoff sleeps (no jitter)."""
-    with (
-        patch("custom_components.elke27.reconnect.asyncio.sleep", AsyncMock()),
-        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
-    ):
-        yield
-
-
 @pytest.mark.parametrize("entity_id", [ALARM, ZONE])
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_entities_unavailable_right_after_link_drop(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -396,7 +386,7 @@ async def test_entities_unavailable_right_after_link_drop(
 
 
 @pytest.mark.parametrize("first", ["link", "typed"])
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_link_and_typed_disconnect_is_one_listener_update(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -422,7 +412,7 @@ async def test_link_and_typed_disconnect_is_one_listener_update(
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_queued_push_skipped_when_link_ready_again(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -442,7 +432,7 @@ async def test_queued_push_skipped_when_link_ready_again(
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_push_queued_before_a_recovery_and_new_drop_is_superseded(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
@@ -472,7 +462,7 @@ async def test_push_queued_before_a_recovery_and_new_drop_is_superseded(
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_warning_once_per_drop_with_push(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -500,7 +490,7 @@ def _live_link_listener(mock_client: ClientHarness) -> Callable[[Any], None]:
     return mock_client.client.subscribe.call_args.args[0]
 
 
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_second_drop_after_supervisor_reconnect_goes_unavailable(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
@@ -521,7 +511,7 @@ async def test_second_drop_after_supervisor_reconnect_goes_unavailable(
     assert hass.states.get(ALARM).state == "disarmed"
     # Second drop with the panel unreachable. The reconnect unsubscribed the
     # first listener, so only the one it registered fires.
-    await _block_connect(mock_client)
+    _block_connect(mock_client)
     mock_client.client.is_ready = False
     _live_link_listener(mock_client)(link_event(connected=False))
     await _settle()
@@ -529,7 +519,7 @@ async def test_second_drop_after_supervisor_reconnect_goes_unavailable(
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_second_drop_after_typed_connected_goes_unavailable(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
@@ -551,7 +541,7 @@ async def test_second_drop_after_typed_connected_goes_unavailable(
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_raw_ready_restores_and_rearms_drop_push(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
@@ -586,7 +576,7 @@ async def _drop_then_raw_ready(hass: HomeAssistant, mock_client: ClientHarness) 
     await hass.async_block_till_done()
 
 
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_raw_ready_recovery_refreshes_csm(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
@@ -600,7 +590,7 @@ async def test_raw_ready_recovery_refreshes_csm(
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_raw_ready_recovery_logs_restored_and_next_drop_warns(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -629,7 +619,7 @@ async def test_raw_ready_recovery_logs_restored_and_next_drop_warns(
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_late_typed_disconnect_after_reconnect_does_not_block_next_drop(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
@@ -653,7 +643,7 @@ async def test_late_typed_disconnect_after_reconnect_does_not_block_next_drop(
     await _settle()
     await hass.async_block_till_done()
     assert hass.states.get(ALARM).state == "disarmed"
-    await _block_connect(mock_client)
+    _block_connect(mock_client)
     mock_client.client.is_ready = False
     _live_link_listener(mock_client)(link_event(connected=False))
     await _settle()
@@ -664,7 +654,7 @@ async def test_late_typed_disconnect_after_reconnect_does_not_block_next_drop(
 @pytest.mark.parametrize(
     "after_ready", ["newer-drop", "newer-drop-ready-again", "not-ready"]
 )
-@pytest.mark.usefixtures("no_backoff_sleep")
+@pytest.mark.usefixtures("fast_backoff")
 async def test_stale_raw_ready_does_not_restore(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
