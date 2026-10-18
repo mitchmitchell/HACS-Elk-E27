@@ -425,7 +425,7 @@ class ZoneEntityTest(unittest.TestCase):
 
     def _zone_class(
         self, definition: str, zone_type: str | None = None, name: str = "Zone"
-    ) -> object:
+    ) -> BinarySensorDeviceClass | None:
         zone = ZoneState(zone_id=3, name=name, open=False)
         zone_definition = ZoneDefinition(
             zone_id=3, name=name, definition=definition, zone_type=zone_type
