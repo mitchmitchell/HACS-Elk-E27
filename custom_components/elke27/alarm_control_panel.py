@@ -254,8 +254,15 @@ def _normalize_code(code: str | None) -> str | None:
     if code is None:
         return None
     normalized = code.strip()
-    if not normalized.isdigit():
+    # ASCII digits only: str.isdigit() also accepts e.g. "²" or full-width digits.
+    if not (normalized.isascii() and normalized.isdigit()):
         raise ServiceValidationError(
             translation_domain=DOMAIN, translation_key="code_not_numeric"
+        )
+    if not normalized.strip("0"):
+        # The panel never accepts an all-zero code; elke27 refuses it before
+        # sending. Report it as input error (HTTP 400), not a server error (#90).
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="code_all_zero"
         )
     return normalized
