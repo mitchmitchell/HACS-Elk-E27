@@ -94,4 +94,6 @@ def _error_message(err: BaseException) -> str:
         return TIMEOUT_MESSAGE
     if is_connection_error(err):
         return CONNECTION_MESSAGE
-    return getattr(err, "user_message", None) or str(err) or type(err).__name__
+    if isinstance(err, Elke27Error) and err.user_message:
+        return err.user_message
+    return str(err) or type(err).__name__
