@@ -693,3 +693,29 @@ async def test_stale_raw_ready_does_not_restore(
     assert restored == []
     assert refresh.await_count == 0
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
+@pytest.mark.usefixtures("fast_backoff")
+async def test_raw_ready_after_supervisor_teardown_keeps_reconnecting(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """
+    A READY queued behind the drop does not cancel the reconnect (Bugbot, #98).
+
+    The drop queues the supervisor's start, which tears the old client down
+    at once (eager task). A READY from that client, queued before the
+    teardown, is stale by the time it runs: it must leave the reconnect
+    running, or the panel stays down until a later drop.
+    """
+    await _setup_blocked(hass, mock_config_entry, mock_client)
+    coordinator = mock_config_entry.runtime_data.coordinator
+    listener = _live_link_listener(mock_client)
+    mock_client.client.is_ready = False
+    listener(link_event(connected=False))
+    mock_client.client.is_ready = True
+    listener(link_event(connected=True))
+    await _settle()
+    task = coordinator._reconnect.task
+    assert task is not None
+    assert not task.done()
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)

@@ -1218,10 +1218,24 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             )
             self.hass.loop.call_soon_threadsafe(self._reconnect.start)
         elif connected is True:
-            self.hass.loop.call_soon_threadsafe(self._reconnect.cancel)
             self.hass.loop.call_soon_threadsafe(
-                self._push_ready, self._connection_epoch
+                self._on_raw_ready, self._connection_epoch
             )
+
+    @callback
+    def _on_raw_ready(self, epoch: int) -> None:
+        """
+        Cancel the reconnect and end the drop, only for a current READY.
+
+        A READY queued behind a drop runs after the supervisor's start, which
+        tears the old client down at once (new epoch, client not ready). That
+        READY is stale: cancelling then would stop the only reconnect and leave
+        the panel down (Bugbot, #98). The supervisor finishes the recovery.
+        """
+        if epoch != self._connection_epoch or not self.is_ready:
+            return
+        self._reconnect.cancel()
+        self._push_ready(epoch)
 
     @callback
     def _push_unavailable(self, epoch: int) -> None:
