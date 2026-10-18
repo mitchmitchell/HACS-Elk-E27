@@ -314,7 +314,7 @@ class LightEntityTest(unittest.TestCase):
         assert self._light(LightState(light_id=1)).is_on is None
 
     def test_brightness_from_panel_level(self) -> None:
-        """Panel level 0-100 maps to HA brightness 0-255 (#91: full is 100)."""
+        """Panel level 0-100 maps to HA brightness 0-255 (#91; read 100 is full)."""
         for level, brightness in ((100, 255), (50, 128), (10, 26), (1, 3), (0, 0)):
             light = self._light(LightState(light_id=1, state=True, level=level))
             assert light.brightness == brightness, level
@@ -333,17 +333,18 @@ class LightEntityTest(unittest.TestCase):
         return hub.async_set_light.await_args.kwargs["level"]
 
     def test_turn_on_sends_panel_level(self) -> None:
-        """HA brightness maps to panel level 0-100 (#91)."""
-        for brightness, level in ((255, 100), (128, 50), (26, 10), (1, 1)):
+        """An explicit HA brightness maps to panel level 1-99; full sends 99 (#99)."""
+        cases = ((255, 99), (128, 50), (26, 10), (1, 1))
+        for brightness, level in cases:
             assert self._sent_level(brightness=brightness) == level, brightness
 
-    def test_turn_on_without_brightness_sends_full(self) -> None:
-        """On with no brightness sends full, level 100 (#91)."""
+    def test_turn_on_without_brightness_restores_last_level(self) -> None:
+        """On with no brightness sends 100: the panel restores the last level (#99)."""
         assert self._sent_level() == 100
 
     def test_every_level_round_trips(self) -> None:
-        """Panel level -> HA brightness -> turn_on sends the same level, for 1-100."""
-        for level in range(1, 101):
+        """Panel level -> HA brightness -> turn_on sends the same level, for 1-99."""
+        for level in range(1, 100):
             light = self._light(LightState(light_id=1, state=True, level=level))
             assert self._sent_level(brightness=light.brightness) == level, level
 
