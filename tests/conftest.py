@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Generator
+from collections.abc import Awaitable, Callable, Generator, Iterator
 import dataclasses
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -349,3 +349,63 @@ async def run_command(coordinator: Any, kind: str) -> bool:
     if kind == "disarm":
         return bool(await coordinator.async_disarm_area(1, "1234"))
     return bool(await coordinator.async_set_zone_bypass(1, bypassed=True, pin="1234"))
+
+
+_real_sleep = asyncio.sleep
+
+
+async def setup_entry(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    """Add the config entry to hass and set it up."""
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+def script_connect(
+    mock_client: ClientHarness, outcomes: list[Exception | None]
+) -> list[str]:
+    """
+    Script the reconnect attempts after setup: raise each error, None succeeds.
+
+    Once the script is used up, a further attempt waits forever, like a panel
+    that stays unreachable, so the loop never spins. Returns a list that
+    records "blocked" (and "cancelled" if unload cancels that wait).
+    """
+    script = list(outcomes)
+    marks: list[str] = []
+
+    async def _connect(*_args: object, **_kwargs: object) -> None:
+        if script:
+            outcome = script.pop(0)
+            if outcome is not None:
+                raise outcome
+            return
+        marks.append("blocked")
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            marks.append("cancelled")
+            raise
+
+    mock_client.client.async_connect.side_effect = _connect
+    mock_client.client.wait_ready.return_value = True
+    return marks
+
+
+async def disconnect_link(mock_client: ClientHarness) -> None:
+    """Send the panel-disconnected event the hub subscribed to, and let it run."""
+    listener = mock_client.client.subscribe.call_args.args[0]
+    listener(link_event(connected=False))
+    for _ in range(50):
+        await _real_sleep(0)
+
+
+@pytest.fixture
+def fast_backoff() -> Iterator[AsyncMock]:
+    """Skip the backoff sleeps (no jitter); return the sleep mock."""
+    sleep_mock = AsyncMock()
+    with (
+        patch("custom_components.elke27.reconnect.asyncio.sleep", sleep_mock),
+        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
+    ):
+        yield sleep_mock
