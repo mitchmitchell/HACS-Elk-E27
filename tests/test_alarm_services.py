@@ -2,8 +2,8 @@
 """
 Alarm panel service and state tests on a loaded entry (mocked elke27 client).
 
-From Tester's feature-map coverage pass (2026-10-17). The #90 xfail is strict:
-drop it when #94 lands.
+From Tester's feature-map coverage pass (2026-10-17). The all-zero code test
+pins #90 (fixed by #94).
 """
 
 from __future__ import annotations
@@ -140,9 +140,6 @@ async def test_disarm_of_bypassed_armed_area_follows_panel_state(
 # --- Code validation (#90) ---------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="HACS #90: all-zero code should be a clean 400, not sent", strict=True
-)
 @pytest.mark.parametrize("code", ["0000", "000000"])
 async def test_all_zero_code_rejected_before_send(
     hass: HomeAssistant, setup: Setup, code: str
