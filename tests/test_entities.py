@@ -334,15 +334,7 @@ class LightEntityTest(unittest.TestCase):
 
     def test_turn_on_sends_panel_level(self) -> None:
         """HA brightness maps to panel level 1-99; full sends 99 (#91, #99)."""
-        cases = (
-            (255, 99),
-            (254, 99),
-            (253, 99),
-            (252, 99),
-            (128, 50),
-            (26, 10),
-            (1, 1),
-        )
+        cases = ((255, 99), (128, 50), (26, 10), (1, 1))
         for brightness, level in cases:
             assert self._sent_level(brightness=brightness) == level, brightness
 
@@ -350,23 +342,11 @@ class LightEntityTest(unittest.TestCase):
         """On with no brightness sends full: level 99, never 100 (#99)."""
         assert self._sent_level() == 99
 
-    def test_turn_on_never_sends_100(self) -> None:
-        """No brightness ever sends 100, the panel's 'previous level' value (#99)."""
-        sent = {self._sent_level(brightness=b) for b in range(256)}
-        assert max(sent) == 99
-        assert min(sent) == 1
-
     def test_every_level_round_trips(self) -> None:
         """Panel level -> HA brightness -> turn_on sends the same level, for 1-99."""
         for level in range(1, 100):
             light = self._light(LightState(light_id=1, state=True, level=level))
             assert self._sent_level(brightness=light.brightness) == level, level
-
-    def test_full_read_back_sends_full(self) -> None:
-        """Panel reports 100 after a 99 command; re-sending that brightness is 99."""
-        light = self._light(LightState(light_id=1, state=True, level=100))
-        assert light.brightness == 255
-        assert self._sent_level(brightness=light.brightness) == 99
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")

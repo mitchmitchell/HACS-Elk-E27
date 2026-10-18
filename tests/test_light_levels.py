@@ -15,17 +15,65 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.core import HomeAssistant
 from tests.conftest import ClientHarness
 
+PANEL_FULL = 99  # highest level sent; 100 means "previous level" to the panel
+HA_FULL = 255
+
+
+async def _load_light(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    light: LightState,
+) -> str:
+    mock_client.snapshot = dataclasses.replace(
+        mock_client.snapshot, lights=MappingProxyType({1: light})
+    )
+    mock_client.client.async_execute.return_value = Result.success({})
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    (entity,) = hass.states.async_entity_ids("light")
+    return entity
+
+
+async def _turn_on_levels(
+    hass: HomeAssistant, mock_client: ClientHarness, entity: str, **service_data: Any
+) -> list[int]:
+    mock_client.client.async_execute.reset_mock()
+    await hass.services.async_call(
+        "light", "turn_on", {"entity_id": entity, **service_data}, blocking=True
+    )
+    return [
+        c.kwargs["level"]
+        for c in mock_client.client.async_execute.call_args_list
+        if c.args[0] == "light_set_status"
+    ]
+
 
 @pytest.mark.parametrize(
     ("service_data", "level"),
     [
         ({}, 99),
         ({"brightness": 255}, 99),
+        ({"brightness": 254}, 99),
+        ({"brightness": 253}, 99),
+        ({"brightness": 252}, 99),
         ({"brightness_pct": 100}, 99),
+        ({"brightness": 128}, 50),
         ({"brightness_pct": 50}, 50),
         ({"brightness": 1}, 1),
     ],
-    ids=["no-brightness", "brightness-255", "pct-100", "pct-50", "brightness-1"],
+    ids=[
+        "no-brightness",
+        "brightness-255",
+        "brightness-254",
+        "brightness-253",
+        "brightness-252",
+        "pct-100",
+        "brightness-128",
+        "pct-50",
+        "brightness-1",
+    ],
 )
 async def test_turn_on_level_sent_to_panel(
     hass: HomeAssistant,
@@ -35,25 +83,49 @@ async def test_turn_on_level_sent_to_panel(
     level: int,
 ) -> None:
     """Full brightness is sent as 99: the panel treats 100 as 'previous level'."""
-    mock_client.snapshot = dataclasses.replace(
-        mock_client.snapshot,
-        lights=MappingProxyType(
-            {1: LightState(light_id=1, name="Dimmer", state=False, level=0)}
-        ),
+    entity = await _load_light(
+        hass,
+        mock_config_entry,
+        mock_client,
+        LightState(light_id=1, name="Dimmer", state=False, level=0),
     )
-    mock_client.client.async_execute.return_value = Result.success({})
-    mock_config_entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
-    (entity,) = hass.states.async_entity_ids("light")
-    await hass.services.async_call(
-        "light", "turn_on", {"entity_id": entity, **service_data}, blocking=True
+    assert await _turn_on_levels(hass, mock_client, entity, **service_data) == [level]
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
+async def test_turn_on_never_sends_100(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """No HA brightness ever sends 100, the panel's 'previous level' value (#99)."""
+    entity = await _load_light(
+        hass,
+        mock_config_entry,
+        mock_client,
+        LightState(light_id=1, name="Dimmer", state=False, level=0),
     )
-    sets = [
-        c
-        for c in mock_client.client.async_execute.call_args_list
-        if c.args[0] == "light_set_status"
+    sent: set[int] = set()
+    for brightness in range(1, 256):
+        sent.update(
+            await _turn_on_levels(hass, mock_client, entity, brightness=brightness)
+        )
+    assert max(sent) == PANEL_FULL
+    assert min(sent) == 1
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
+async def test_full_read_back_resends_99(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """The panel reports 100 after a 99 command; re-sending that brightness is 99."""
+    entity = await _load_light(
+        hass,
+        mock_config_entry,
+        mock_client,
+        LightState(light_id=1, name="Dimmer", state=True, level=100),
+    )
+    brightness = hass.states.get(entity).attributes["brightness"]
+    assert brightness == HA_FULL
+    assert await _turn_on_levels(hass, mock_client, entity, brightness=brightness) == [
+        99
     ]
-    assert sets
-    assert sets[0].kwargs["level"] == level
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
