@@ -50,6 +50,9 @@ from tests.conftest import (
     PANEL_SERIAL_2,
     PORT,
     ClientHarness,
+    FakeClient,
+    Setup,
+    command_result,
     panel_snapshot,
 )
 
@@ -912,3 +915,50 @@ def test_non_numeric_alarm_code_is_validation_error(code: str) -> None:
 def test_numeric_alarm_code_is_stripped() -> None:
     """Surrounding whitespace is removed from a numeric code."""
     assert _normalize_code(" 1234 ") == "1234"
+
+
+ALARM = "alarm_control_panel.house"
+
+
+async def _disarm(hass: HomeAssistant, code: str) -> None:
+    await hass.services.async_call(
+        "alarm_control_panel",
+        "alarm_disarm",
+        {"entity_id": ALARM, "code": code},
+        blocking=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "key"),
+    [
+        ("0", "code_all_zero"),
+        ("0000", "code_all_zero"),
+        (" 000000 ", "code_all_zero"),
+        ("0" * 5000, "code_all_zero"),
+        ("\u00b2", "code_not_numeric"),
+        ("\uff11\uff12\uff13\uff14", "code_not_numeric"),
+    ],
+)
+async def test_disarm_service_refuses_invalid_code_before_sending(
+    hass: HomeAssistant, setup: Setup, code: str, key: str
+) -> None:
+    """An all-zero or non-ASCII code is a 400 validation error, never sent (#90)."""
+    client = FakeClient(command_result(refresh=True))
+    await setup(client)
+    with pytest.raises(ServiceValidationError) as err:
+        await _disarm(hass, code)
+    assert err.value.translation_key == key
+    assert client.keys({"disarm"}) == []
+
+
+async def test_disarm_service_sends_code_with_zeros_but_not_all_zero(
+    hass: HomeAssistant, setup: Setup
+) -> None:
+    """Leading or embedded zeros alone are not refused: "1000" reaches the client."""
+    client = FakeClient(command_result(refresh=True))
+    await setup(client)
+    await _disarm(hass, "1000")
+    assert [(key, params.get("pin")) for key, params in client.calls] == [
+        ("disarm", "1000")
+    ]
