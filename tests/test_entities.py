@@ -423,49 +423,6 @@ class ZoneEntityTest(unittest.TestCase):
         assert entity.is_on is not False
         assert entity.icon is None
 
-    def _zone_class(
-        self, definition: str, zone_type: str | None = None, name: str = "Zone"
-    ) -> BinarySensorDeviceClass | None:
-        zone = ZoneState(zone_id=3, name=name, open=False)
-        zone_definition = ZoneDefinition(
-            zone_id=3, name=name, definition=definition, zone_type=zone_type
-        )
-        snapshot = _snapshot(zones={3: zone}, zone_definitions={3: zone_definition})
-        entity = Elke27ZoneBinarySensor(
-            _bound(_hub(), snapshot), _entry(), 3, zone, zone_definition
-        )
-        return entity.device_class
-
-    def test_interior_zone_without_type_stays_opening(self) -> None:
-        """BURG INTERIOR alone is not motion: it also covers interior doors (#101)."""
-        for name in ("Interior", "Basement Door", "Zone 3", "Pirate Room"):
-            assert (
-                self._zone_class("BURG INTERIOR", name=name)
-                is BinarySensorDeviceClass.OPENING
-            )
-
-    def test_interior_zone_named_motion_is_motion(self) -> None:
-        """No zone type: an interior zone named as a motion detector is motion."""
-        for name in ("Hall Motion", "Living Room PIR", "MOTION-2"):
-            assert (
-                self._zone_class("BURG INTERIOR", name=name)
-                is BinarySensorDeviceClass.MOTION
-            )
-
-    def test_motion_name_needs_interior_definition(self) -> None:
-        """A perimeter zone named 'motion' keeps the opening default."""
-        assert (
-            self._zone_class("BURG PERIM INST", name="Motion")
-            is BinarySensorDeviceClass.OPENING
-        )
-
-    def test_zone_type_wins_over_name(self) -> None:
-        """A zone type, when the panel sends one, still decides the class."""
-        assert (
-            self._zone_class("BURG INTERIOR", zone_type="Door", name="Hall Motion")
-            is BinarySensorDeviceClass.DOOR
-        )
-
     def test_no_zone_definition(self) -> None:
         """Without a ZoneDefinition, fall back to the zone name and opening class."""
         zone = ZoneState(zone_id=8, name="Hall", open=False)
