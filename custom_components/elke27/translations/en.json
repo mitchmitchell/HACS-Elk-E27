@@ -141,6 +141,9 @@
     "code_not_numeric": {
       "message": "The code must be numeric."
     },
+    "code_all_zero": {
+      "message": "The code can't be all zeros."
+    },
     "integration_id_invalid": {
       "message": "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
     },
