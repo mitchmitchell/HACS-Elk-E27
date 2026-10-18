@@ -126,7 +126,8 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 - The sensor is **on** when the zone is open/violated.
 - The device class is *motion*, *window* or *door* when the panel's zone type says so.
-  Otherwise it is *opening*. Fire, CO and water zones also show as *opening*, not as
+  If the panel sends no zone type, an interior zone (definition `BURG INTERIOR`) is
+  *motion*. Otherwise it is *opening*. Fire, CO and water zones also show as *opening*, not as
   smoke, CO or moisture sensors (see [Known issues](#known-issues)).
 - The icon follows the zone definition (burglary entry/exit, perimeter, interior, 24-hour,
   tamper, fire, CO, panic, medical, automation, power supervision, water, hi/lo temp) and

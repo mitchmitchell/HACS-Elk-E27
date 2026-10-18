@@ -65,6 +65,10 @@ _ZONE_OPEN_ICON_BY_DEFINITION = {
     "HILO TEMP": "mdi:thermometer-alert",
 }
 
+_ZONE_DEVICE_CLASS_BY_DEFINITION = {
+    "BURG INTERIOR": BinarySensorDeviceClass.MOTION,
+}
+
 
 async def async_setup_entry(
     _hass: HomeAssistant,
@@ -273,4 +277,11 @@ def _zone_device_class(
             return BinarySensorDeviceClass.WINDOW
         if "door" in normalized:
             return BinarySensorDeviceClass.DOOR
+    # Panels that send no zone type (#101): fall back to the zone definition.
+    if not zone_type and zone_definition is not None:
+        by_definition = _ZONE_DEVICE_CLASS_BY_DEFINITION.get(
+            str(zone_definition.definition or "")
+        )
+        if by_definition is not None:
+            return by_definition
     return BinarySensorDeviceClass.OPENING
