@@ -132,7 +132,6 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
                 )
                 raise_if_not_sent(sent=sent, coordinator=self.coordinator)
             else:
-                # No brightness: turn on at the light's last level.
                 sent = await self.coordinator.async_set_light(
                     self._light_id, state=True, level=_ELK_RESTORE_LAST_LEVEL
                 )
