@@ -715,7 +715,7 @@ async def test_raw_ready_after_supervisor_teardown_keeps_reconnecting(
     mock_client.client.is_ready = True
     listener(link_event(connected=True))
     await _settle()
-    task = coordinator._reconnect.task
+    task = coordinator.reconnect.task
     assert task is not None
     assert not task.done()
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
