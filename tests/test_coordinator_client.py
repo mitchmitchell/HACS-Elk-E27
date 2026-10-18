@@ -32,7 +32,7 @@ if _HAS_DEPS:
 
     from custom_components.elke27 import coordinator as hub_module
     from custom_components.elke27.coordinator import _connection_state
-    from homeassistant.exceptions import HomeAssistantError
+    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
     from tests.conftest import make_coordinator
 
 
@@ -314,6 +314,43 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
             await hub.async_set_light(3, state=True)
         client.async_execute.assert_awaited_once()
         assert hub.background_tasks == []
+
+    async def test_all_zero_code_is_validation_error_and_sends_nothing(self) -> None:
+        """Arm, disarm and bypass refuse an all-zero code before the client (#90)."""
+        client = _client()
+        hub = _hub(client)
+        calls = [
+            lambda: hub.async_disarm_area(1, "0000"),
+            lambda: hub.async_arm_area(1, "away", "0000"),
+            lambda: hub.async_set_zone_bypass(2, bypassed=True, pin="0"),
+        ]
+        with self.assertNoLogs("custom_components.elke27", level="ERROR"):
+            for call in calls:
+                with self.assertRaises(ServiceValidationError) as err:
+                    await call()
+                assert err.exception.translation_key == "code_all_zero"
+        assert client.method_calls == []
+
+    async def test_non_ascii_or_huge_zero_code_sends_nothing(self) -> None:
+        """Arm, disarm and bypass refuse non-ASCII digits and 5,000 zeros cleanly."""
+        client = _client()
+        hub = _hub(client)
+        cases = [
+            ("\u00b2", "code_not_numeric"),
+            ("\uff11\uff12\uff13\uff14", "code_not_numeric"),
+        ]
+        cases.append(("0" * 5000, "code_all_zero"))
+        with self.assertNoLogs("custom_components.elke27", level="ERROR"):
+            for code, key in cases:
+                for call in (
+                    lambda c=code: hub.async_disarm_area(1, c),
+                    lambda c=code: hub.async_arm_area(1, "away", c),
+                    lambda c=code: hub.async_set_zone_bypass(2, bypassed=True, pin=c),
+                ):
+                    with self.assertRaises(ServiceValidationError) as err:
+                        await call()
+                    assert err.exception.translation_key == key
+        assert client.method_calls == []
 
     async def test_lock_payloads(self) -> None:
         """Lock is status ON, unlock is status OFF."""
