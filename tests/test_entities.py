@@ -422,10 +422,12 @@ class ZoneEntityTest(unittest.TestCase):
         assert entity.is_on is not False
         assert entity.icon is None
 
-    def _zone_class(self, definition: str, zone_type: str | None = None) -> object:
-        zone = ZoneState(zone_id=3, name="Zone", open=False)
+    def _zone_class(
+        self, definition: str, zone_type: str | None = None, name: str = "Zone"
+    ) -> object:
+        zone = ZoneState(zone_id=3, name=name, open=False)
         zone_definition = ZoneDefinition(
-            zone_id=3, name="Zone", definition=definition, zone_type=zone_type
+            zone_id=3, name=name, definition=definition, zone_type=zone_type
         )
         snapshot = _snapshot(zones={3: zone}, zone_definitions={3: zone_definition})
         entity = Elke27ZoneBinarySensor(
@@ -433,21 +435,35 @@ class ZoneEntityTest(unittest.TestCase):
         )
         return entity.device_class
 
-    def test_interior_zone_without_type_is_motion(self) -> None:
-        """No zone type from the panel (#101): BURG INTERIOR is a motion sensor."""
-        assert self._zone_class("BURG INTERIOR") is BinarySensorDeviceClass.MOTION
+    def test_interior_zone_without_type_stays_opening(self) -> None:
+        """BURG INTERIOR alone is not motion: it also covers interior doors (#101)."""
+        for name in ("Interior", "Basement Door", "Zone 3", "Pirate Room"):
+            assert (
+                self._zone_class("BURG INTERIOR", name=name)
+                is BinarySensorDeviceClass.OPENING
+            )
 
-    def test_zone_type_wins_over_definition(self) -> None:
-        """A zone type, when the panel sends one, still decides the class."""
+    def test_interior_zone_named_motion_is_motion(self) -> None:
+        """No zone type: an interior zone named as a motion detector is motion."""
+        for name in ("Hall Motion", "Living Room PIR", "MOTION-2"):
+            assert (
+                self._zone_class("BURG INTERIOR", name=name)
+                is BinarySensorDeviceClass.MOTION
+            )
+
+    def test_motion_name_needs_interior_definition(self) -> None:
+        """A perimeter zone named 'motion' keeps the opening default."""
         assert (
-            self._zone_class("BURG INTERIOR", zone_type="Door")
-            is BinarySensorDeviceClass.DOOR
+            self._zone_class("BURG PERIM INST", name="Motion")
+            is BinarySensorDeviceClass.OPENING
         )
 
-    def test_other_definitions_without_type_stay_opening(self) -> None:
-        """Definitions with no clear class keep the opening default."""
-        for definition in ("BURG EE DELAY", "BURG PERIM INST", "BURG 24HR"):
-            assert self._zone_class(definition) is BinarySensorDeviceClass.OPENING
+    def test_zone_type_wins_over_name(self) -> None:
+        """A zone type, when the panel sends one, still decides the class."""
+        assert (
+            self._zone_class("BURG INTERIOR", zone_type="Door", name="Hall Motion")
+            is BinarySensorDeviceClass.DOOR
+        )
 
     def test_no_zone_definition(self) -> None:
         """Without a ZoneDefinition, fall back to the zone name and opening class."""

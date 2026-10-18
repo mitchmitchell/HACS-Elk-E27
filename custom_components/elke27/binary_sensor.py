@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.binary_sensor import (
@@ -65,9 +66,10 @@ _ZONE_OPEN_ICON_BY_DEFINITION = {
     "HILO TEMP": "mdi:thermometer-alert",
 }
 
-_ZONE_DEVICE_CLASS_BY_DEFINITION = {
-    "BURG INTERIOR": BinarySensorDeviceClass.MOTION,
-}
+# Words in a zone name that mark a motion detector. Used only when the panel
+# sends no zone type (#101): the definition alone can't tell, since BURG
+# INTERIOR covers interior door contacts as well as motion detectors.
+_MOTION_NAME_WORDS = ("motion", "pir")
 
 
 async def async_setup_entry(
@@ -277,11 +279,18 @@ def _zone_device_class(
             return BinarySensorDeviceClass.WINDOW
         if "door" in normalized:
             return BinarySensorDeviceClass.DOOR
-    # Panels that send no zone type (#101): fall back to the zone definition.
-    if not zone_type and zone_definition is not None:
-        by_definition = _ZONE_DEVICE_CLASS_BY_DEFINITION.get(
-            str(zone_definition.definition or "")
-        )
-        if by_definition is not None:
-            return by_definition
+    # No zone type from the panel (#101): a BURG INTERIOR zone named as a
+    # motion detector is motion; anything else stays opening.
+    if (
+        not zone_type
+        and zone_definition is not None
+        and zone_definition.definition == "BURG INTERIOR"
+        and _name_says_motion(zone_definition.name)
+    ):
+        return BinarySensorDeviceClass.MOTION
     return BinarySensorDeviceClass.OPENING
+
+
+def _name_says_motion(name: str | None) -> bool:
+    words = re.findall(r"[a-z]+", (name or "").lower())
+    return any(word in _MOTION_NAME_WORDS for word in words)
