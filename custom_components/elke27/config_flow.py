@@ -17,6 +17,7 @@ from elke27_lib.errors import (
     Elke27CryptoError,
     Elke27DisconnectedError,
     Elke27Error,
+    Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27TimeoutError,
     InvalidCredentials,
@@ -355,6 +356,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         host = self._selected_host
         port = self._selected_port
         if host is None or port is None:
+            _LOGGER.warning(
+                "Elke27 link (%s) not started: entry has no host/port", step_id
+            )
             errors["base"] = "unknown"
             return self.async_show_form(
                 step_id=step_id,
@@ -397,7 +401,10 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             errors["base"] = "cannot_connect"
         except Elke27LinkRequiredError:
             errors["base"] = "link_required"
-        except Elke27Error:
+        except (Elke27Error, Elke27InvalidArgument) as err:
+            # Log the exception type only: its message can carry host, port or
+            # panel fields, and none of those belong in the log.
+            _LOGGER.warning("Elke27 link (%s) failed: %s", step_id, type(err).__name__)
             errors["base"] = "unknown"
         finally:
             with contextlib.suppress(OSError, TimeoutError, E27Error, Elke27Error):

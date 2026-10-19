@@ -22,7 +22,11 @@ from unittest.mock import AsyncMock, create_autospec, patch
 from elke27_lib import AreaState, LinkKeys, OutputState, PanelInfo, ZoneState
 from elke27_lib.client import Elke27Client
 from elke27_lib.discovery import DiscoveredPanel
-from elke27_lib.errors import Elke27ConnectionError
+from elke27_lib.errors import (
+    Elke27ConnectionError,
+    Elke27InvalidArgument,
+    Elke27ProtocolError,
+)
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -1341,3 +1345,90 @@ async def test_device_conflict_is_counted_not_named(
         hass, entry, caplog, _forbidden(device.id, _PLANT_NAME)
     )
     assert placeholders["other"] == "1"
+
+
+def entry_017_discovered() -> MockConfigEntry:
+    """
+    0.1.7 entry as its discover step really stored it (elke27 0.3.11).
+
+    `panel` is asdict() of the discovered panel, title is the host (the panel
+    reported no name), and options carry the 0.1.7 panel_info snapshot.
+    """
+    entry = entry_017()
+    data = dict(entry.data)
+    data["panel"] = {
+        "host": HOST,
+        "port": PORT,
+        "tls_port": None,
+        "panel_name": None,
+        "panel_serial": None,
+        "panel_mac": RAW_MAC,
+    }
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title=HOST,
+        version=1,
+        minor_version=1,
+        unique_id=LEGACY_SERIAL,
+        data=data,
+        options={"panel_info": {"mac": None, "panel_name": None}, "table_info": {}},
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(Elke27ProtocolError("panel said no at 192.0.2.10"), id="protocol"),
+        pytest.param(Elke27InvalidArgument("port must be ..."), id="invalid_arg"),
+    ],
+)
+async def test_017_relink_link_failure_logs_type_only_and_retries(
+    hass: HomeAssistant,
+    panel: ClientHarness,
+    flow_client: Any,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+) -> None:
+    """
+    HW 912f3c3: a 0.1.7 re-link showed a bare 'unknown' with nothing logged.
+
+    The flow now logs the exception type (never its message, which can carry
+    the host), an invalid argument is a form error instead of a 500, the
+    upgrade stays pending, and a second attempt finishes it.
+    """
+    entry = entry_017_discovered()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert legacy_migration_pending(entry)
+
+    flow_client.async_link.side_effect = error
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        result = await relink(hass, entry)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "unknown"}
+    assert legacy_migration_pending(entry)
+    lines = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name.startswith("custom_components.elke27")
+    ]
+    assert any(type(error).__name__ in line for line in lines), lines
+    text = caplog.text
+    for secret in (HOST, LEGACY_SERIAL, RAW_MAC, KEY, ACCESS, PASSPHRASE, str(error)):
+        assert secret not in text
+
+    flow_client.async_link.side_effect = None
+    flow_client.async_link.return_value = LINK_KEYS
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_CODE: ACCESS, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    await hass.async_block_till_done()
+    assert result["reason"] == "reauth_successful"
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.data[CONF_LEGACY_MIGRATION]["state"] == "done"
+    assert entry.unique_id == KEY
