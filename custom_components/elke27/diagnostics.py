@@ -171,14 +171,14 @@ def migration_diagnostics(entry: Elke27ConfigEntry) -> dict[str, Any] | None:
         return [
             {
                 **{k: v for k, v in row.items() if k != "old_unique_id"},
-                "old_unique_id": redact(str(row.get("old_unique_id", ""))),
+                "old_unique_id": redact(str(row["old_unique_id"])),
             }
-            for row in state.get(name, [])
+            for row in state[name]
         ]
 
     return {
-        "from": state.get("from"),
-        "state": state.get("state"),
+        "from": state["from"],
+        "state": state["state"],
         "done_at": state.get("done_at"),
         "plan": rows("plan"),
         "duplicates": rows("duplicates"),

@@ -443,7 +443,8 @@ def _plan_device(
 
 def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
     """Pre-scan with no writes: what Phase B would change, and any conflict."""
-    state = legacy_migration_state(entry) or {}
+    # Strict reads: a malformed record raises instead of being marked done.
+    state = entry.data[CONF_LEGACY_MIGRATION]
     plan = _Plan([], None, set(), None, [], 0)
     device_area = _plan_device(hass, entry, key, plan)
     registry = er.async_get(hass)
@@ -452,10 +453,14 @@ def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
         for reg in er.async_entries_for_config_entry(registry, entry.entry_id)
     }
     targets: set[tuple[str, str]] = set()
-    for row in state.get("plan", []):
+    for row in state["plan"]:
         reg = current.get(row["entity_registry_id"])
         target = new_unique_id(key, row["kind"], int(row["n"]))
-        if reg is None or target is None:
+        if target is None:
+            # Phase A never plans a row without a 0.2.x unique_id.
+            msg = "Elke27 upgrade record has an unmappable row"
+            raise ValueError(msg)
+        if reg is None:
             # Removed by the user since Phase A: nothing to keep.
             plan.skipped += 1
             continue
@@ -614,7 +619,7 @@ def async_apply_legacy_migration(
             translation_placeholders={"count": str(len(plan.conflicts))},
         )
 
-    state = dict(legacy_migration_state(entry) or {})
+    state = dict(entry.data[CONF_LEGACY_MIGRATION])
     state["state"] = MIGRATION_STATE_DONE
     state["done_at"] = dt_util.utcnow().isoformat()
     data = {k: v for k, v in entry.data.items() if k != CONF_INTEGRATION_SERIAL}

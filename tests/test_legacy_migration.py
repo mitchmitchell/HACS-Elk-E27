@@ -14,9 +14,10 @@ from collections.abc import Generator
 import dataclasses
 import json
 import logging
+from pathlib import Path
 import re
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, create_autospec, patch
 
 from elke27_lib import AreaState, LinkKeys, OutputState, PanelInfo, ZoneState
@@ -29,8 +30,11 @@ from elke27_lib.errors import (
 )
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.components.diagnostics import (
+    get_diagnostics_for_config_entry,
+)
 
-from custom_components.elke27 import async_migrate_entry
+from custom_components.elke27 import async_migrate_entry, migration as migration_module
 from custom_components.elke27.config_flow import (
     CONF_ACCESS_CODE,
     CONF_PASSPHRASE,
@@ -72,7 +76,12 @@ from homeassistant.helpers import (
     issue_registry as ir,
     label_registry as lr,
 )
+from homeassistant.setup import async_setup_component
 from tests.conftest import HOST, INTEGRATION_ID, PORT, ClientHarness
+
+if TYPE_CHECKING:
+    from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
+    from syrupy.assertion import SnapshotAssertion
 
 # Made-up identifiers only (design §10: no production values in fixtures).
 LEGACY_SERIAL = "a1b2c3d4e5f6"  # 0.1.7 integration_serial (derived on the HA host)
@@ -1151,7 +1160,7 @@ async def test_entry_without_id_and_not_pending_is_still_an_error(
 
 
 async def test_blocked_raises_not_ready(hass: HomeAssistant) -> None:
-    """Phase B on its own: a conflict raises ConfigEntryNotReady."""
+    """Phase B on its own: a conflict raises ConfigEntryNotReady (pinned key)."""
     entry = entry_relinked()
     entry.add_to_hass(hass)
     seed_legacy_registry(
@@ -1161,28 +1170,148 @@ async def test_blocked_raises_not_ready(hass: HomeAssistant) -> None:
     er.async_get(hass).async_get_or_create(
         "sensor", DOMAIN, f"{KEY}:panel_ready", config_entry=entry
     )
-    with pytest.raises(ConfigEntryNotReady):
+    with pytest.raises(ConfigEntryNotReady, match=ISSUE_LEGACY_MIGRATION_BLOCKED):
         async_apply_legacy_migration(hass, entry, KEY)
     assert legacy_migration_pending(entry)
 
 
-async def test_diagnostics_redact_old_unique_id_base(hass: HomeAssistant) -> None:
-    """The plan in diagnostics has no MAC or host-derived serial in it."""
+@pytest.mark.parametrize(
+    "drop", ["plan", "from", "state"], ids=["no-plan", "no-from", "no-state"]
+)
+async def test_malformed_record_raises_not_done(
+    hass: HomeAssistant, panel: ClientHarness, drop: str
+) -> None:
+    """Strict reads: a malformed record raises; it is never marked done."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(hass, entry, base=KEY, device_identifier=KEY)
+    await _phase_a_on_relinked(hass, entry)
+    record = {k: v for k, v in entry.data[CONF_LEGACY_MIGRATION].items() if k != drop}
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
+    )
+    if drop == "plan":
+        with pytest.raises(KeyError):
+            async_apply_legacy_migration(hass, entry, KEY)
+        assert entry.data[CONF_LEGACY_MIGRATION].get("done_at") is None
+    else:
+        with pytest.raises(KeyError):
+            migration_diagnostics(entry)
+
+
+async def test_unmappable_plan_row_raises(hass: HomeAssistant) -> None:
+    """A plan row with no 0.2.x unique_id is malformed: raise, write nothing."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(hass, entry, base=KEY, device_identifier=KEY)
+    await _phase_a_on_relinked(hass, entry)
+    record = dict(entry.data[CONF_LEGACY_MIGRATION])
+    record["plan"] = [{**record["plan"][0], "kind": "panel", "n": 99}]
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
+    )
+    before = registry_view(hass, entry.entry_id)
+    with pytest.raises(ValueError, match="unmappable"):
+        async_apply_legacy_migration(hass, entry, KEY)
+    assert legacy_migration_pending(entry)
+    assert registry_view(hass, entry.entry_id) == before
+
+
+async def test_diagnostics_redact_old_unique_id_base(
+    hass: HomeAssistant,
+    panel: ClientHarness,
+    hass_client: ClientSessionGenerator,
+    snapshot: SnapshotAssertion,
+) -> None:
+    """Diagnostics (real endpoint, after setup ran Phase A): no MAC or serial."""
+    assert await async_setup_component(hass, "diagnostics", {})
     entry = entry_019()
     entry.add_to_hass(hass)
     seed_legacy_registry(hass, entry, base=KEY, device_identifier=KEY)
-    assert await async_migrate_entry(hass, entry)
-    diag = migration_diagnostics(entry)
-    assert diag is not None
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert legacy_migration_pending(entry)
+    result = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+    diag = result["legacy_registry_migration"]
     assert diag["state"] == "pending"
+    assert diag["done_at"] is None
     assert len(diag["plan"]) == len(LEGACY_ROWS)
-    text = repr(diag)
+    text = repr(result)
     assert KEY not in text
     assert LEGACY_SERIAL not in text
+    assert RAW_MAC not in text
     assert {row["old_unique_id"] for row in diag["plan"]} >= {
         "**REDACTED**:zone:1",
         "**REDACTED**:panel:2",
     }
+    # Registry ids are random per run: snapshot the stable shape only.
+    stable = {
+        **diag,
+        "plan": [
+            {k: v for k, v in row.items() if k != "entity_registry_id"}
+            for row in diag["plan"]
+        ],
+    }
+    assert stable == snapshot
+
+
+async def test_user_device_class_override_survives_upgrade(
+    hass: HomeAssistant, panel: ClientHarness, flow_client: Any
+) -> None:
+    """
+    A 'Show as' choice (registry device_class) survives A, B, re-link, reload.
+
+    Migration code never writes device_class: every registry update it makes
+    is recorded and checked.
+    """
+    entry = entry_017()
+    entry.add_to_hass(hass)
+    legacy = seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    ent_reg = er.async_get(hass)
+    zone = legacy["zone:4"]
+    ent_reg.async_update_entity(zone, device_class="window")
+
+    def device_class() -> str | None:
+        reg = ent_reg.async_get(zone)
+        assert reg is not None
+        return reg.device_class
+
+    calls: list[dict[str, Any]] = []
+    real_update = er.EntityRegistry.async_update_entity
+
+    def spy(self: er.EntityRegistry, entity_id: str, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return real_update(self, entity_id, **kwargs)
+
+    with patch.object(er.EntityRegistry, "async_update_entity", spy):
+        await hass.config_entries.async_setup(entry.entry_id)  # Phase A
+        await hass.async_block_till_done()
+        assert legacy_migration_pending(entry)
+        assert device_class() == "window"
+        result = await relink(hass, entry)  # re-link, then Phase B
+        assert result["reason"] == "reauth_successful"
+        assert not legacy_migration_pending(entry)
+        assert device_class() == "window"
+        state = hass.states.get(zone)
+        assert state is not None
+        assert state.attributes.get("device_class") == "window"
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    assert device_class() == "window"
+    state = hass.states.get(zone)
+    assert state is not None
+    assert state.attributes.get("device_class") == "window"
+    assert calls  # Phase B did rewrite unique_ids through the registry
+    assert not [c for c in calls if "device_class" in c]
+
+
+def test_migration_source_never_names_device_class() -> None:
+    """Guard: migration.py has no code path that could set device_class."""
+    source = Path(migration_module.__file__).read_text(encoding="utf-8")
+    assert "device_class" not in source
 
 
 async def test_removing_entry_clears_migration_issues(
