@@ -156,11 +156,10 @@ async def test_undo_previews_then_restores_previous_names(tmp_path: Path) -> Non
 
     await tool.run_undo(ha, map_path, apply=True)
     assert {k: v["name"] for k, v in ha.rows.items()} == before
-    again = await tool.run_undo(ha, map_path, apply=True)
-    assert again.changes == []
+    assert not map_path.exists()  # only a successful --undo removes the map
 
 
-async def test_failure_part_way_restores_everything_written(tmp_path: Path) -> None:
+async def test_failure_part_way_keeps_map_and_undo_restores(tmp_path: Path) -> None:
     ha = FakeHA(registry(), fail_on="binary_sensor.elk_back")
     before = {k: v["name"] for k, v in ha.rows.items()}
     map_path = tmp_path / "map.json"
@@ -168,6 +167,11 @@ async def test_failure_part_way_restores_everything_written(tmp_path: Path) -> N
         await tool.run_rename(
             ha, tool.read_names(names_csv(tmp_path)), apply=True, map_path=map_path
         )
+    assert [c.entity_id for c in tool.read_map(map_path)] == [
+        "alarm_control_panel.elk_main",
+        "binary_sensor.elk_back",
+    ]
+    await tool.run_undo(ha, map_path, apply=True)
     assert {k: v["name"] for k, v in ha.rows.items()} == before
     assert not map_path.exists()
 
@@ -314,33 +318,6 @@ async def test_unwritable_map_fails_before_any_rename(tmp_path: Path) -> None:
     assert {k: v["name"] for k, v in ha.rows.items()} == before
 
 
-async def test_map_rewrite_failure_rolls_back(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """If saving the final map fails after the renames, they are reverted."""
-    ha = FakeHA(registry())
-    before = {k: v["name"] for k, v in ha.rows.items()}
-    real_write = tool.write_map
-    calls = {"n": 0}
-
-    def flaky_write(path: Path, changes: list[Any]) -> None:
-        calls["n"] += 1
-        if calls["n"] == 2:
-            msg = "disk full"
-            raise OSError(msg)
-        real_write(path, changes)
-
-    monkeypatch.setattr(tool, "write_map", flaky_write)
-    with pytest.raises(OSError, match="disk full"):
-        await tool.run_rename(
-            ha,
-            tool.read_names(names_csv(tmp_path)),
-            apply=True,
-            map_path=tmp_path / "map.json",
-        )
-    assert {k: v["name"] for k, v in ha.rows.items()} == before
-
-
 async def test_map_exists_before_first_rename(tmp_path: Path) -> None:
     """The undo map is on disk before Home Assistant gets the first update."""
     map_path = tmp_path / "map.json"
@@ -358,3 +335,74 @@ async def test_map_exists_before_first_rename(tmp_path: Path) -> None:
     )
     assert seen
     assert all(seen)
+
+
+async def test_drop_after_first_write_applied_keeps_map_and_undo_restores(
+    tmp_path: Path,
+) -> None:
+    """HA applies the first update, then the connection drops before the reply."""
+
+    class Dropping(FakeHA):
+        async def call(self, message: dict[str, Any]) -> Any:
+            result = await super().call(message)
+            if message["type"] == "config/entity_registry/update":
+                msg = "connection lost"
+                raise ConnectionError(msg)
+            return result
+
+    ha = Dropping(registry())
+    before = {k: v["name"] for k, v in ha.rows.items()}
+    map_path = tmp_path / "map.json"
+    with pytest.raises(ConnectionError):
+        await tool.run_rename(
+            ha, tool.read_names(names_csv(tmp_path)), apply=True, map_path=map_path
+        )
+    assert ha.rows["alarm_control_panel.elk_main"]["name"] == "Main House"
+    assert [c.entity_id for c in tool.read_map(map_path)] == [
+        "alarm_control_panel.elk_main",
+        "binary_sensor.elk_back",
+    ]
+
+    # Connection back: --undo is idempotent, skips the never-written rename.
+    healthy = FakeHA(list(ha.rows.values()))
+    plan = await tool.run_undo(healthy, map_path, apply=True)
+    assert [c.entity_id for c in plan.changes] == ["alarm_control_panel.elk_main"]
+    assert {k: v["name"] for k, v in healthy.rows.items()} == before
+    assert not map_path.exists()
+
+
+async def test_failed_undo_keeps_map(tmp_path: Path) -> None:
+    ha = FakeHA(registry())
+    map_path = tmp_path / "map.json"
+    await tool.run_rename(
+        ha, tool.read_names(names_csv(tmp_path)), apply=True, map_path=map_path
+    )
+
+    class Failing(FakeHA):
+        async def call(self, message: dict[str, Any]) -> Any:
+            if message["type"] == "config/entity_registry/update":
+                msg = "connection lost"
+                raise ConnectionError(msg)
+            return await super().call(message)
+
+    with pytest.raises(ConnectionError):
+        await tool.run_undo(Failing(list(ha.rows.values())), map_path, apply=True)
+    assert map_path.exists()
+
+
+async def test_existing_map_is_not_overwritten_without_force(tmp_path: Path) -> None:
+    map_path = tmp_path / "map.json"
+    map_path.write_text("keep me\n", encoding="utf-8")
+    ha = FakeHA(registry())
+    names = tool.read_names(names_csv(tmp_path))
+    with pytest.raises(ValueError, match="already exists"):
+        await tool.run_rename(ha, names, apply=True, map_path=map_path)
+    assert ha.writes == []
+    assert map_path.read_text(encoding="utf-8") == "keep me\n"
+
+    await tool.run_rename(ha, names, apply=True, map_path=map_path, force=True)
+    assert [c.entity_id for c in tool.read_map(map_path)] == [
+        "alarm_control_panel.elk_main",
+        "binary_sensor.elk_back",
+    ]
+    assert tool.parse_args(["--url", "ws://x", "n.csv", "--force"]).force

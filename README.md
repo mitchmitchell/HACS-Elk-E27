@@ -958,6 +958,11 @@ with `entity_id` and `displayed name (friendly_name)` columns). A registry name 
 the whole displayed name, so by default each entity gets its exact old displayed name (device
 name plus zone name, e.g. "<device> Front Door"); `--original-name` uses the bare name
 ("Front Door") instead.
+`--apply` saves an undo map listing every planned rename before the first write, refuses to
+overwrite an existing map unless you pass `--force`, and never deletes the map, even if it
+fails part way (for example when the connection drops). `--undo` sets each entity back to its
+old name and skips any that already match, so it is safe to re-run; only a successful
+`--undo --apply` removes the map.
 `--to-csv names.csv` only converts the table, without connecting:
 
 ```bash

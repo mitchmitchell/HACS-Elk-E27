@@ -210,35 +210,22 @@ async def list_entities(transport: Transport) -> list[dict[str, Any]]:
     return list(result)
 
 
-async def apply_changes(transport: Transport, changes: list[Change]) -> list[Change]:
+async def apply_changes(transport: Transport, changes: list[Change]) -> None:
     """
-    Write ``changes`` one by one; return the ones that were written.
+    Write ``changes`` one by one, in order; the first error is re-raised.
 
-    On the first error the writes done so far are undone in reverse order and
-    the error is re-raised, so a failed run leaves the registry as it was.
+    There is no automatic rollback: the outcome of a failed write is unknown
+    (the connection may drop after Home Assistant applied it), so recovery is
+    always ``--undo`` with the map saved before the first write.
     """
-    done: list[Change] = []
-    try:
-        for change in changes:
-            await transport.call(
-                {
-                    "type": "config/entity_registry/update",
-                    "entity_id": change.entity_id,
-                    "name": change.after,
-                }
-            )
-            done.append(change)
-    except Exception:
-        for change in reversed(done):
-            await transport.call(
-                {
-                    "type": "config/entity_registry/update",
-                    "entity_id": change.entity_id,
-                    "name": change.before,
-                }
-            )
-        raise
-    return done
+    for change in changes:
+        await transport.call(
+            {
+                "type": "config/entity_registry/update",
+                "entity_id": change.entity_id,
+                "name": change.after,
+            }
+        )
 
 
 def write_map(path: Path, changes: list[Change]) -> None:
@@ -254,8 +241,13 @@ def write_map(path: Path, changes: list[Change]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def map_exists(path: Path) -> bool:
+    """Return True if a map file is already saved at ``path``."""
+    return path.is_file()
+
+
 def remove_map(path: Path) -> None:
-    """Delete a map whose changes were all reverted (nothing left to undo)."""
+    """Delete a map after a successful ``--undo`` (nothing left to undo)."""
     path.unlink(missing_ok=True)
 
 
@@ -269,47 +261,54 @@ def read_map(path: Path) -> list[Change]:
 
 
 async def run_rename(
-    transport: Transport, names: dict[str, str], *, apply: bool, map_path: Path | None
+    transport: Transport,
+    names: dict[str, str],
+    *,
+    apply: bool,
+    map_path: Path | None,
+    force: bool = False,
 ) -> Plan:
-    """Plan, and with ``apply`` write, the renames to ``names``."""
+    """
+    Plan, and with ``apply`` write, the renames to ``names``.
+
+    With ``apply`` the undo map listing every planned rename is written before
+    the first write and is never deleted here, on success or failure; only a
+    successful ``--undo`` removes it. An existing map is never overwritten
+    unless ``force`` is set.
+    """
     plan = build_plan(await list_entities(transport), dict(names))
     if apply and plan.changes:
         if map_path is None:
             msg = "--apply needs --map <file> so the change can be undone"
             raise ValueError(msg)
-        # Write the undo map before the first rename: an unwritable path fails
-        # here with nothing changed, so every apply stays reversible.
+        if not force and map_exists(map_path):
+            msg = f"{map_path} already exists; undo it first or pass --force"
+            raise ValueError(msg)
+        # An unwritable path fails here with nothing changed.
         write_map(map_path, plan.changes)
-        try:
-            done = await apply_changes(transport, plan.changes)
-        except Exception:
-            # apply_changes already restored the names it wrote.
-            remove_map(map_path)
-            raise
-        try:
-            write_map(map_path, done)
-        except OSError:
-            await apply_changes(
-                transport,
-                [Change(c.entity_id, c.after, c.before) for c in reversed(done)],
-            )
-            raise
+        await apply_changes(transport, plan.changes)
     return plan
 
 
 async def run_undo(transport: Transport, map_path: Path, *, apply: bool) -> Plan:
-    """Plan, and with ``apply`` write, the restore of the names in ``map_path``."""
+    """
+    Plan, and with ``apply`` write, the restore of the names in ``map_path``.
+
+    Idempotent: entities already at their old name are skipped, so it can be
+    re-run after a partial apply or a failed undo. The map is removed only
+    after a successful ``--undo --apply``.
+    """
     saved = read_map(map_path)
     wanted: dict[str, str | None] = {c.entity_id: c.before for c in saved}
     plan = build_plan(await list_entities(transport), wanted)
-    if apply and plan.changes:
+    if apply:
+        order = [s.entity_id for s in saved]
         # Newest first: the reverse of the order the map was written in.
         ordered = sorted(
-            plan.changes,
-            key=lambda c: [s.entity_id for s in saved].index(c.entity_id),
-            reverse=True,
+            plan.changes, key=lambda c: order.index(c.entity_id), reverse=True
         )
         await apply_changes(transport, ordered)
+        remove_map(map_path)
     return plan
 
 
@@ -396,6 +395,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--apply", action="store_true", help="write (default: dry run)")
     parser.add_argument("--map", type=Path, help="where --apply saves the undo map")
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="let --apply overwrite an existing --map file",
+    )
+    parser.add_argument(
         "--undo", type=Path, metavar="MAP", help="restore from a saved map"
     )
     args = parser.parse_args(argv)
@@ -421,7 +425,11 @@ async def amain(args: argparse.Namespace) -> int:
             plan = await run_undo(transport, args.undo, apply=args.apply)
         else:
             plan = await run_rename(
-                transport, load_names(args), apply=args.apply, map_path=args.map
+                transport,
+                load_names(args),
+                apply=args.apply,
+                map_path=args.map,
+                force=args.force,
             )
     print(format_plan(plan, apply=args.apply))  # noqa: T201  # CLI output
     return 0
