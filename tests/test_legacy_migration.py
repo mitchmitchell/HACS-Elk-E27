@@ -63,6 +63,7 @@ from custom_components.elke27.migration import (
     legacy_migration_pending,
     new_unique_id,
     parse_legacy_unique_id,
+    validate_legacy_migration_record,
 )
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
@@ -1230,24 +1231,9 @@ def _malformed(name: str) -> str:
 
 
 @pytest.mark.parametrize(("path", "field"), _REQUIRED_FIELDS)
-async def test_malformed_record_raises_not_done(
-    hass: HomeAssistant, panel: ClientHarness, path: str, field: str
-) -> None:
-    """Phase B on a record missing any required field raises; nothing written."""
-    entry, record, name = await _pending_with(hass, path, field)
-    before = registry_view(hass, entry.entry_id)
-    devices_before = device_view(hass, entry.entry_id)
-    with pytest.raises(LegacyMigrationRecordError, match=_malformed(name)) as info:
-        async_apply_legacy_migration(hass, entry, KEY)
-    assert info.value.field == name
-    assert entry.data[CONF_LEGACY_MIGRATION] == record  # never marked done
-    assert registry_view(hass, entry.entry_id) == before
-    assert device_view(hass, entry.entry_id) == devices_before
-
-
-@pytest.mark.parametrize(("path", "field"), _REQUIRED_FIELDS)
 async def test_malformed_record_fails_setup_cleanly(
     hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
     panel: ClientHarness,
     caplog: pytest.LogCaptureFixture,
     path: str,
@@ -1262,17 +1248,14 @@ async def test_malformed_record_fails_setup_cleanly(
     assert entry.data[CONF_LEGACY_MIGRATION] == record
     assert "done_at" not in entry.data[CONF_LEGACY_MIGRATION]
     assert registry_view(hass, entry.entry_id) == before
-    logs = [
-        r.getMessage()
+    # HA logs the ConfigEntryError (field only); we add no second line.
+    setup_logs = [r.getMessage() for r in caplog.records if name in r.getMessage()]
+    assert setup_logs
+    assert not [
+        r
         for r in caplog.records
         if r.name.startswith("custom_components.elke27")
         and "malformed" in r.getMessage()
-    ]
-    assert logs == [
-        (
-            "Elke27 upgrade: LegacyMigrationRecordError: legacy migration record "
-            f"is malformed (missing {name})"
-        )
     ]
     ours = "\n".join(
         r.getMessage()
@@ -1282,7 +1265,9 @@ async def test_malformed_record_fails_setup_cleanly(
     assert KEY not in ours
     assert LEGACY_SERIAL not in ours
     # Diagnostics degrade to type + field only, for every required field.
-    assert migration_diagnostics(entry) == {
+    assert await async_setup_component(hass, "diagnostics", {})
+    result = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+    assert result["legacy_registry_migration"] == {
         "error": "LegacyMigrationRecordError",
         "field": name,
     }
@@ -1301,6 +1286,7 @@ async def test_malformed_record_fails_setup_cleanly(
 )
 async def test_invalid_record_value_diagnostics_type_and_field(
     hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
     panel: ClientHarness,
     path: str,
     field: str,
@@ -1328,7 +1314,9 @@ async def test_invalid_record_value_diagnostics_type_and_field(
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_ERROR
     assert entry.data[CONF_LEGACY_MIGRATION] == record
-    assert migration_diagnostics(entry) == {
+    assert await async_setup_component(hass, "diagnostics", {})
+    result = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+    assert result["legacy_registry_migration"] == {
         "error": "LegacyMigrationRecordError",
         "field": name,
     }
@@ -1350,7 +1338,7 @@ async def test_unmappable_plan_row_raises(hass: HomeAssistant) -> None:
         LegacyMigrationRecordError,
         match=r"^legacy migration record is malformed \(unmappable plan\[\]\.kind\)$",
     ):
-        async_apply_legacy_migration(hass, entry, KEY)
+        validate_legacy_migration_record(entry)
     assert legacy_migration_pending(entry)
     assert registry_view(hass, entry.entry_id) == before
 

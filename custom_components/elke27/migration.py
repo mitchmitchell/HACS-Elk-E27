@@ -26,7 +26,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.const import Platform
 from homeassistant.core import callback
@@ -509,11 +509,8 @@ def _plan_device(
 
 def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
     """Pre-scan with no writes: what Phase B would change, and any conflict."""
-    # Strict reads: a malformed record raises instead of being marked done.
-    state = record_field(entry.data, CONF_LEGACY_MIGRATION)
-    rows = record_field(state, "plan")
-    if not isinstance(rows, list):
-        raise LegacyMigrationRecordError("plan", "invalid")  # noqa: EM101  # field name, not a message
+    # The record was validated by validate_legacy_migration_record (setup).
+    rows = entry.data[CONF_LEGACY_MIGRATION]["plan"]
     plan = _Plan([], None, set(), None, [], 0)
     device_area = _plan_device(hass, entry, key, plan)
     registry = er.async_get(hass)
@@ -523,18 +520,10 @@ def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
     }
     targets: set[tuple[str, str]] = set()
     for row in rows:
-        reg = current.get(record_field(row, "entity_registry_id", "plan[]."))
-        kind = record_field(row, "kind", "plan[].")
-        raw_n = record_field(row, "n", "plan[].")
-        try:
-            n = int(raw_n)
-        except (TypeError, ValueError):
-            raise LegacyMigrationRecordError("plan[].n", "invalid") from None  # noqa: EM101  # field name, not a message
-        target = new_unique_id(key, kind, n)
-        if target is None:
-            # Phase A never plans a row without a 0.2.x unique_id.
-            raise LegacyMigrationRecordError("plan[].kind", "unmappable")  # noqa: EM101  # field name, not a message
-        old_unique_id = record_field(row, "old_unique_id", "plan[].")
+        reg = current.get(row["entity_registry_id"])
+        # Never None: the validator rejects an unmappable row as malformed.
+        target = cast("str", new_unique_id(key, row["kind"], int(row["n"])))
+        old_unique_id = row["old_unique_id"]
         if reg is None:
             # Removed by the user since Phase A: nothing to keep.
             plan.skipped += 1
@@ -643,9 +632,9 @@ def async_apply_legacy_migration(
     All or nothing: on a conflict nothing is written, the migration stays
     pending, the ``legacy_migration_blocked`` Repairs issue names the
     conflicts, and ConfigEntryNotReady stops the platforms from loading.
-    A malformed record raises LegacyMigrationRecordError before any write.
+    The record must already have passed validate_legacy_migration_record
+    (async_setup_entry runs it first); it is not re-checked here.
     """
-    validate_legacy_migration_record(entry)
     plan = _build_phase_b(hass, entry, key)
     partial = False
     if not plan.conflicts:
@@ -696,7 +685,7 @@ def async_apply_legacy_migration(
             translation_placeholders={"count": str(len(plan.conflicts))},
         )
 
-    state = dict(record_field(entry.data, CONF_LEGACY_MIGRATION))
+    state = dict(entry.data[CONF_LEGACY_MIGRATION])
     state["state"] = MIGRATION_STATE_DONE
     state["done_at"] = dt_util.utcnow().isoformat()
     data = {k: v for k, v in entry.data.items() if k != CONF_INTEGRATION_SERIAL}

@@ -106,9 +106,8 @@ def _record_errors_fail_setup() -> Iterator[None]:
     try:
         yield
     except LegacyMigrationRecordError as err:
-        # Type and field only (the message names no value); the record stays
+        # HA logs the ConfigEntryError (field only, no value); the record stays
         # as stored and the entry stays unloaded: a retry can't fix it.
-        _LOGGER.error("Elke27 upgrade: %s: %s", type(err).__name__, err)  # noqa: TRY400
         raise ConfigEntryError(
             translation_domain=DOMAIN,
             translation_key="legacy_migration_record_malformed",
@@ -140,10 +139,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
     # 0.1.x upgrade, Phase B: before the panel device is created and before the
     # platforms register entities, or the new unique_ids would collide.
     if legacy_migration_pending(entry):
-        with _record_errors_fail_setup():
-            async_apply_legacy_migration(
-                hass, entry, entry_identity_key(coordinator, entry)
-            )
+        async_apply_legacy_migration(
+            hass, entry, entry_identity_key(coordinator, entry)
+        )
     async_refresh_duplicates_issue(hass, entry)
     # E2: register the panel device first so area devices can link to it.
     # Area entities link to it by device id (via_device_id) where HA supports it.
