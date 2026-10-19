@@ -33,6 +33,7 @@ from elke27_lib.events import (
     ZoneStatusUpdated,
 )
 
+from homeassistant.components import persistent_notification
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
@@ -654,9 +655,13 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         *,
         attempted: list[ZoneState] | None = None,
         gate: Callable[[], Awaitable[None]] | None = None,
+        raise_code_rejected: bool = True,
     ) -> list[ZoneState]:
         """
         Bypass open, non-bypassed zones assigned to the given area.
+
+        With ``raise_code_rejected`` False, a rejected code is raised as a
+        ZoneBypassFailedError (caused by the refusal) for the caller to report.
 
         Return the zones that were bypassed. Stop at the first failure without
         retrying it (a refusal is reported, never retried); ZoneBypassFailedError
@@ -681,7 +686,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 ) from err
             except HomeAssistantError as err:
                 rejected = code_rejected_error(err)
-                if rejected is not None:
+                if rejected is not None and raise_code_rejected:
                     # A rejected code is a user error: undo, then re-raise as is.
                     await self.async_raise_code_rejected(
                         rejected, bypassed, pin, gate=gate
@@ -784,9 +789,22 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             except _ROLLBACK_ERRORS:  # never hide the refusal behind these
                 still_bypassed = list(bypassed)
         if still_bypassed:
+            zone_ids = ", ".join(str(zone.zone_id) for zone in still_bypassed)
             _LOGGER.warning(
-                "Code rejected; zones still bypassed after rollback: %s",
-                ", ".join(str(zone.zone_id) for zone in still_bypassed),
+                "Code rejected; zones still bypassed after rollback: %s", zone_ids
+            )
+            # Tell the user, not only the log: zone numbers only, never the code.
+            persistent_notification.async_create(
+                self.hass,
+                title="Elk E27 zones still bypassed",
+                message=(
+                    "The code was rejected and these zones could not be"
+                    f" un-bypassed, so they are still bypassed: zones {zone_ids}."
+                    " Clear them with elke27.zone_bypass and bypass: false."
+                ),
+                notification_id=(
+                    f"elke27_code_rejected_bypass_{self.config_entry.entry_id}"
+                ),
             )
         raise rejected
 

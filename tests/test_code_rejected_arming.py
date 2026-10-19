@@ -180,3 +180,113 @@ async def test_rollback_failure_still_raises_code_rejected(
     for message in messages:
         assert CODE not in message
         assert "Back Door" not in message
+
+
+def _arm_automatic_reports(
+    hass: HomeAssistant,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    events: list[dict[str, Any]] = []
+    hass.bus.async_listen(
+        "elke27_arm_automatic_failed", lambda event: events.append(dict(event.data))
+    )
+    return events, []
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "stage", "zone_id", "bypassed", "rolled_back", "still"),
+    [
+        # Zone 1 bypassed, zone 2's bypass refused, zone 1 rolled back.
+        ([None, _rejected(), None], "bypass", 2, [1], [1], []),
+        # Both bypassed, the arm refused, zone 2's rollback refused.
+        ([None, None, _rejected(), _rejected(), None], "arm", None, [1, 2], [1], [2]),
+    ],
+    ids=["bypass_stage", "arm_stage_failed_rollback"],
+)
+async def test_arm_automatic_rejected_code_still_notifies_and_fires_event(
+    hass: HomeAssistant,
+    setup: Setup,
+    caplog: pytest.LogCaptureFixture,
+    outcomes: list[BaseException | None],
+    stage: str,
+    zone_id: int | None,
+    bypassed: list[int],
+    rolled_back: list[int],
+    still: list[int],
+) -> None:
+    client = ScriptedClient(outcomes)
+    await setup(client)
+    caplog.set_level(logging.DEBUG, logger="custom_components.elke27")
+    events, _ = _arm_automatic_reports(hass)
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            "elke27",
+            "alarm_arm_automatic",
+            {"entity_id": ALARM, "mode": "away", ATTR_CODE: CODE},
+            blocking=True,
+        )
+    _assert_code_rejected(err)
+    await hass.async_block_till_done()
+    assert len(events) == 1
+    data = events[0]
+    assert data["stage"] == stage
+    assert data["outcome"] == "not_armed"
+    assert data["zone_id"] == zone_id
+    assert data["bypassed_zone_ids"] == bypassed
+    assert data["rolled_back_zone_ids"] == rolled_back
+    assert data["still_bypassed_zone_ids"] == still
+    assert CODE not in str(data)
+    notifications = [
+        n
+        for key, n in hass.data["persistent_notification"].items()
+        if key.startswith("elke27_arm_automatic_")
+    ]
+    assert len(notifications) == 1
+    assert CODE not in notifications[0]["message"]
+    for record in caplog.records:
+        assert CODE not in record.getMessage()
+
+
+async def test_custom_bypass_failed_rollback_notifies_still_bypassed_zones(
+    hass: HomeAssistant, setup: Setup
+) -> None:
+    client = ScriptedClient([None, None, _rejected(), _rejected(), None])
+    await setup(client)
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            "alarm_control_panel",
+            "alarm_arm_custom_bypass",
+            {"entity_id": ALARM, ATTR_CODE: CODE},
+            blocking=True,
+        )
+    _assert_code_rejected(err)
+    await hass.async_block_till_done()
+    notifications = [
+        n
+        for key, n in hass.data["persistent_notification"].items()
+        if key.startswith("elke27_code_rejected_bypass_")
+    ]
+    assert len(notifications) == 1
+    message = notifications[0]["message"]
+    assert "zones 2." in message
+    assert CODE not in message
+    assert "Back Door" not in message
+    assert "Front Door" not in message
+
+
+async def test_custom_bypass_full_rollback_creates_no_notification(
+    hass: HomeAssistant, setup: Setup
+) -> None:
+    client = ScriptedClient([None, None, _rejected()])
+    await setup(client)
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            "alarm_control_panel",
+            "alarm_arm_custom_bypass",
+            {"entity_id": ALARM, ATTR_CODE: CODE},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+    assert not any(
+        key.startswith("elke27_code_rejected_bypass_")
+        for key in hass.data.get("persistent_notification", {})
+    )

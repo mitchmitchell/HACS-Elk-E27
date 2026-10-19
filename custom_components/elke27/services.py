@@ -309,6 +309,15 @@ async def _async_arm_automatic_locked(
             still_bypassed_zones=still_bypassed,
             config_entry_id=_config_entry_id(entity_entry),
         )
+        rejected = code_rejected_error(cause) if cause is not None else None
+        if rejected is not None:
+            # A rejected code is a user error: reported above, raised as is.
+            if still_bypassed:
+                _LOGGER.warning(
+                    "Code rejected; zones still bypassed after rollback: %s",
+                    ", ".join(str(item.zone_id) for item in still_bypassed),
+                )
+            raise rejected
         detail = f"{zone_bypass_label(zone)}: {reason}" if zone is not None else reason
         msg = f"Area {area_id} was not armed: {_sentence(detail)}"
         if summary:
@@ -375,7 +384,12 @@ async def _async_arm_automatic_locked(
         await _fail("arm", ARM_NOT_SENT_REASON, cause=None)
     try:
         bypassed = await coordinator.async_bypass_faulted_zones(
-            area_id, snapshot, code, attempted=attempted, gate=_gate
+            area_id,
+            snapshot,
+            code,
+            attempted=attempted,
+            gate=_gate,
+            raise_code_rejected=False,
         )
     except ZoneBypassFailedError as err:
         if is_already_armed_refusal(err):
@@ -402,10 +416,8 @@ async def _async_arm_automatic_locked(
     except HomeAssistantError as err:
         rejected = code_rejected_error(err)
         if rejected is not None:
-            # A rejected code is a user error: undo, then re-raise it unchanged.
-            await coordinator.async_raise_code_rejected(
-                rejected, bypassed, code, gate=_gate
-            )
+            # A rejected code is a user error: undo, report, then raise it as is.
+            await _fail("arm", str(rejected), bypassed=bypassed, cause=err)
         # "Already armed" means the area may rely on these bypasses: keep them.
         if is_already_armed_refusal(err):
             await _already_armed(str(err), bypassed, err)
