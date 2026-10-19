@@ -236,17 +236,35 @@ def markdown_file(tmp_path: Path) -> Path:
     return path
 
 
-def test_markdown_names_use_override_else_original_name(tmp_path: Path) -> None:
+def test_markdown_default_is_the_exact_old_displayed_name(tmp_path: Path) -> None:
     assert tool.read_names_markdown(markdown_file(tmp_path)) == {
-        "alarm_control_panel.elk_main": "Main",
-        "binary_sensor.elk_back": "Back Door Pinned",
+        "alarm_control_panel.elk_main": "10.0.0.1 Main",
+        "binary_sensor.elk_back": "10.0.0.1 Back Door",
     }
 
 
-def test_markdown_names_displayed_option(tmp_path: Path) -> None:
-    assert tool.read_names_markdown(markdown_file(tmp_path), displayed=True) == {
-        "alarm_control_panel.elk_main": "10.0.0.1 Main",
-        "binary_sensor.elk_back": "10.0.0.1 Back Door",
+def test_markdown_rebuilds_device_plus_original_name_when_cell_empty(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "rebuild.md"
+    path.write_text(
+        "| entity_id | device | displayed name (friendly_name) "
+        "| registry name (override) | original_name |\n"
+        "|---|---|---|---|---|\n"
+        "| `binary_sensor.a` | 10.0.0.9 |  |  | Gate |\n"
+        "| `binary_sensor.b` | 10.0.0.9 |  | Pinned |  Gate |\n",
+        encoding="utf-8",
+    )
+    assert tool.read_names_markdown(path) == {
+        "binary_sensor.a": "10.0.0.9 Gate",
+        "binary_sensor.b": "Pinned",
+    }
+
+
+def test_markdown_original_name_option(tmp_path: Path) -> None:
+    assert tool.read_names_markdown(markdown_file(tmp_path), original_name=True) == {
+        "alarm_control_panel.elk_main": "Main",
+        "binary_sensor.elk_back": "Back Door Pinned",
     }
 
 
@@ -274,11 +292,69 @@ async def test_markdown_names_drive_a_dry_run(tmp_path: Path) -> None:
     plan = await tool.run_rename(ha, tool.load_names(args), apply=False, map_path=None)
     assert ha.writes == []
     assert {c.entity_id: c.after for c in plan.changes} == {
-        "alarm_control_panel.elk_main": "Main",
-        "binary_sensor.elk_back": "Back Door Pinned",
+        "alarm_control_panel.elk_main": "10.0.0.1 Main",
+        "binary_sensor.elk_back": "10.0.0.1 Back Door",
     }
 
 
 def test_url_required_unless_converting(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         tool.parse_args([str(tmp_path / "n.csv")])
+
+
+async def test_unwritable_map_fails_before_any_rename(tmp_path: Path) -> None:
+    """--map pointing at a directory: error, registry unchanged, nothing to undo."""
+    ha = FakeHA(registry())
+    before = {k: v["name"] for k, v in ha.rows.items()}
+    with pytest.raises(IsADirectoryError):
+        await tool.run_rename(
+            ha, tool.read_names(names_csv(tmp_path)), apply=True, map_path=tmp_path
+        )
+    assert ha.writes == []
+    assert {k: v["name"] for k, v in ha.rows.items()} == before
+
+
+async def test_map_rewrite_failure_rolls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If saving the final map fails after the renames, they are reverted."""
+    ha = FakeHA(registry())
+    before = {k: v["name"] for k, v in ha.rows.items()}
+    real_write = tool.write_map
+    calls = {"n": 0}
+
+    def flaky_write(path: Path, changes: list[Any]) -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            msg = "disk full"
+            raise OSError(msg)
+        real_write(path, changes)
+
+    monkeypatch.setattr(tool, "write_map", flaky_write)
+    with pytest.raises(OSError, match="disk full"):
+        await tool.run_rename(
+            ha,
+            tool.read_names(names_csv(tmp_path)),
+            apply=True,
+            map_path=tmp_path / "map.json",
+        )
+    assert {k: v["name"] for k, v in ha.rows.items()} == before
+
+
+async def test_map_exists_before_first_rename(tmp_path: Path) -> None:
+    """The undo map is on disk before Home Assistant gets the first update."""
+    map_path = tmp_path / "map.json"
+    seen: list[bool] = []
+
+    class Watching(FakeHA):
+        async def call(self, message: dict[str, Any]) -> Any:
+            if message["type"] == "config/entity_registry/update":
+                seen.append(map_path.exists())
+            return await super().call(message)
+
+    ha = Watching(registry())
+    await tool.run_rename(
+        ha, tool.read_names(names_csv(tmp_path)), apply=True, map_path=map_path
+    )
+    assert seen
+    assert all(seen)

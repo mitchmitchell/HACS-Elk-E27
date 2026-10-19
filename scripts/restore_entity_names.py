@@ -25,9 +25,11 @@ Dry run is the default: nothing is written without ``--apply``.
 The names file is CSV with ``entity_id`` and ``name`` columns (extra columns
 are ignored), or, with ``--from-markdown``, the Markdown names table Home
 Automation saved before the upgrade (vault: grokbots/home/
-elk-entity-names-pre-0.2.1.md). From that table the name is the registry
-override when set, else ``original_name`` (``--displayed`` takes the full
-displayed name instead). ``--to-csv out.csv`` only converts, with no connection:
+elk-entity-names-pre-0.2.1.md). A registry name replaces the whole displayed
+name, so from that table the default is the exact old displayed name (device
+name plus original_name, e.g. "<device> Front Door"); ``--original-name`` takes
+the bare override-or-original_name instead ("Front Door"). ``--to-csv out.csv``
+only converts, with no connection:
 
     scripts/restore_entity_names.py --from-markdown names.md --to-csv names.csv
     HA_TOKEN=... scripts/restore_entity_names.py --url ... --from-markdown names.md
@@ -104,14 +106,18 @@ def _cells(line: str) -> list[str]:
     ]
 
 
-def read_names_markdown(path: Path, *, displayed: bool = False) -> dict[str, str]:
+def read_names_markdown(path: Path, *, original_name: bool = False) -> dict[str, str]:
     """
     Read the names table saved before the upgrade (Markdown, one row per entity).
 
-    Uses the first table whose header has an ``entity_id`` column. The name is
-    the ``registry name (override)`` cell when set, else ``original_name``: the
-    entity's own name, which Home Assistant shows after the device name. With
-    ``displayed`` the full ``displayed name (friendly_name)`` cell is used.
+    Uses the first table whose header has an ``entity_id`` column. A registry
+    name replaces the entity's whole displayed name in Home Assistant, so by
+    default the name is the old displayed name exactly: the ``displayed name
+    (friendly_name)`` cell (device name plus original_name, e.g.
+    "<device> Front Door"). If that cell is empty it is rebuilt from the
+    ``registry name (override)`` cell, else ``device`` + ``original_name``.
+    With ``original_name`` the bare override-or-original_name is used instead
+    (e.g. "Front Door", with no device name).
     """
     lines = path.read_text(encoding="utf-8").splitlines()
     header: list[str] | None = None
@@ -130,12 +136,14 @@ def read_names_markdown(path: Path, *, displayed: bool = False) -> dict[str, str
             continue
         row = dict(zip(header, cells, strict=False))
         entity_id = row.get("entity_id", "")
-        if displayed:
-            name = row.get("displayed name (friendly_name)", "")
+        override = row.get("registry name (override)", "")
+        bare = override or row.get("original_name", "")
+        if original_name:
+            name = bare
         else:
-            name = row.get("registry name (override)", "") or row.get(
-                "original_name", ""
-            )
+            device = row.get("device", "")
+            rebuilt = override or (f"{device} {bare}".strip() if bare else "")
+            name = row.get("displayed name (friendly_name)", "") or rebuilt
         if not entity_id or not name:
             continue
         if entity_id in names:
@@ -246,6 +254,11 @@ def write_map(path: Path, changes: list[Change]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def remove_map(path: Path) -> None:
+    """Delete a map whose changes were all reverted (nothing left to undo)."""
+    path.unlink(missing_ok=True)
+
+
 def read_map(path: Path) -> list[Change]:
     """Read a saved map back into changes (in the order they were applied)."""
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -264,8 +277,23 @@ async def run_rename(
         if map_path is None:
             msg = "--apply needs --map <file> so the change can be undone"
             raise ValueError(msg)
-        done = await apply_changes(transport, plan.changes)
-        write_map(map_path, done)
+        # Write the undo map before the first rename: an unwritable path fails
+        # here with nothing changed, so every apply stays reversible.
+        write_map(map_path, plan.changes)
+        try:
+            done = await apply_changes(transport, plan.changes)
+        except Exception:
+            # apply_changes already restored the names it wrote.
+            remove_map(map_path)
+            raise
+        try:
+            write_map(map_path, done)
+        except OSError:
+            await apply_changes(
+                transport,
+                [Change(c.entity_id, c.after, c.before) for c in reversed(done)],
+            )
+            raise
     return plan
 
 
@@ -353,10 +381,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="read NAMES as the Markdown names table instead of CSV",
     )
     parser.add_argument(
-        "--displayed",
+        "--original-name",
         action="store_true",
-        help="with --from-markdown: use the full displayed name (device name "
-        "included) instead of the override or original_name",
+        help="with --from-markdown: use the bare override or original_name "
+        "(no device name) instead of the exact old displayed name",
     )
     parser.add_argument(
         "--to-csv",
@@ -381,7 +409,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def load_names(args: argparse.Namespace) -> dict[str, str]:
     """Read the names file in the format chosen on the command line."""
     if args.from_markdown:
-        return read_names_markdown(args.names, displayed=args.displayed)
+        return read_names_markdown(args.names, original_name=args.original_name)
     return read_names(args.names)
 
 

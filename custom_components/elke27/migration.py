@@ -464,6 +464,31 @@ def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
 
 
 @callback
+def _async_update_row(
+    ent_reg: er.EntityRegistry,
+    change: _Change,
+    current: str,
+    target: str,
+    *,
+    pin: bool,
+) -> None:
+    """
+    Move one row from ``current`` to ``target`` unique_id (and set/clear its pin).
+
+    A row already at ``target`` (an earlier attempt got that far) gets only
+    the area write: HA rejects new_unique_id equal to the entity's own as a
+    conflict, which would block the upgrade on every attempt.
+    """
+    updates: dict[str, Any] = {}
+    if current != target:
+        updates["new_unique_id"] = target
+    if change.pin_area is not None:
+        updates["area_id"] = change.pin_area if pin else None
+    if updates:
+        ent_reg.async_update_entity(change.entity_id, **updates)
+
+
+@callback
 def _async_write(hass: HomeAssistant, plan: _Plan) -> None:
     """Apply ``plan``; on any error undo what was written and re-raise."""
     ent_reg = er.async_get(hass)
@@ -477,31 +502,21 @@ def _async_write(hass: HomeAssistant, plan: _Plan) -> None:
             )
             device_moved = True
         for change in plan.changes:
-            if change.pin_area is not None:
-                ent_reg.async_update_entity(
-                    change.entity_id,
-                    new_unique_id=change.new_unique_id,
-                    area_id=change.pin_area,
-                )
-            else:
-                ent_reg.async_update_entity(
-                    change.entity_id, new_unique_id=change.new_unique_id
-                )
+            _async_update_row(
+                ent_reg, change, change.old_unique_id, change.new_unique_id, pin=True
+            )
             undo.append(change)
     except (ValueError, HomeAssistantError) as err:
         failed = 0
         for change in reversed(undo):
             try:
-                if change.pin_area is not None:
-                    ent_reg.async_update_entity(
-                        change.entity_id,
-                        new_unique_id=change.old_unique_id,
-                        area_id=None,
-                    )
-                else:
-                    ent_reg.async_update_entity(
-                        change.entity_id, new_unique_id=change.old_unique_id
-                    )
+                _async_update_row(
+                    ent_reg,
+                    change,
+                    change.new_unique_id,
+                    change.old_unique_id,
+                    pin=False,
+                )
             except (ValueError, HomeAssistantError):
                 failed += 1
         if device_moved and plan.device_id is not None:

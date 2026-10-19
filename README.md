@@ -953,8 +953,10 @@ panels and zones that took their area from the panel device keep that area. If y
 old displayed names back, `scripts/restore_entity_names.py` renames entities from a saved
 list (dry run by default, with undo; see its `--help`). It reads an `entity_id,name` CSV, or
 with `--from-markdown` the Markdown names table saved before the upgrade (one row per entity
-with `entity_id`, `registry name (override)` and `original_name` columns; the override is
-used when set, else `original_name`, or the full displayed name with `--displayed`).
+with `entity_id` and `displayed name (friendly_name)` columns). A registry name replaces
+the whole displayed name, so by default each entity gets its exact old displayed name (device
+name plus zone name, e.g. "<device> Front Door"); `--original-name` uses the bare name
+("Front Door") instead.
 `--to-csv names.csv` only converts the table, without connecting:
 
 ```bash

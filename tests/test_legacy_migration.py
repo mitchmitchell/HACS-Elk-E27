@@ -736,6 +736,42 @@ async def test_migration_is_idempotent(
     assert registry_view(hass, entry.entry_id) == after
 
 
+async def test_retry_on_partly_migrated_registry_succeeds(
+    hass: HomeAssistant, panel: ClientHarness
+) -> None:
+    """Rows already at their new unique_id but still needing the area pin."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    legacy = seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    await _phase_a_on_relinked(hass, entry)
+    ent_reg = er.async_get(hass)
+    # An earlier attempt got this far: alarm panel and zone 40 (both inherit
+    # the device area, so both need the pin) and zone 1 already rewritten.
+    for key in ("area:1", "zone:40", "zone:1"):
+        kind, n = key.split(":")
+        ent_reg.async_update_entity(legacy[key], new_unique_id=_new_uid(kind, int(n)))
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert not legacy_migration_pending(entry)
+    assert blocked_issue_id(entry.entry_id) not in our_issues(hass)
+    closet = ar.async_get(hass).async_get_area_by_name("Master Closet")
+    assert closet is not None
+    for key in ("area:1", "zone:40"):
+        current = ent_reg.async_get(legacy[key])
+        assert current is not None
+        assert current.area_id == closet.id
+    for key, entity_id in legacy.items():
+        kind, n = key.split(":")
+        current = ent_reg.async_get(entity_id)
+        assert current is not None
+        assert current.unique_id == _new_uid(kind, int(n))
+
+
 async def test_panel_offline_after_relink_keeps_pending(
     hass: HomeAssistant, panel: ClientHarness
 ) -> None:
