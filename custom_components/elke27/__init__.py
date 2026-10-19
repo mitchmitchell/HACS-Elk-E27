@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import logging
 from typing import TYPE_CHECKING
 
@@ -32,6 +33,7 @@ from .migration import (
     blocked_issue_id,
     duplicates_issue_id,
     legacy_migration_pending,
+    validate_legacy_migration_record,
 )
 from .models import Elke27ConfigEntry, Elke27RuntimeData
 from .panel_mac import mismatch_issue_id
@@ -50,6 +52,8 @@ from .services import (  # noqa: F401  # re-exported; tests and callers import t
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from homeassistant.core import HomeAssistant, ServiceCall
     from homeassistant.helpers.typing import ConfigType
 
@@ -96,8 +100,27 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
     return True
 
 
+@contextmanager
+def _record_errors_fail_setup() -> Iterator[None]:
+    """Turn LegacyMigrationRecordError into a ConfigEntryError (type + field)."""
+    try:
+        yield
+    except LegacyMigrationRecordError as err:
+        # Type and field only (the message names no value); the record stays
+        # as stored and the entry stays unloaded: a retry can't fix it.
+        _LOGGER.error("Elke27 upgrade: %s: %s", type(err).__name__, err)  # noqa: TRY400
+        raise ConfigEntryError(
+            translation_domain=DOMAIN,
+            translation_key="legacy_migration_record_malformed",
+            translation_placeholders={"field": err.field},
+        ) from None
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Set up Elke27 from a config entry."""
+    # A malformed 0.1.x upgrade record is never run, skipped or marked done.
+    with _record_errors_fail_setup():
+        validate_legacy_migration_record(entry)
     # E1: the client sn is the flow-generated integration ID. A 0.1.x entry
     # (migration pending) has none: the re-link (reauth) draws one and links
     # again. A 0.2.x entry without a valid one can't occur; it stays an error.
@@ -117,19 +140,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
     # 0.1.x upgrade, Phase B: before the panel device is created and before the
     # platforms register entities, or the new unique_ids would collide.
     if legacy_migration_pending(entry):
-        try:
+        with _record_errors_fail_setup():
             async_apply_legacy_migration(
                 hass, entry, entry_identity_key(coordinator, entry)
             )
-        except LegacyMigrationRecordError as err:
-            # Type and field only (the message names no value); the record
-            # stays pending and the entry stays unloaded: a retry can't fix it.
-            _LOGGER.error("Elke27 upgrade: %s: %s", type(err).__name__, err)  # noqa: TRY400
-            raise ConfigEntryError(
-                translation_domain=DOMAIN,
-                translation_key="legacy_migration_record_malformed",
-                translation_placeholders={"field": err.field},
-            ) from None
     async_refresh_duplicates_issue(hass, entry)
     # E2: register the panel device first so area devices can link to it.
     # Area entities link to it by device id (via_device_id) where HA supports it.

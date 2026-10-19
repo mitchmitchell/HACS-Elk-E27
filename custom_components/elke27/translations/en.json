@@ -172,7 +172,7 @@
       "message": "The upgrade from 0.1.x was interrupted and some changes could not be undone; see Repairs. Reload to finish it."
     },
     "legacy_migration_record_malformed": {
-      "message": "The stored upgrade record from 0.1.x is malformed (field {field}). Nothing was changed. Restore the backup taken before the upgrade, or delete and re-add the integration."
+      "message": "The stored 0.1.x upgrade record is malformed (field {field}), so the upgrade was not run and nothing was changed. To recover, restore the Home Assistant backup taken before the upgrade, or reinstall Elk E27 0.1.x and upgrade again. See the README troubleshooting section."
     }
   },
   "selector": {

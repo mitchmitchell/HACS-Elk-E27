@@ -166,6 +166,48 @@ def legacy_migration_state(entry: ConfigEntry) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+_ROW_FIELDS: dict[str, tuple[str, ...]] = {
+    "plan": ("entity_registry_id", "domain", "kind", "n", "old_unique_id"),
+    "duplicates": ("entity_registry_id", "entity_id", "old_unique_id"),
+    "skipped": ("entity_registry_id", "entity_id", "old_unique_id"),
+}
+
+
+def validate_legacy_migration_record(entry: ConfigEntry) -> None:
+    """
+    Raise LegacyMigrationRecordError unless the stored 0.1.x record is usable.
+
+    A ``done`` record is history and is not re-checked. Anything else must
+    have every field Phase B and diagnostics read; no field is defaulted, so
+    a malformed record is never run, skipped or marked done.
+    """
+    if CONF_LEGACY_MIGRATION not in entry.data:
+        return
+    record = record_field(entry.data, CONF_LEGACY_MIGRATION)
+    if not isinstance(record, Mapping):
+        raise LegacyMigrationRecordError("record", "invalid")  # noqa: EM101  # field name
+    state = record_field(record, "state")
+    if state == MIGRATION_STATE_DONE:
+        return
+    if state != MIGRATION_STATE_PENDING:
+        raise LegacyMigrationRecordError("state", "invalid")  # noqa: EM101  # field name
+    record_field(record, "from")
+    for name, fields in _ROW_FIELDS.items():
+        rows = record_field(record, name)
+        if not isinstance(rows, list):
+            raise LegacyMigrationRecordError(name, "invalid")
+        for row in rows:
+            for field in fields:
+                record_field(row, field, f"{name}[].")
+    for row in record["plan"]:
+        try:
+            n = int(row["n"])
+        except (TypeError, ValueError):
+            raise LegacyMigrationRecordError("plan[].n", "invalid") from None  # noqa: EM101  # field name
+        if new_unique_id("key", row["kind"], n) is None:
+            raise LegacyMigrationRecordError("plan[].kind", "unmappable")  # noqa: EM101  # field name
+
+
 def legacy_migration_pending(entry: ConfigEntry) -> bool:
     """Return True while Phase B still has to run for this entry."""
     state = legacy_migration_state(entry)
@@ -601,7 +643,9 @@ def async_apply_legacy_migration(
     All or nothing: on a conflict nothing is written, the migration stays
     pending, the ``legacy_migration_blocked`` Repairs issue names the
     conflicts, and ConfigEntryNotReady stops the platforms from loading.
+    A malformed record raises LegacyMigrationRecordError before any write.
     """
+    validate_legacy_migration_record(entry)
     plan = _build_phase_b(hass, entry, key)
     partial = False
     if not plan.conflicts:

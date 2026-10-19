@@ -1175,58 +1175,92 @@ async def test_blocked_raises_not_ready(hass: HomeAssistant) -> None:
     assert legacy_migration_pending(entry)
 
 
-@pytest.mark.parametrize("drop", ["plan", "from", "state"])
-async def test_malformed_record_raises_not_done(
-    hass: HomeAssistant, panel: ClientHarness, drop: str
-) -> None:
-    """
-    Strict reads: a malformed record raises the dedicated error, never done.
+_ROW = {
+    "entity_registry_id": "0" * 32,
+    "entity_id": "binary_sensor.elk_extra",
+    "old_unique_id": f"{KEY}:zone:99",
+}
+# (path, field): every field the migration reads, top level and per row.
+_REQUIRED_FIELDS = [
+    ("", "state"),
+    ("", "from"),
+    ("", "plan"),
+    ("", "duplicates"),
+    ("", "skipped"),
+    *[
+        ("plan", f)
+        for f in ("entity_registry_id", "domain", "kind", "n", "old_unique_id")
+    ],
+    *[
+        (name, f)
+        for name in ("duplicates", "skipped")
+        for f in ("entity_registry_id", "entity_id", "old_unique_id")
+    ],
+]
 
-    Phase B (no-plan) raises and writes nothing; diagnostics degrade to the
-    error type and field name. Neither names a value or key.
-    """
+
+def _drop(record: dict[str, Any], path: str, field: str) -> tuple[dict, str]:
+    """Return a copy of ``record`` without ``field``, and its reported name."""
+    record = dict(record)
+    if not path:
+        record.pop(field)
+        return record, field
+    rows = [dict(row) for row in record[path]] or [dict(_ROW)]
+    rows[0].pop(field)
+    record[path] = rows
+    return record, f"{path}[].{field}"
+
+
+async def _pending_with(
+    hass: HomeAssistant, path: str, field: str
+) -> tuple[MockConfigEntry, dict[str, Any], str]:
     entry = entry_relinked()
     entry.add_to_hass(hass)
     seed_legacy_registry(hass, entry, base=KEY, device_identifier=KEY)
     await _phase_a_on_relinked(hass, entry)
-    record = {k: v for k, v in entry.data[CONF_LEGACY_MIGRATION].items() if k != drop}
+    record, name = _drop(dict(entry.data[CONF_LEGACY_MIGRATION]), path, field)
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
     )
+    return entry, record, name
+
+
+def _malformed(name: str) -> str:
+    return rf"^legacy migration record is malformed \(missing {re.escape(name)}\)$"
+
+
+@pytest.mark.parametrize(("path", "field"), _REQUIRED_FIELDS)
+async def test_malformed_record_raises_not_done(
+    hass: HomeAssistant, panel: ClientHarness, path: str, field: str
+) -> None:
+    """Phase B on a record missing any required field raises; nothing written."""
+    entry, record, name = await _pending_with(hass, path, field)
     before = registry_view(hass, entry.entry_id)
     devices_before = device_view(hass, entry.entry_id)
-    message = rf"^legacy migration record is malformed \(missing {drop}\)$"
-    if drop == "plan":
-        with pytest.raises(LegacyMigrationRecordError, match=message) as info:
-            async_apply_legacy_migration(hass, entry, KEY)
-        assert info.value.field == "plan"
+    with pytest.raises(LegacyMigrationRecordError, match=_malformed(name)) as info:
+        async_apply_legacy_migration(hass, entry, KEY)
+    assert info.value.field == name
     assert entry.data[CONF_LEGACY_MIGRATION] == record  # never marked done
     assert registry_view(hass, entry.entry_id) == before
     assert device_view(hass, entry.entry_id) == devices_before
-    diag = migration_diagnostics(entry)
-    assert diag == {"error": "LegacyMigrationRecordError", "field": drop}
 
 
+@pytest.mark.parametrize(("path", "field"), _REQUIRED_FIELDS)
 async def test_malformed_record_fails_setup_cleanly(
-    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant,
+    panel: ClientHarness,
+    caplog: pytest.LogCaptureFixture,
+    path: str,
+    field: str,
 ) -> None:
-    """Setup: SETUP_ERROR, record stays pending, log names type and field only."""
-    entry = entry_relinked()
-    entry.add_to_hass(hass)
-    seed_legacy_registry(hass, entry, base=KEY, device_identifier=KEY)
-    await _phase_a_on_relinked(hass, entry)
-    record = dict(entry.data[CONF_LEGACY_MIGRATION])
-    record["plan"] = [
-        {k: v for k, v in row.items() if k != "old_unique_id"} for row in record["plan"]
-    ]
-    hass.config_entries.async_update_entry(
-        entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
-    )
+    """Setup: SETUP_ERROR, record unchanged (not done), log has type + field only."""
+    entry, record, name = await _pending_with(hass, path, field)
     before = registry_view(hass, entry.entry_id)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_ERROR
-    assert legacy_migration_pending(entry)
+    assert entry.data[CONF_LEGACY_MIGRATION] == record
+    assert "done_at" not in entry.data[CONF_LEGACY_MIGRATION]
     assert registry_view(hass, entry.entry_id) == before
     logs = [
         r.getMessage()
@@ -1237,11 +1271,22 @@ async def test_malformed_record_fails_setup_cleanly(
     assert logs == [
         (
             "Elke27 upgrade: LegacyMigrationRecordError: legacy migration record "
-            "is malformed (missing plan[].old_unique_id)"
+            f"is malformed (missing {name})"
         )
     ]
-    assert KEY not in caplog.text
-    assert LEGACY_SERIAL not in caplog.text
+    ours = "\n".join(
+        r.getMessage()
+        for r in caplog.records
+        if r.name.startswith("custom_components.elke27")
+    )
+    assert KEY not in ours
+    assert LEGACY_SERIAL not in ours
+    if not path or field == "old_unique_id":
+        # Diagnostics degrade to type + field instead of crashing.
+        assert migration_diagnostics(entry) == {
+            "error": "LegacyMigrationRecordError",
+            "field": name,
+        }
 
 
 async def test_unmappable_plan_row_raises(hass: HomeAssistant) -> None:

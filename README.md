@@ -752,6 +752,7 @@ Host, panel MAC, unique ID and client ID are redacted; link keys are never inclu
 | *The panel requires linking…* | Enter the access code and passphrase again. |
 | *No panels were discovered…* | The panel is online and on the same network segment, and UDP broadcast on port 2362 isn't blocked. Otherwise use **Manual setup**. |
 | *This panel is already configured.* | The panel already has an entry, matched by MAC address, or by the panel's serial number when it reports a real one, or, if neither is reported, by the same host and port. |
+| *The stored 0.1.x upgrade record is malformed…* | The upgrade from 0.1.x didn't run and nothing was changed. Restore the Home Assistant backup taken before the upgrade, or reinstall Elk E27 0.1.x and upgrade again. Download diagnostics first if you plan to report it. The `legacy_registry_migration` field names the bad field, with no values. |
 
 ### Panel error messages
 
