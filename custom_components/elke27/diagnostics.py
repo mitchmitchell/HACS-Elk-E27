@@ -174,6 +174,15 @@ def migration_diagnostics(entry: Elke27ConfigEntry) -> dict[str, Any] | None:
         return f"{REDACTED}:{match.group('kind')}:{match.group('n')}"
 
     def rows(name: str) -> list[dict[str, Any]]:
+        # A done record is not re-validated, so type-check here as well: a
+        # non-list section or non-mapping row degrades instead of crashing.
+        section = record_field(state, name)
+        if not isinstance(section, list):
+            raise LegacyMigrationRecordError(name, "invalid")
+        row_field = f"{name}[]"
+        for row in section:
+            if not isinstance(row, Mapping):
+                raise LegacyMigrationRecordError(row_field, "invalid")
         return [
             {
                 **{k: v for k, v in row.items() if k != "old_unique_id"},
@@ -181,7 +190,7 @@ def migration_diagnostics(entry: Elke27ConfigEntry) -> dict[str, Any] | None:
                     str(record_field(row, "old_unique_id", f"{name}[]."))
                 ),
             }
-            for row in record_field(state, name)
+            for row in section
         ]
 
     try:

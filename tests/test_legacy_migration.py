@@ -1693,3 +1693,35 @@ async def test_017_relink_link_failure_logs_type_only_and_retries(
     assert entry.state is ConfigEntryState.LOADED
     assert entry.data[CONF_LEGACY_MIGRATION]["state"] == "done"
     assert entry.unique_id == KEY
+
+
+@pytest.mark.parametrize(
+    ("plan", "field"),
+    [
+        ({"not": "a list"}, "plan"),
+        ("text", "plan"),
+        ([["not", "a", "mapping"]], "plan[]"),
+        (["row"], "plan[]"),
+    ],
+)
+def test_diagnostics_degrade_on_non_list_or_non_mapping_rows(
+    plan: Any, field: str
+) -> None:
+    """A done record (not re-validated) with bad shapes degrades, never raises."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_LEGACY_MIGRATION: {
+                "from": 1,
+                "state": "done",
+                "done_at": "2026-01-01T00:00:00+00:00",
+                "plan": plan,
+                "duplicates": [],
+                "skipped": [],
+            }
+        },
+    )
+    assert migration_diagnostics(entry) == {
+        "error": "LegacyMigrationRecordError",
+        "field": field,
+    }
