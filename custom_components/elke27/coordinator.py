@@ -69,6 +69,7 @@ from .errors import (
     _error_message,
     is_connection_error,
     is_timeout_error,
+    panel_error_code,
 )
 from .identity import build_client_identity
 from .panel_mac import async_verify_panel_mac
@@ -132,7 +133,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._host: str = entry.data[CONF_HOST]
         self._port: int = entry.data[CONF_PORT]
         self._link_keys_json: dict[str, str] = entry.data[CONF_LINK_KEYS_JSON]
-        self._integration_id: str = entry.data.get(CONF_INTEGRATION_ID) or ""
+        self._integration_id: str = entry.data[CONF_INTEGRATION_ID]
         self._panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
         self._client: Elke27Client | None = None
         # Device id of the panel device, set in async_setup_entry (E2 via link).
@@ -858,17 +859,14 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         Asks elke27 to probe the panel now, so a dead link is detected within
         the keepalive timeout instead of at the next scheduled keepalive. When
         the probe fails the library disconnects and the reconnect loop starts.
-        Older elke27 versions without request_link_check() fall back to their
-        own keepalive.
         """
         if not is_timeout_error(err):
             return
         client = self._client
-        check = getattr(client, "request_link_check", None)
-        if check is None:
+        if client is None:
             return
         try:
-            check()
+            client.request_link_check()
         except COMMAND_ERRORS as check_err:
             _LOGGER.debug("Link check request failed: %s", check_err)
 
@@ -1431,7 +1429,7 @@ def _log_command_failure(
     kind: str, target_id: int, action: str, err: Exception
 ) -> None:
     """Log a rejected arm/disarm/bypass, with the panel error code when known."""
-    panel_code = getattr(err, "panel_error_code", None)
+    panel_code = panel_error_code(err)
     if panel_code is not None:
         _LOGGER.warning(
             "%s %s %s failed: %s (panel error %s)",
