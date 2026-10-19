@@ -17,9 +17,26 @@ from elke27_lib.errors import (
     Elke27TimeoutError,
 )
 
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import (
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+)
+
+from .const import DOMAIN
 
 NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
+
+
+# The panel refuses a user code it does not accept (wrong code, or a code not
+# allowed for this action) with ELKERR_NOAUTH.
+PANEL_ERROR_CODE_REJECTED = 11008
+
+
+CODE_REJECTED_MESSAGE = (
+    "The panel rejected the code. Check the user code and that it is allowed"
+    " for this area."
+)
 
 
 TIMEOUT_MESSAGE = (
@@ -95,3 +112,20 @@ def _error_message(err: BaseException) -> str:
     if is_connection_error(err):
         return CONNECTION_MESSAGE
     return str(err) or type(err).__name__
+
+
+def command_error(err: BaseException) -> HomeAssistantError:
+    """
+    Return the Home Assistant error to raise for a failed code command.
+
+    A code the panel refused is a user error, so it becomes a translated
+    ServiceValidationError; anything else stays a HomeAssistantError. The
+    message never includes the code.
+    """
+    if panel_error_code(err) == PANEL_ERROR_CODE_REJECTED:
+        return ServiceValidationError(
+            CODE_REJECTED_MESSAGE,
+            translation_domain=DOMAIN,
+            translation_key="code_rejected",
+        )
+    return HomeAssistantError(_error_message(err))

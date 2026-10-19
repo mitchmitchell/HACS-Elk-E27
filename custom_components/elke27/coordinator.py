@@ -67,6 +67,7 @@ from .errors import (
     COMMAND_ERRORS,
     NOT_ACCEPTED_MESSAGE,
     _error_message,
+    command_error,
     is_connection_error,
     is_timeout_error,
     panel_error_code,
@@ -813,7 +814,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_error(err) from err
         await self._async_after_write(
             "bypass", refresh_ok=refresh_ok, zone_id=zone_id, epoch=epoch
         )
@@ -915,7 +916,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_error(err) from err
         await self._async_after_write(
             "arm", refresh_ok=refresh_ok, area_id=area_id, epoch=epoch
         )
@@ -973,7 +974,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_error(err) from err
         await self._async_after_write(
             "disarm", refresh_ok=refresh_ok, area_id=area_id, epoch=epoch
         )
