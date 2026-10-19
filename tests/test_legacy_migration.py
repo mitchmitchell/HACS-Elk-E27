@@ -1916,6 +1916,42 @@ async def test_blocked_flow_rechecks_targets_at_submit(
     assert ent_reg.async_get(owned.entity_id) is not None
 
 
+async def test_blocked_flow_deletes_only_shown_and_reconfirms_new(
+    hass: HomeAssistant, panel: ClientHarness
+) -> None:
+    """A leftover that appears after the form is shown survives and is re-listed."""
+    entry, owned, _foreign = await _blocked_entry(hass)
+    manager = await _flow_manager(hass)
+    with patch.object(hass.config_entries, "async_schedule_reload") as reload:
+        result = await manager.async_init(
+            DOMAIN, data={"issue_id": blocked_issue_id(entry.entry_id)}
+        )
+        assert result["step_id"] == "confirm"
+        ent_reg = er.async_get(hass)
+        late = ent_reg.async_get_or_create(
+            "binary_sensor",
+            DOMAIN,
+            _new_uid("zone", 4),
+            config_entry=entry,
+            suggested_object_id="trial_late",
+        )
+        assert late.entity_id not in result["description_placeholders"]["entities"]
+        result = await manager.async_configure(result["flow_id"], {})
+        # Only the shown entity is deleted; the new one is confirmed again.
+        assert ent_reg.async_get(owned.entity_id) is None
+        assert ent_reg.async_get(late.entity_id) is not None
+        assert result["type"] == "form"
+        assert result["step_id"] == "confirm"
+        listed = result["description_placeholders"]["entities"]
+        assert late.entity_id in listed
+        assert owned.entity_id not in listed
+        reload.assert_not_called()
+        result = await manager.async_configure(result["flow_id"], {})
+    assert result["type"] == "create_entry"
+    assert ent_reg.async_get(late.entity_id) is None
+    reload.assert_called_once_with(entry.entry_id)
+
+
 async def test_retry_flows_reload(hass: HomeAssistant) -> None:
     """Interrupted and write-failed issues: submitting retries (reloads)."""
     entry = MockConfigEntry(domain=DOMAIN, version=2)

@@ -244,7 +244,7 @@
         "step": {
           "confirm": {
             "title": "Finish the Elk E27 upgrade",
-            "description": "Select **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept."
+            "description": "Select **Submit** to reload Elk E27 and run the upgrade again. Nothing was changed by the failed attempt, so it starts from the beginning."
           }
         },
         "abort": {

@@ -116,6 +116,8 @@ class RecordRebuildFlow(_EntryFlow):
 class BlockedUpgradeFlow(_EntryFlow):
     """Blocked upgrade: confirm deleting the leftover entities, then retry."""
 
+    _shown: frozenset[str] = frozenset()
+
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,  # noqa: ARG002  # issue data
@@ -135,10 +137,15 @@ class BlockedUpgradeFlow(_EntryFlow):
         entry = self._entry()
         if entry is None:
             return self.async_abort(reason="entry_missing")
-        if user_input is not None:
-            self._delete(entry)
-            return self._finish()
+        if user_input is not None and self._shown:
+            unshown = self._delete(entry, self._shown)
+            if not unshown:
+                return self._finish()
         shown = blocking_entities(self.hass, entry) or []
+        if not shown:
+            return self._finish()
+        # Only what this form lists may be deleted on submit.
+        self._shown = frozenset(reg.id for reg in shown)
         return self.async_show_form(
             step_id="confirm",
             data_schema=vol.Schema({}),
@@ -155,14 +162,18 @@ class BlockedUpgradeFlow(_EntryFlow):
             return self._finish()
         return self.async_show_form(step_id="retry", data_schema=vol.Schema({}))
 
-    def _delete(self, entry: ConfigEntry) -> None:
+    def _delete(self, entry: ConfigEntry, shown: frozenset[str]) -> bool:
+        """Delete shown leftovers that still block; True if new ones appeared."""
         # Re-checked at submit: still this entry's, this platform's, and still
-        # holding a planned 0.2.x target. Anything else is left alone.
-        targets = blocking_entities(self.hass, entry) or []
+        # holding a planned 0.2.x target. Only entities listed on the confirm
+        # form are deleted; anything else is left alone and re-confirmed.
+        current = blocking_entities(self.hass, entry) or []
+        targets = [reg for reg in current if reg.id in shown]
         registry = er.async_get(self.hass)
         for reg in targets:
             registry.async_remove(reg.entity_id)
         _LOGGER.info("Elke27 upgrade: deleted %d leftover entities", len(targets))
+        return len(targets) < len(current)
 
 
 async def async_create_fix_flow(
