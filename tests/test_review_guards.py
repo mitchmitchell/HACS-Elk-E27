@@ -63,8 +63,9 @@ def _test_modules() -> list[Path]:
 _NOQA = re.compile(r"#\s*(ruff:\s*)?noqa:([^#]*)")
 WATCHED = ("SLF001", "BLE001")
 
-# "<file>:<code>" -> lines that silence it ("<file>:<code>:file" for a file-level
-# "# ruff: noqa" header). New tests use the public API and never add to this.
+# "<file>:<code>" -> lines that silence it. The key ends in ":file" for a
+# file-level ruff noqa header. Codes may be comma- or space-separated, as ruff
+# accepts both. New tests use the public API and never add to this.
 NOQA_CEILING: dict[str, int] = {
     "custom_components/elke27/coordinator.py:BLE001": 4,
     "custom_components/elke27/panel_mac.py:BLE001": 1,
@@ -86,7 +87,7 @@ def _noqa_counts() -> dict[str, int]:
     for path in [*_files(SOURCE), *_test_modules()]:
         for line in path.read_text(encoding="utf-8").splitlines():
             for match in _NOQA.finditer(line):
-                codes = {c.strip() for c in match.group(2).split(",")}
+                codes = set(re.split(r"[\s,]+", match.group(2).strip()))
                 for code in WATCHED:
                     if code in codes:
                         key = f"{_rel(path)}:{code}" + (
