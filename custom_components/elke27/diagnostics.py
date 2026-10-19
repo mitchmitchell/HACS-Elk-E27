@@ -31,6 +31,7 @@ from .migration import (
     LegacyMigrationRecordError,
     legacy_migration_state,
     record_field,
+    validate_legacy_migration_record,
 )
 
 # Host, MAC, panel serial (unique_id may be a serial or MAC), integration ID and
@@ -184,6 +185,9 @@ def migration_diagnostics(entry: Elke27ConfigEntry) -> dict[str, Any] | None:
         ]
 
     try:
+        # Same check setup runs: any malformed field or value (top level,
+        # per row, or an invalid state) yields type + field only.
+        validate_legacy_migration_record(entry)
         return {
             "from": record_field(state, "from"),
             "state": record_field(state, "state"),

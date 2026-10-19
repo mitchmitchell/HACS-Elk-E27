@@ -1281,12 +1281,57 @@ async def test_malformed_record_fails_setup_cleanly(
     )
     assert KEY not in ours
     assert LEGACY_SERIAL not in ours
-    if not path or field == "old_unique_id":
-        # Diagnostics degrade to type + field instead of crashing.
-        assert migration_diagnostics(entry) == {
-            "error": "LegacyMigrationRecordError",
-            "field": name,
-        }
+    # Diagnostics degrade to type + field only, for every required field.
+    assert migration_diagnostics(entry) == {
+        "error": "LegacyMigrationRecordError",
+        "field": name,
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "field", "value", "name"),
+    [
+        ("", "state", "bogus", "state"),
+        ("plan", "n", "x", "plan[].n"),
+        ("plan", "kind", "panel", "plan[].kind"),
+        ("", "plan", "nope", "plan"),
+        ("", "duplicates", "nope", "duplicates"),
+        ("", "skipped", "nope", "skipped"),
+    ],
+)
+async def test_invalid_record_value_diagnostics_type_and_field(
+    hass: HomeAssistant,
+    panel: ClientHarness,
+    path: str,
+    field: str,
+    value: Any,
+    name: str,
+) -> None:
+    """Invalid values: setup fails and diagnostics give type + field only."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(hass, entry, base=KEY, device_identifier=KEY)
+    await _phase_a_on_relinked(hass, entry)
+    record = dict(entry.data[CONF_LEGACY_MIGRATION])
+    if path:
+        rows = [dict(row) for row in record[path]]
+        rows[0][field] = value
+        if field == "kind":
+            rows[0]["n"] = 99
+        record[path] = rows
+    else:
+        record[field] = value
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
+    )
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.data[CONF_LEGACY_MIGRATION] == record
+    assert migration_diagnostics(entry) == {
+        "error": "LegacyMigrationRecordError",
+        "field": name,
+    }
 
 
 async def test_unmappable_plan_row_raises(hass: HomeAssistant) -> None:
