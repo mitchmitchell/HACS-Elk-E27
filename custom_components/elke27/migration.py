@@ -226,6 +226,15 @@ async def async_migrate_legacy_entry(hass: HomeAssistant, entry: ConfigEntry) ->
         "state": MIGRATION_STATE_PENDING,
         "plan": plan,
         "duplicates": duplicates,
+        # 0.1.x rows with no 0.2.x counterpart (panel sensors other than 1 and 2).
+        "skipped": [
+            {
+                "entity_registry_id": row.entity_registry_id,
+                "entity_id": row.entity_id,
+                "old_unique_id": row.old_unique_id,
+            }
+            for row in unmapped
+        ],
     }
     updates: dict[str, Any] = {
         "version": 2,

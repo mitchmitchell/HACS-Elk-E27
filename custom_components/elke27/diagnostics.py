@@ -182,4 +182,5 @@ def migration_diagnostics(entry: Elke27ConfigEntry) -> dict[str, Any] | None:
         "done_at": state.get("done_at"),
         "plan": rows("plan"),
         "duplicates": rows("duplicates"),
+        "skipped": rows("skipped"),
     }

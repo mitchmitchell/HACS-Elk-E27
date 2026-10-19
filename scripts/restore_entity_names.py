@@ -23,8 +23,15 @@ Dry run is the default: nothing is written without ``--apply``.
         --apply
 
 The names file is CSV with ``entity_id`` and ``name`` columns (extra columns
-are ignored), like the read-only inventory Home Automation saves before the
-upgrade. The access token comes from the ``HA_TOKEN`` environment variable or a
+are ignored), or, with ``--from-markdown``, the Markdown names table Home
+Automation saved before the upgrade (vault: grokbots/home/
+elk-entity-names-pre-0.2.1.md). From that table the name is the registry
+override when set, else ``original_name`` (``--displayed`` takes the full
+displayed name instead). ``--to-csv out.csv`` only converts, with no connection:
+
+    scripts/restore_entity_names.py --from-markdown names.md --to-csv names.csv
+    HA_TOKEN=... scripts/restore_entity_names.py --url ... --from-markdown names.md
+ The access token comes from the ``HA_TOKEN`` environment variable or a
 hidden prompt. It is never printed, logged or written to a file; the saved map
 holds entity IDs and names only. No alarm codes or PINs are handled.
 """
@@ -89,6 +96,64 @@ def read_names(path: Path) -> dict[str, str]:
                 raise ValueError(msg)
             names[entity_id] = name
     return names
+
+
+def _cells(line: str) -> list[str]:
+    return [
+        cell.strip().strip("`").strip() for cell in line.strip().strip("|").split("|")
+    ]
+
+
+def read_names_markdown(path: Path, *, displayed: bool = False) -> dict[str, str]:
+    """
+    Read the names table saved before the upgrade (Markdown, one row per entity).
+
+    Uses the first table whose header has an ``entity_id`` column. The name is
+    the ``registry name (override)`` cell when set, else ``original_name``: the
+    entity's own name, which Home Assistant shows after the device name. With
+    ``displayed`` the full ``displayed name (friendly_name)`` cell is used.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    header: list[str] | None = None
+    names: dict[str, str] = {}
+    for line in lines:
+        if not line.lstrip().startswith("|"):
+            if header is not None and names:
+                break
+            continue
+        cells = _cells(line)
+        if header is None:
+            if "entity_id" in cells:
+                header = [cell.lower() for cell in cells]
+            continue
+        if set("".join(cells)) <= set("-: "):
+            continue
+        row = dict(zip(header, cells, strict=False))
+        entity_id = row.get("entity_id", "")
+        if displayed:
+            name = row.get("displayed name (friendly_name)", "")
+        else:
+            name = row.get("registry name (override)", "") or row.get(
+                "original_name", ""
+            )
+        if not entity_id or not name:
+            continue
+        if entity_id in names:
+            msg = f"{path}: duplicate entity_id {entity_id}"
+            raise ValueError(msg)
+        names[entity_id] = name
+    if header is None:
+        msg = f"{path}: no Markdown table with an entity_id column"
+        raise ValueError(msg)
+    return names
+
+
+def write_csv(path: Path, names: dict[str, str]) -> None:
+    """Write ``names`` as the entity_id,name CSV this script reads."""
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["entity_id", "name"])
+        writer.writerows(sorted(names.items()))
 
 
 def build_plan(registry: list[dict[str, Any]], wanted: dict[str, str | None]) -> Plan:
@@ -275,10 +340,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Rename Elk E27 entities back to saved names (dry run by default)."
     )
-    parser.add_argument("names", nargs="?", type=Path, help="CSV: entity_id,name")
     parser.add_argument(
-        "--url", required=True, help="e.g. ws://homeassistant.local:8123"
+        "names",
+        nargs="?",
+        type=Path,
+        help="CSV with entity_id,name columns, or with --from-markdown the saved "
+        "names table (grokbots/home/elk-entity-names-pre-0.2.1.md)",
     )
+    parser.add_argument(
+        "--from-markdown",
+        action="store_true",
+        help="read NAMES as the Markdown names table instead of CSV",
+    )
+    parser.add_argument(
+        "--displayed",
+        action="store_true",
+        help="with --from-markdown: use the full displayed name (device name "
+        "included) instead of the override or original_name",
+    )
+    parser.add_argument(
+        "--to-csv",
+        type=Path,
+        metavar="CSV",
+        help="only convert NAMES to an entity_id,name CSV and exit (no connection)",
+    )
+    parser.add_argument("--url", help="e.g. ws://homeassistant.local:8123")
     parser.add_argument("--apply", action="store_true", help="write (default: dry run)")
     parser.add_argument("--map", type=Path, help="where --apply saves the undo map")
     parser.add_argument(
@@ -287,7 +373,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if (args.names is None) == (args.undo is None):
         parser.error("give either a names CSV or --undo MAP")
+    if args.to_csv is None and not args.url:
+        parser.error("--url is required")
     return args
+
+
+def load_names(args: argparse.Namespace) -> dict[str, str]:
+    """Read the names file in the format chosen on the command line."""
+    if args.from_markdown:
+        return read_names_markdown(args.names, displayed=args.displayed)
+    return read_names(args.names)
 
 
 async def amain(args: argparse.Namespace) -> int:
@@ -298,7 +393,7 @@ async def amain(args: argparse.Namespace) -> int:
             plan = await run_undo(transport, args.undo, apply=args.apply)
         else:
             plan = await run_rename(
-                transport, read_names(args.names), apply=args.apply, map_path=args.map
+                transport, load_names(args), apply=args.apply, map_path=args.map
             )
     print(format_plan(plan, apply=args.apply))  # noqa: T201  # CLI output
     return 0
@@ -308,6 +403,11 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point."""
     args = parse_args(argv)
     try:
+        if args.to_csv is not None:
+            names = load_names(args)
+            write_csv(args.to_csv, names)
+            print(f"wrote {len(names)} rows to {args.to_csv}")  # noqa: T201  # CLI output
+            return 0
         return asyncio.run(amain(args))
     except (ValueError, RuntimeError, PermissionError, OSError) as err:
         print(f"error: {err}", file=sys.stderr)  # noqa: T201  # CLI output

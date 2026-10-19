@@ -1,4 +1,4 @@
-# ruff: noqa: S101, D102, D103, D107, PLR2004, TC003
+# ruff: noqa: S101, E501, D102, D103, D107, PLR2004, TC003
 """Tests for scripts/restore_entity_names.py (dry run, apply, undo, rollback)."""
 
 from __future__ import annotations
@@ -210,3 +210,75 @@ def test_cli_needs_exactly_one_of_names_or_undo(tmp_path: Path) -> None:
         )
     args = tool.parse_args(["--url", "ws://ha:8123", str(tmp_path / "n.csv")])
     assert args.apply is False
+
+
+MARKDOWN = """# Saved names (dummy data)
+
+- Rows: 3
+
+| # | entity_id | domain | displayed name (friendly_name) | registry name (override) | original_name | icon override |
+|---|---|---|---|---|---|---|
+| 1 | `alarm_control_panel.elk_main` | alarm_control_panel | 10.0.0.1 Main |  | Main |  |
+| 2 | `binary_sensor.elk_back` | binary_sensor | 10.0.0.1 Back Door | Back Door Pinned | Back Door | mdi:door |
+| 3 | `binary_sensor.elk_blank` | binary_sensor |  |  |  |  |
+
+## Notes
+
+| entity_id | other table |
+|---|---|
+| `binary_sensor.ignored` | x |
+"""
+
+
+def markdown_file(tmp_path: Path) -> Path:
+    path = tmp_path / "names.md"
+    path.write_text(MARKDOWN, encoding="utf-8")
+    return path
+
+
+def test_markdown_names_use_override_else_original_name(tmp_path: Path) -> None:
+    assert tool.read_names_markdown(markdown_file(tmp_path)) == {
+        "alarm_control_panel.elk_main": "Main",
+        "binary_sensor.elk_back": "Back Door Pinned",
+    }
+
+
+def test_markdown_names_displayed_option(tmp_path: Path) -> None:
+    assert tool.read_names_markdown(markdown_file(tmp_path), displayed=True) == {
+        "alarm_control_panel.elk_main": "10.0.0.1 Main",
+        "binary_sensor.elk_back": "10.0.0.1 Back Door",
+    }
+
+
+def test_markdown_without_table_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "none.md"
+    path.write_text("# nothing\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="entity_id column"):
+        tool.read_names_markdown(path)
+
+
+def test_to_csv_converts_without_connecting(tmp_path: Path) -> None:
+    out = tmp_path / "names.csv"
+    code = tool.main(
+        ["--from-markdown", str(markdown_file(tmp_path)), "--to-csv", str(out)]
+    )
+    assert code == 0
+    assert tool.read_names(out) == tool.read_names_markdown(markdown_file(tmp_path))
+
+
+async def test_markdown_names_drive_a_dry_run(tmp_path: Path) -> None:
+    ha = FakeHA(registry())
+    args = tool.parse_args(
+        ["--url", "ws://ha:8123", "--from-markdown", str(markdown_file(tmp_path))]
+    )
+    plan = await tool.run_rename(ha, tool.load_names(args), apply=False, map_path=None)
+    assert ha.writes == []
+    assert {c.entity_id: c.after for c in plan.changes} == {
+        "alarm_control_panel.elk_main": "Main",
+        "binary_sensor.elk_back": "Back Door Pinned",
+    }
+
+
+def test_url_required_unless_converting(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        tool.parse_args([str(tmp_path / "n.csv")])

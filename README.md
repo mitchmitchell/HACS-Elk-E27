@@ -950,7 +950,18 @@ zones sit under it, named after the area (for example "Main House Front Door"). 
 do not change, so only dashboard captions that show friendly names look different. Alarm
 panels and zones that took their area from the panel device keep that area. If you want the
 old displayed names back, `scripts/restore_entity_names.py` renames entities from a saved
-list (dry run by default, with undo; see its `--help`).
+list (dry run by default, with undo; see its `--help`). It reads an `entity_id,name` CSV, or
+with `--from-markdown` the Markdown names table saved before the upgrade (one row per entity
+with `entity_id`, `registry name (override)` and `original_name` columns; the override is
+used when set, else `original_name`, or the full displayed name with `--displayed`).
+`--to-csv names.csv` only converts the table, without connecting:
+
+```bash
+scripts/restore_entity_names.py --from-markdown names.md --to-csv names.csv
+HA_TOKEN=... scripts/restore_entity_names.py --url ws://homeassistant.local:8123 names.csv
+HA_TOKEN=... scripts/restore_entity_names.py --url ... names.csv --apply --map applied-map.json
+HA_TOKEN=... scripts/restore_entity_names.py --url ... --undo applied-map.json --apply
+```
 
 Already on 0.2.0 (deleted and re-added)? Nothing changes for you. Went from 0.1.x to 0.2.0 by
 mistake? Don't delete the entry: update to 0.2.1 and re-link. Requires elke27 0.3.14, which

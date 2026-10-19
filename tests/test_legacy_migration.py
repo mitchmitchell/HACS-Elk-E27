@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import dataclasses
+import logging
 from types import MappingProxyType
 from typing import Any
 from unittest.mock import AsyncMock, create_autospec, patch
@@ -53,7 +54,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
@@ -609,7 +610,8 @@ async def test_failure_mid_write_rolls_back_everything(
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    assert calls["n"] > 4  # three writes, the failure, then the undo
+    # Three writes (the device move came first), the failure, then three undos.
+    assert calls["n"] == 7
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
     assert registry_view(hass, entry.entry_id) == before
@@ -626,6 +628,32 @@ async def test_failure_mid_write_rolls_back_everything(
     current = er.async_get(hass).async_get(legacy["area:1"])
     assert current is not None
     assert current.unique_id == _new_uid("area", 1)
+
+
+async def test_failure_on_device_move_writes_nothing(
+    hass: HomeAssistant, panel: ClientHarness
+) -> None:
+    """A device registry error on the first write leaves every row as it was."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    await _phase_a_on_relinked(hass, entry)
+    before = registry_view(hass, entry.entry_id)
+    devices_before = device_view(hass, entry.entry_id)
+
+    def broken(self: dr.DeviceRegistry, device_id: str, **kwargs: Any) -> Any:
+        msg = "simulated device failure"
+        raise HomeAssistantError(msg)
+
+    with patch.object(dr.DeviceRegistry, "async_update_device", broken):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert legacy_migration_pending(entry)
+    assert registry_view(hass, entry.entry_id) == before
+    assert device_view(hass, entry.entry_id) == devices_before
 
 
 async def test_migration_is_idempotent(
@@ -800,6 +828,38 @@ async def test_unparseable_and_unmapped_rows_are_left_alone(
         current = ent_reg.async_get(reg.entity_id)
         assert current is not None
         assert current.unique_id == reg.unique_id
+
+
+async def test_skipped_panel_sensors_are_logged_and_in_diagnostics(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Panel sensors other than 1 and 2: WARNING, listed (redacted) in diagnostics."""
+    entry = entry_017()
+    entry.add_to_hass(hass)
+    reg = er.async_get(hass).async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{LEGACY_SERIAL}:panel:3",
+        config_entry=entry,
+        suggested_object_id="elk_panel_extra",
+    )
+    with caplog.at_level(logging.WARNING, logger="custom_components.elke27"):
+        assert await async_migrate_entry(hass, entry)
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(reg.entity_id in r.getMessage() for r in warnings)
+    state = entry.data[CONF_LEGACY_MIGRATION]
+    assert [row["entity_registry_id"] for row in state["skipped"]] == [reg.id]
+    assert state["plan"] == []
+    diag = migration_diagnostics(entry)
+    assert diag is not None
+    assert diag["skipped"] == [
+        {
+            "entity_registry_id": reg.id,
+            "entity_id": reg.entity_id,
+            "old_unique_id": "**REDACTED**:panel:3",
+        }
+    ]
+    assert LEGACY_SERIAL not in repr(diag)
 
 
 async def test_newer_entry_version_is_refused(hass: HomeAssistant) -> None:
