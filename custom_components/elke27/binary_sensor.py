@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.binary_sensor import (
@@ -66,10 +65,16 @@ _ZONE_OPEN_ICON_BY_DEFINITION = {
     "HILO TEMP": "mdi:thermometer-alert",
 }
 
-# Words in a zone name that mark a motion detector. Used only when the panel
-# sends no zone type (#101): the definition alone can't tell, since BURG
-# INTERIOR covers interior door contacts as well as motion detectors.
-_MOTION_NAME_WORDS = ("motion", "pir")
+# Device class by Zone Definition, per Elk guidance: the panel records each
+# zone's logical definition, not the physical sensor, so the definition alone
+# decides the class. Zone names and zone types never affect it. Definitions not
+# listed here get no device class (a generic binary sensor).
+_DEVICE_CLASS_BY_DEFINITION: dict[str, BinarySensorDeviceClass] = {
+    "BURG INTERIOR": BinarySensorDeviceClass.MOTION,
+    "BURG PERIM INST": BinarySensorDeviceClass.OPENING,
+    "BURG EE DELAY": BinarySensorDeviceClass.OPENING,
+    "FIRE": BinarySensorDeviceClass.SMOKE,
+}
 
 
 async def async_setup_entry(
@@ -143,7 +148,6 @@ class Elke27ZoneBinarySensor(
 ):
     """Representation of an Elke27 zone."""
 
-    _attr_device_class = BinarySensorDeviceClass.OPENING
     _attr_has_entity_name = True
     _attr_translation_key = "zone"
 
@@ -266,31 +270,8 @@ def _zone_name(zone: ZoneState, zone_definition: ZoneDefinition | None) -> str |
 
 def _zone_device_class(
     zone_definition: ZoneDefinition | None,
-) -> BinarySensorDeviceClass:
-    zone_type = None
-    if zone_definition is not None:
-        zone_type = zone_definition.zone_type or zone_definition.kind
-    # Temporary until elke27_lib ships py.typed (strict mypy treats fields as Any).
-    if isinstance(zone_type, str):
-        normalized = zone_type.lower()
-        if "motion" in normalized:
-            return BinarySensorDeviceClass.MOTION
-        if "window" in normalized:
-            return BinarySensorDeviceClass.WINDOW
-        if "door" in normalized:
-            return BinarySensorDeviceClass.DOOR
-    # No zone type from the panel (#101): a BURG INTERIOR zone named as a
-    # motion detector is motion; anything else stays opening.
-    if (
-        not zone_type
-        and zone_definition is not None
-        and zone_definition.definition == "BURG INTERIOR"
-        and _name_says_motion(zone_definition.name)
-    ):
-        return BinarySensorDeviceClass.MOTION
-    return BinarySensorDeviceClass.OPENING
-
-
-def _name_says_motion(name: str | None) -> bool:
-    words = re.findall(r"[a-z]+", (name or "").lower())
-    return any(word in _MOTION_NAME_WORDS for word in words)
+) -> BinarySensorDeviceClass | None:
+    definition = _zone_definition_value(zone_definition)
+    if definition is None:
+        return None
+    return _DEVICE_CLASS_BY_DEFINITION.get(definition.strip().upper())
