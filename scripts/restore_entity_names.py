@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import csv
 from dataclasses import dataclass
 import getpass
@@ -210,12 +211,26 @@ async def list_entities(transport: Transport) -> list[dict[str, Any]]:
     return list(result)
 
 
+class RollbackError(RuntimeError):
+    """A failed apply whose rollback also failed; some renames are still applied."""
+
+    def __init__(self, still_applied: list[Change]) -> None:
+        """Keep the changes that may still be applied, in the order written."""
+        super().__init__(
+            f"rollback failed: {len(still_applied)} rename(s) may still be applied"
+        )
+        self.still_applied = still_applied
+
+
 async def apply_changes(transport: Transport, changes: list[Change]) -> list[Change]:
     """
     Write ``changes`` one by one; return the ones that were written.
 
     On the first error the writes done so far are undone in reverse order and
-    the error is re-raised, so a failed run leaves the registry as it was.
+    the error is re-raised, so a failed run leaves the registry as it was. If
+    an undo write fails too (e.g. the connection dropped), ``RollbackError`` is
+    raised with every change that may still be applied, including the one
+    whose write failed (its outcome is unknown; undoing it is harmless).
     """
     done: list[Change] = []
     try:
@@ -229,14 +244,20 @@ async def apply_changes(transport: Transport, changes: list[Change]) -> list[Cha
             )
             done.append(change)
     except Exception:
-        for change in reversed(done):
-            await transport.call(
-                {
-                    "type": "config/entity_registry/update",
-                    "entity_id": change.entity_id,
-                    "name": change.before,
-                }
-            )
+        failed = changes[len(done)]
+        pending = list(done)
+        try:
+            for change in reversed(done):
+                await transport.call(
+                    {
+                        "type": "config/entity_registry/update",
+                        "entity_id": change.entity_id,
+                        "name": change.before,
+                    }
+                )
+                pending.pop()
+        except Exception as rollback_err:
+            raise RollbackError([*pending, failed]) from rollback_err
         raise
     return done
 
@@ -254,6 +275,11 @@ def write_map(path: Path, changes: list[Change]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def map_exists(path: Path) -> bool:
+    """Return True if a map file is already saved at ``path``."""
+    return path.is_file()
+
+
 def remove_map(path: Path) -> None:
     """Delete a map whose changes were all reverted (nothing left to undo)."""
     path.unlink(missing_ok=True)
@@ -269,21 +295,41 @@ def read_map(path: Path) -> list[Change]:
 
 
 async def run_rename(
-    transport: Transport, names: dict[str, str], *, apply: bool, map_path: Path | None
+    transport: Transport,
+    names: dict[str, str],
+    *,
+    apply: bool,
+    map_path: Path | None,
+    force: bool = False,
 ) -> Plan:
-    """Plan, and with ``apply`` write, the renames to ``names``."""
+    """
+    Plan, and with ``apply`` write, the renames to ``names``.
+
+    The undo map is deleted only after a verified clean rollback; if the
+    rollback fails it is rewritten with the renames that may still be applied.
+    An existing map is never overwritten unless ``force`` is set.
+    """
     plan = build_plan(await list_entities(transport), dict(names))
     if apply and plan.changes:
         if map_path is None:
             msg = "--apply needs --map <file> so the change can be undone"
+            raise ValueError(msg)
+        if not force and map_exists(map_path):
+            msg = f"{map_path} already exists; undo it first or pass --force"
             raise ValueError(msg)
         # Write the undo map before the first rename: an unwritable path fails
         # here with nothing changed, so every apply stays reversible.
         write_map(map_path, plan.changes)
         try:
             done = await apply_changes(transport, plan.changes)
+        except RollbackError as err:
+            # Some renames may still be applied: keep a map of exactly those.
+            # If even that write fails, the full pre-apply map stays on disk.
+            with contextlib.suppress(OSError):
+                write_map(map_path, err.still_applied)
+            raise
         except Exception:
-            # apply_changes already restored the names it wrote.
+            # apply_changes verified every written name was restored.
             remove_map(map_path)
             raise
         try:
@@ -396,6 +442,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--apply", action="store_true", help="write (default: dry run)")
     parser.add_argument("--map", type=Path, help="where --apply saves the undo map")
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="let --apply overwrite an existing --map file",
+    )
+    parser.add_argument(
         "--undo", type=Path, metavar="MAP", help="restore from a saved map"
     )
     args = parser.parse_args(argv)
@@ -421,7 +472,11 @@ async def amain(args: argparse.Namespace) -> int:
             plan = await run_undo(transport, args.undo, apply=args.apply)
         else:
             plan = await run_rename(
-                transport, load_names(args), apply=args.apply, map_path=args.map
+                transport,
+                load_names(args),
+                apply=args.apply,
+                map_path=args.map,
+                force=args.force,
             )
     print(format_plan(plan, apply=args.apply))  # noqa: T201  # CLI output
     return 0

@@ -358,3 +358,56 @@ async def test_map_exists_before_first_rename(tmp_path: Path) -> None:
     )
     assert seen
     assert all(seen)
+
+
+async def test_failed_rollback_keeps_map_of_what_is_still_applied(
+    tmp_path: Path,
+) -> None:
+    """Connection drops mid-apply: every update after the first fails, map survives."""
+
+    class Dropping(FakeHA):
+        async def call(self, message: dict[str, Any]) -> Any:
+            if message["type"] == "config/entity_registry/update" and self.writes:
+                msg = "connection lost"
+                raise ConnectionError(msg)
+            return await super().call(message)
+
+    ha = Dropping(registry())
+    map_path = tmp_path / "map.json"
+    with pytest.raises(tool.RollbackError):
+        await tool.run_rename(
+            ha, tool.read_names(names_csv(tmp_path)), apply=True, map_path=map_path
+        )
+    assert ha.rows["alarm_control_panel.elk_main"]["name"] == "Main House"
+    assert map_path.exists()
+    saved = tool.read_map(map_path)
+    assert [c.entity_id for c in saved] == [
+        "alarm_control_panel.elk_main",
+        "binary_sensor.elk_back",
+    ]
+    assert saved[0].before is None
+    assert saved[0].after == "Main House"
+
+    # Once the connection is back, --undo restores the pre-apply names.
+    healthy = FakeHA(list(ha.rows.values()))
+    await tool.run_undo(healthy, map_path, apply=True)
+    assert healthy.rows["alarm_control_panel.elk_main"]["name"] is None
+    assert healthy.rows["binary_sensor.elk_back"]["name"] is None
+
+
+async def test_existing_map_is_not_overwritten_without_force(tmp_path: Path) -> None:
+    map_path = tmp_path / "map.json"
+    map_path.write_text("keep me\n", encoding="utf-8")
+    ha = FakeHA(registry())
+    names = tool.read_names(names_csv(tmp_path))
+    with pytest.raises(ValueError, match="already exists"):
+        await tool.run_rename(ha, names, apply=True, map_path=map_path)
+    assert ha.writes == []
+    assert map_path.read_text(encoding="utf-8") == "keep me\n"
+
+    await tool.run_rename(ha, names, apply=True, map_path=map_path, force=True)
+    assert [c.entity_id for c in tool.read_map(map_path)] == [
+        "alarm_control_panel.elk_main",
+        "binary_sensor.elk_back",
+    ]
+    assert tool.parse_args(["--url", "ws://x", "n.csv", "--force"]).force
