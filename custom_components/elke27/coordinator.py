@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from elke27_lib import (
     ClientConfig,
@@ -39,6 +39,7 @@ from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
+    ServiceValidationError,
 )
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -67,6 +68,7 @@ from .errors import (
     COMMAND_ERRORS,
     NOT_ACCEPTED_MESSAGE,
     _error_message,
+    code_rejected_error,
     command_error,
     is_connection_error,
     is_timeout_error,
@@ -107,6 +109,9 @@ DEBOUNCED_REFRESH_ERRORS: tuple[type[Exception], ...] = (
     *COMMAND_ERRORS,
     HomeAssistantError,
 )
+
+
+_ROLLBACK_ERRORS: tuple[type[Exception], ...] = (HomeAssistantError, *COMMAND_ERRORS)
 
 
 class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
@@ -675,6 +680,12 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                     zone, PIN_REQUIRED_REASON, bypassed, pin_required=True
                 ) from err
             except HomeAssistantError as err:
+                rejected = code_rejected_error(err)
+                if rejected is not None:
+                    # A rejected code is a user error: undo, then re-raise as is.
+                    await self.async_raise_code_rejected(
+                        rejected, bypassed, pin, gate=gate
+                    )
                 raise ZoneBypassFailedError(zone, str(err), bypassed) from err
             if not acknowledged:
                 raise ZoneBypassFailedError(
@@ -749,6 +760,35 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     def cancelled_by_disarm(self, task: asyncio.Task[Any] | None) -> bool:
         """Return True when the task was cancelled by cancel_arm_automatic."""
         return task is not None and task in self._disarm_cancelled
+
+    async def async_raise_code_rejected(
+        self,
+        rejected: ServiceValidationError,
+        bypassed: Sequence[ZoneState],
+        pin: str | None,
+        *,
+        gate: Callable[[], Awaitable[None]] | None = None,
+    ) -> NoReturn:
+        """
+        Roll back ``bypassed``, then re-raise the code_rejected error unchanged.
+
+        A failed rollback never replaces the refusal: the zones still bypassed
+        are logged by zone number only and ``rejected`` is raised regardless.
+        """
+        still_bypassed: list[ZoneState] = []
+        if bypassed:
+            try:
+                _rolled_back, still_bypassed = await self.async_rollback_bypasses(
+                    tuple(bypassed), pin, gate=gate
+                )
+            except _ROLLBACK_ERRORS:  # never hide the refusal behind these
+                still_bypassed = list(bypassed)
+        if still_bypassed:
+            _LOGGER.warning(
+                "Code rejected; zones still bypassed after rollback: %s",
+                ", ".join(str(zone.zone_id) for zone in still_bypassed),
+            )
+        raise rejected
 
     async def async_rollback_bypasses(
         self,

@@ -30,6 +30,7 @@ from .arming import (
     zone_bypass_label,
 )
 from .const import DOMAIN
+from .errors import code_rejected_error
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -151,7 +152,9 @@ async def _async_handle_alarm_arm_automatic(
             )
         except HomeAssistantError as err:
             failures.append(err)
-    if len(failures) == 1:
+    if len(failures) == 1 or (
+        failures and all(code_rejected_error(err) is err for err in failures)
+    ):
         raise failures[0]
     if failures:
         details = "; ".join(str(err) for err in failures)
@@ -397,6 +400,12 @@ async def _async_arm_automatic_locked(
     except Elke27PinRequiredError as err:
         await _fail("arm", PIN_REQUIRED_REASON, bypassed=bypassed, cause=err)
     except HomeAssistantError as err:
+        rejected = code_rejected_error(err)
+        if rejected is not None:
+            # A rejected code is a user error: undo, then re-raise it unchanged.
+            await coordinator.async_raise_code_rejected(
+                rejected, bypassed, code, gate=_gate
+            )
         # "Already armed" means the area may rely on these bypasses: keep them.
         if is_already_armed_refusal(err):
             await _already_armed(str(err), bypassed, err)

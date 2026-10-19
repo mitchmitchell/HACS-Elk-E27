@@ -129,3 +129,26 @@ def command_error(err: BaseException) -> HomeAssistantError:
             translation_key="code_rejected",
         )
     return HomeAssistantError(_error_message(err))
+
+
+def code_rejected_error(err: BaseException) -> ServiceValidationError | None:
+    """
+    Return the code_rejected error to re-raise unchanged, or None.
+
+    Walks the cause chain: an existing code_rejected ServiceValidationError is
+    returned as is; a bare 11008 panel refusal gets one built by command_error.
+    """
+    seen: BaseException | None = err
+    while seen is not None:
+        if (
+            isinstance(seen, ServiceValidationError)
+            and seen.translation_key == "code_rejected"
+        ):
+            return seen
+        seen = seen.__cause__
+    if panel_error_code(err) == PANEL_ERROR_CODE_REJECTED:
+        rejected = command_error(err)
+        rejected.__cause__ = err
+        if isinstance(rejected, ServiceValidationError):
+            return rejected
+    return None
