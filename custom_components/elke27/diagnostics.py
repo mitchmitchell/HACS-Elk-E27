@@ -174,8 +174,11 @@ def migration_diagnostics(entry: Elke27ConfigEntry) -> dict[str, Any] | None:
         return f"{REDACTED}:{match.group('kind')}:{match.group('n')}"
 
     def rows(name: str) -> list[dict[str, Any]]:
-        # A done record is not re-validated, so type-check here as well: a
-        # non-list section or non-mapping row degrades instead of crashing.
+        # Setup does not re-validate a done record, and a done record can
+        # predate the validator: pre-release 0.2.x builds marked records done
+        # behind .get() fallbacks, and storage can be hand-edited. So
+        # type-check here too: a non-list section or non-mapping row degrades
+        # instead of crashing.
         section = record_field(state, name)
         if not isinstance(section, list):
             raise LegacyMigrationRecordError(name, "invalid")

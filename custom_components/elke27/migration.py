@@ -49,6 +49,7 @@ from .const import (
     ISSUE_LEGACY_DUPLICATES,
     ISSUE_LEGACY_MIGRATION_BLOCKED,
     ISSUE_LEGACY_MIGRATION_PARTIAL,
+    ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED,
     ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
     MIGRATION_STATE_DONE,
     MIGRATION_STATE_PENDING,
@@ -121,7 +122,10 @@ AREA_PIN_DOMAINS = frozenset({Platform.ALARM_CONTROL_PANEL, Platform.BINARY_SENS
 
 _AREA_DEVICE_RE = re.compile(r":area:\d+$")
 _FORMATTED_MAC_RE = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
-_MAX_LISTED = 20
+# In-memory only (never persisted, never logged): the identity key the last
+# blocked Phase B used, so the Repairs flow can recompute the same targets.
+# Issues are not persistent either, so both vanish together on restart.
+_BLOCKED_KEYS = f"{DOMAIN}_legacy_blocked_keys"
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +239,11 @@ def blocked_issue_id(entry_id: str) -> str:
     return f"{ISSUE_LEGACY_MIGRATION_BLOCKED}_{entry_id}"
 
 
+def record_issue_id(entry_id: str) -> str:
+    """Return the Repairs issue id for an unreadable upgrade record."""
+    return f"{ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED}_{entry_id}"
+
+
 def duplicates_issue_id(entry_id: str) -> str:
     """Return the Repairs issue id for duplicate legacy entities."""
     return f"{ISSUE_LEGACY_DUPLICATES}_{entry_id}"
@@ -286,28 +295,13 @@ async def async_migrate_legacy_entry(hass: HomeAssistant, entry: ConfigEntry) ->
     the version bump. Anything else is a 0.1.x entry: its plan is stored and
     marked pending for Phase B.
     """
-    rows = _order_by_newest(hass, entry, _legacy_rows(hass, entry))
-    if is_valid_integration_id(entry.data.get(CONF_INTEGRATION_ID)) and not rows:
+    planned = _plan_record(hass, entry)
+    if planned is None:
         hass.config_entries.async_update_entry(entry, version=2, minor_version=1)
         _LOGGER.debug("Elke27 entry: 0.2.0 entry, version bump only")
         return True
-
-    plan, duplicates, unmapped = _build_plan(rows)
-    record: dict[str, Any] = {
-        "from": "0.1.x",
-        "state": MIGRATION_STATE_PENDING,
-        "plan": plan,
-        "duplicates": duplicates,
-        # 0.1.x rows with no 0.2.x counterpart (panel sensors other than 1 and 2).
-        "skipped": [
-            {
-                "entity_registry_id": row.entity_registry_id,
-                "entity_id": row.entity_id,
-                "old_unique_id": row.old_unique_id,
-            }
-            for row in unmapped
-        ],
-    }
+    record, unmapped = planned
+    plan, duplicates = record["plan"], record["duplicates"]
     updates: dict[str, Any] = {
         "version": 2,
         "minor_version": 1,
@@ -333,6 +327,116 @@ async def async_migrate_legacy_entry(hass: HomeAssistant, entry: ConfigEntry) ->
         len(unmapped),
     )
     return True
+
+
+def _plan_record(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> tuple[dict[str, Any], list[LegacyRow]] | None:
+    """
+    Plan the upgrade record from the current registry (no writes, no panel I/O).
+
+    Shared by Phase A and the Repairs rebuild so both apply the same keeper
+    tie-break. Returns None for a 0.2.0 entry (valid integration ID, no
+    0.1.x rows): nothing to upgrade.
+    """
+    rows = _order_by_newest(hass, entry, _legacy_rows(hass, entry))
+    if is_valid_integration_id(entry.data.get(CONF_INTEGRATION_ID)) and not rows:
+        return None
+    plan, duplicates, unmapped = _build_plan(rows)
+    record: dict[str, Any] = {
+        "from": "0.1.x",
+        "state": MIGRATION_STATE_PENDING,
+        "plan": plan,
+        "duplicates": duplicates,
+        # 0.1.x rows with no 0.2.x counterpart (panel sensors other than 1 and 2).
+        "skipped": [
+            {
+                "entity_registry_id": row.entity_registry_id,
+                "entity_id": row.entity_id,
+                "old_unique_id": row.old_unique_id,
+            }
+            for row in unmapped
+        ],
+    }
+    return record, unmapped
+
+
+@dataclass(frozen=True, slots=True)
+class KeeperChoice:
+    """One duplicate group whose keeper the tie-break had to pick by recency."""
+
+    keep: str
+    leave: tuple[str, ...]
+
+
+def ambiguous_keepers(hass: HomeAssistant, entry: ConfigEntry) -> list[KeeperChoice]:
+    """
+    Return the duplicate groups whose keeper rests on registry recency alone.
+
+    The keeper is the row whose base has the most rows, then the most
+    recently changed row. Recency can move when the user edits a duplicate
+    after upgrading, so a rebuild shows those groups and asks to confirm.
+    """
+    rows = _order_by_newest(hass, entry, _legacy_rows(hass, entry))
+    base_count = Counter(row.base for row in rows)
+    groups: dict[tuple[str, str, int], list[LegacyRow]] = {}
+    for row in rows:
+        if new_unique_id("key", row.kind, row.n) is not None:
+            groups.setdefault((row.domain, row.kind, row.n), []).append(row)
+    choices: list[KeeperChoice] = []
+    for group in groups.values():
+        if len(group) < 2:  # noqa: PLR2004  # a duplicate needs two rows
+            continue
+        group.sort(key=lambda row: base_count[row.base], reverse=True)
+        keep, *extra = group
+        if base_count[extra[0].base] == base_count[keep.base]:
+            choices.append(
+                KeeperChoice(keep.entity_id, tuple(row.entity_id for row in extra))
+            )
+    return sorted(choices, key=lambda c: c.keep)
+
+
+@callback
+def async_rebuild_legacy_record(hass: HomeAssistant, entry: ConfigEntry) -> str:
+    """
+    Replace an unreadable upgrade record with a fresh plan; return the outcome.
+
+    Writes ``entry.data[CONF_LEGACY_MIGRATION]`` only: never the registry, a
+    unique_id, a name or a device_class. Deterministic and idempotent: the
+    same registry always yields the same record. ``"valid"``: the record
+    already validates and is kept; ``"done"``: nothing is left to upgrade;
+    ``"pending"``: a fresh plan for Phase B.
+    """
+    try:
+        validate_legacy_migration_record(entry)
+    except LegacyMigrationRecordError:
+        pass
+    else:
+        return "valid"
+    planned = _plan_record(hass, entry)
+    if planned is None:
+        record: dict[str, Any] = {
+            "from": "0.1.x",
+            "state": MIGRATION_STATE_DONE,
+            "done_at": dt_util.utcnow().isoformat(),
+            "rebuilt": True,
+            "plan": [],
+            "duplicates": [],
+            "skipped": [],
+        }
+        outcome = MIGRATION_STATE_DONE
+    else:
+        record, _unmapped = planned
+        outcome = MIGRATION_STATE_PENDING
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
+    )
+    _LOGGER.info(
+        "Elke27 upgrade notes rebuilt: %d planned, %d duplicates",
+        len(record["plan"]),
+        len(record["duplicates"]),
+    )
+    return outcome
 
 
 def _build_plan(
@@ -404,11 +508,8 @@ def _async_raise_duplicates_issue(
 
 
 def _listing(items: Any) -> str:
-    values = sorted(str(item) for item in items)
-    shown = ", ".join(values[:_MAX_LISTED])
-    if len(values) > _MAX_LISTED:
-        shown += f" (+{len(values) - _MAX_LISTED} more)"
-    return shown
+    """Every entity_id, one markdown bullet each (never cut off)."""
+    return "".join(f"\n- {item}" for item in sorted(str(item) for item in items))
 
 
 @callback
@@ -460,16 +561,6 @@ class _Plan:
     # none (device identifiers, registry errors). Never a unique_id or key.
     conflicts: list[str | None]
     skipped: int
-
-
-def _conflict_listing(conflicts: list[str | None]) -> str:
-    """Entity IDs only; conflicts with no entity ID are shown as a count."""
-    listed = _listing(c for c in conflicts if c is not None)
-    others = sum(1 for c in conflicts if c is None)
-    if not others:
-        return listed
-    counted = f"{others} without an entity ID"
-    return f"{listed}; {counted}" if listed else counted
 
 
 def issue_variant(base: str, conflicts: list[str | None]) -> tuple[str, dict[str, str]]:
@@ -526,6 +617,46 @@ def _plan_device(
             ident for ident in device.identifiers if ident[0] != DOMAIN
         } | {target}
     return device.area_id
+
+
+def blocking_entities(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> list[er.RegistryEntry] | None:
+    """
+    Return the leftover entities blocking Phase B that this entry may delete.
+
+    Recomputed from the live registry each call. Only entities of this
+    config entry and platform whose unique_id is still a planned 0.2.x
+    target held by a row other than the planned one. None when the blocked
+    Phase B key is unknown (for example after a restart): retry only.
+    """
+    key = hass.data.get(_BLOCKED_KEYS, {}).get(entry.entry_id)
+    if key is None or not legacy_migration_pending(entry):
+        return None
+    try:
+        validate_legacy_migration_record(entry)
+    except LegacyMigrationRecordError:
+        return None
+    registry = er.async_get(hass)
+    rows = entry.data[CONF_LEGACY_MIGRATION]["plan"]
+    planned = {row["entity_registry_id"] for row in rows}
+    found: dict[str, er.RegistryEntry] = {}
+    for row in rows:
+        target = new_unique_id(key, row["kind"], int(row["n"]))
+        if target is None:
+            continue
+        owner_id = registry.async_get_entity_id(row["domain"], DOMAIN, target)
+        owner = registry.async_get(owner_id) if owner_id else None
+        if (
+            owner is None
+            or owner.id in planned
+            or owner.config_entry_id != entry.entry_id
+            or owner.platform != DOMAIN
+            or owner.unique_id != target
+        ):
+            continue
+        found[owner.entity_id] = owner
+    return [found[entity_id] for entity_id in sorted(found)]
 
 
 def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
@@ -684,7 +815,8 @@ def async_apply_legacy_migration(
             hass,
             DOMAIN,
             blocked_issue_id(entry.entry_id),
-            is_fixable=False,
+            is_fixable=True,
+            data={"entry_id": entry.entry_id, "flow": "retry"},
             severity=ir.IssueSeverity.ERROR,
             translation_key=ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
         )
@@ -693,10 +825,12 @@ def async_apply_legacy_migration(
             translation_key=ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
         )
     if plan.conflicts and not partial:
+        hass.data.setdefault(_BLOCKED_KEYS, {})[entry.entry_id] = key
+        # Count only: the entity IDs are listed in Repairs, not in the log.
         _LOGGER.error(
-            "Elke27 upgrade blocked, registry unchanged: %d conflict(s): %s",
+            "Elke27 upgrade blocked, registry unchanged: %d leftover item(s); "
+            "see Settings > Repairs",
             len(plan.conflicts),
-            _conflict_listing(plan.conflicts),
         )
     if plan.conflicts:
         base = (
@@ -709,16 +843,16 @@ def async_apply_legacy_migration(
             hass,
             DOMAIN,
             blocked_issue_id(entry.entry_id),
-            is_fixable=False,
+            is_fixable=True,
+            data={
+                "entry_id": entry.entry_id,
+                "flow": "retry" if partial else "blocked",
+            },
             severity=ir.IssueSeverity.ERROR,
             translation_key=issue_key,
             translation_placeholders=placeholders,
         )
-        raise ConfigEntryNotReady(
-            translation_domain=DOMAIN,
-            translation_key=base,
-            translation_placeholders={"count": str(len(plan.conflicts))},
-        )
+        raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key=base)
 
     state = dict(entry.data[CONF_LEGACY_MIGRATION])
     state["state"] = MIGRATION_STATE_DONE
@@ -727,6 +861,7 @@ def async_apply_legacy_migration(
     data[CONF_LEGACY_MIGRATION] = state
     hass.config_entries.async_update_entry(entry, data=data)
     ir.async_delete_issue(hass, DOMAIN, blocked_issue_id(entry.entry_id))
+    hass.data.get(_BLOCKED_KEYS, {}).pop(entry.entry_id, None)
     _LOGGER.info(
         "Elke27 upgrade done: %d entities rewritten (%d area pins), "
         "panel device %s, %d skipped",

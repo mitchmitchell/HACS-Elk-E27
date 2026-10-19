@@ -51,7 +51,9 @@ from custom_components.elke27.const import (
     ISSUE_LEGACY_DUPLICATES,
     ISSUE_LEGACY_MIGRATION_BLOCKED,
     ISSUE_LEGACY_MIGRATION_PARTIAL,
+    ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED,
     ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
+    MIGRATION_STATE_PENDING,
 )
 from custom_components.elke27.diagnostics import (
     async_get_config_entry_diagnostics,
@@ -60,13 +62,18 @@ from custom_components.elke27.diagnostics import (
 from custom_components.elke27.migration import (
     LegacyMigrationRecordError,
     async_apply_legacy_migration,
+    async_rebuild_legacy_record,
     blocked_issue_id,
     duplicates_issue_id,
     issue_variant,
     legacy_migration_pending,
     new_unique_id,
     parse_legacy_unique_id,
+    record_issue_id,
     validate_legacy_migration_record,
+)
+from homeassistant.components.repairs.issue_handler import (
+    async_process_repairs_platforms,
 )
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
@@ -399,7 +406,7 @@ async def test_upgrade_from_017_in_place_with_one_relink(
 
     result = await relink(hass, entry)
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "reauth_successful"
+    assert result["reason"] == "reauth_successful_upgrade"
 
     closet = ar.async_get(hass).async_get_area_by_name("Master Closet")
     assert closet is not None
@@ -453,7 +460,7 @@ async def test_upgrade_from_019_in_place(
     assert legacy_migration_pending(entry)
 
     result = await relink(hass, entry)
-    assert result["reason"] == "reauth_successful"
+    assert result["reason"] == "reauth_successful_upgrade"
     closet = ar.async_get(hass).async_get_area_by_name("Master Closet")
     assert closet is not None
     assert_migrated(hass, entry, before, legacy, closet.id)
@@ -822,7 +829,7 @@ async def test_repairs_and_logs_never_name_the_panel_key(
     assert issue.translation_placeholders is not None
     conflicts = issue.translation_placeholders["conflicts"]
     # Three rows were rewritten before the fault and none could be undone.
-    listed = conflicts.split(", ")
+    listed = [line[2:] for line in conflicts.strip().splitlines()]
     assert len(listed) == 3
     assert set(listed) <= set(legacy.values())
 
@@ -1432,7 +1439,7 @@ async def test_user_device_class_override_survives_upgrade(
         assert legacy_migration_pending(entry)
         assert device_class() == "window"
         result = await relink(hass, entry)  # re-link, then Phase B
-        assert result["reason"] == "reauth_successful"
+        assert result["reason"] == "reauth_successful_upgrade"
         assert not legacy_migration_pending(entry)
         assert device_class() == "window"
         state = hass.states.get(zone)
@@ -1548,9 +1555,12 @@ async def _assert_no_identifiers(
     )
     for text in (json.dumps(placeholders), logs, diagnostics):
         assert not [f for f in forbidden if f.lower() in text.lower()]
-    items = [x.strip() for x in placeholders.get("conflicts", "").split(",")]
-    items = [re.sub(r" \(\+\d+ more\)$", "", x) for x in items if x]
+    listing = placeholders.get("conflicts", "")
+    assert "more)" not in listing
+    items = [line.removeprefix("- ") for line in listing.strip().splitlines()]
     assert all(_EID_RE.match(x) for x in items)
+    # Entity IDs are listed in Repairs only; the log carries counts.
+    assert not [x for x in items if x in logs]
     return placeholders
 
 
@@ -1696,7 +1706,7 @@ async def test_017_relink_link_failure_logs_type_only_and_retries(
         result["flow_id"], {CONF_ACCESS_CODE: ACCESS, CONF_PASSPHRASE: PASSPHRASE}
     )
     await hass.async_block_till_done()
-    assert result["reason"] == "reauth_successful"
+    assert result["reason"] == "reauth_successful_upgrade"
     assert entry.state is ConfigEntryState.LOADED
     assert entry.data[CONF_LEGACY_MIGRATION]["state"] == "done"
     assert entry.unique_id == KEY
@@ -1711,13 +1721,20 @@ async def test_017_relink_link_failure_logs_type_only_and_retries(
         (["row"], "plan[]"),
     ],
 )
-def test_diagnostics_degrade_on_non_list_or_non_mapping_rows(
-    plan: Any, field: str
+async def test_diagnostics_degrade_on_non_list_or_non_mapping_rows(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    panel: ClientHarness,
+    plan: Any,
+    field: str,
 ) -> None:
     """A done record (not re-validated) with bad shapes degrades, never raises."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        entry,
         data={
+            **entry.data,
             CONF_LEGACY_MIGRATION: {
                 "from": 1,
                 "state": "done",
@@ -1725,10 +1742,16 @@ def test_diagnostics_degrade_on_non_list_or_non_mapping_rows(
                 "plan": plan,
                 "duplicates": [],
                 "skipped": [],
-            }
+            },
         },
     )
-    assert migration_diagnostics(entry) == {
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    # Setup does not re-check a done record, so the entry loads.
+    assert entry.state is ConfigEntryState.LOADED
+    assert await async_setup_component(hass, "diagnostics", {})
+    result = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+    assert result["legacy_registry_migration"] == {
         "error": "LegacyMigrationRecordError",
         "field": field,
     }
@@ -1743,13 +1766,13 @@ def test_diagnostics_degrade_on_non_list_or_non_mapping_rows(
         (
             ["binary_sensor.a", "sensor.b"],
             "",
-            {"count": "2", "conflicts": "binary_sensor.a, sensor.b"},
+            {"count": "2", "conflicts": "\n- binary_sensor.a\n- sensor.b"},
         ),
         ([None, None], "_devices", {"count": "2"}),
         (
             ["binary_sensor.a", None],
             "_mixed",
-            {"count": "2", "conflicts": "binary_sensor.a", "other": "1"},
+            {"count": "2", "conflicts": "\n- binary_sensor.a", "other": "1"},
         ),
     ],
     ids=["entities_only", "non_entities_only", "both"],
@@ -1772,3 +1795,240 @@ def test_issue_variant_never_leaves_a_placeholder_empty(
     for value in placeholders.values():
         assert value
         assert value != "0"
+
+
+# Repairs fix flows (repairs.py).
+
+_STRINGS_DIR = Path(__file__).parent.parent / "custom_components/elke27"
+
+
+async def _flow_manager(hass: HomeAssistant) -> Any:
+    assert await async_setup_component(hass, "repairs", {})
+    await async_process_repairs_platforms(hass)
+    return hass.data["repairs"]["flow_manager"]
+
+
+def _registry_view(hass: HomeAssistant, entry_id: str) -> dict[str, tuple[Any, ...]]:
+    return {
+        reg.id: (reg.entity_id, reg.unique_id, reg.name, reg.device_class)
+        for reg in er.async_entries_for_config_entry(er.async_get(hass), entry_id)
+    }
+
+
+async def _blocked_entry(
+    hass: HomeAssistant,
+) -> tuple[MockConfigEntry, er.RegistryEntry, er.RegistryEntry]:
+    """Block an upgrade: one owned leftover, one held by another entry."""
+    entry = entry_017()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    assert await async_migrate_entry(hass, entry)
+    relinked = entry_relinked()
+    hass.config_entries.async_update_entry(
+        entry,
+        unique_id=KEY,
+        data={
+            **relinked.data,
+            CONF_LEGACY_MIGRATION: entry.data[CONF_LEGACY_MIGRATION],
+        },
+    )
+    ent_reg = er.async_get(hass)
+    owned = ent_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        _new_uid("zone", 2),
+        config_entry=entry,
+        suggested_object_id="trial_owned",
+    )
+    other = MockConfigEntry(domain=DOMAIN, unique_id="other-entry")
+    other.add_to_hass(hass)
+    foreign = ent_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        _new_uid("zone", 3),
+        config_entry=other,
+        suggested_object_id="trial_foreign",
+    )
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    return entry, owned, foreign
+
+
+async def test_blocked_flow_deletes_nothing_until_confirm_submitted(
+    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The confirm step lists owned leftovers only; submitting it deletes them."""
+    entry, owned, foreign = await _blocked_entry(hass)
+    issue_id = blocked_issue_id(entry.entry_id)
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.is_fixable
+    # Repairs lists every entity_id, logs carry the count only.
+    assert owned.entity_id in (issue.translation_placeholders or {})["conflicts"]
+    logs = "\n".join(
+        r.getMessage() for r in caplog.records if r.name.startswith("custom_components")
+    )
+    assert owned.entity_id not in logs
+    assert foreign.entity_id not in logs
+
+    manager = await _flow_manager(hass)
+    with patch.object(hass.config_entries, "async_schedule_reload") as reload:
+        result = await manager.async_init(DOMAIN, data={"issue_id": issue_id})
+        assert result["step_id"] == "confirm"
+        assert result["data_schema"].schema == {}
+        listed = result["description_placeholders"]["entities"]
+        assert owned.entity_id in listed
+        # Another entry's entity is never offered or deleted.
+        assert foreign.entity_id not in listed
+        ent_reg = er.async_get(hass)
+        assert ent_reg.async_get(owned.entity_id) is not None
+        reload.assert_not_called()
+
+        caplog.clear()
+        result = await manager.async_configure(result["flow_id"], {})
+    assert result["type"] == "create_entry"
+    assert ent_reg.async_get(owned.entity_id) is None
+    assert ent_reg.async_get(foreign.entity_id) is not None
+    reload.assert_called_once_with(entry.entry_id)
+    logs = "\n".join(
+        r.getMessage() for r in caplog.records if r.name.startswith("custom_components")
+    )
+    assert "deleted 1 leftover entities" in logs
+    assert owned.entity_id not in logs
+
+
+async def test_blocked_flow_rechecks_targets_at_submit(
+    hass: HomeAssistant, panel: ClientHarness
+) -> None:
+    """A leftover changed between showing and submitting is not deleted."""
+    entry, owned, _foreign = await _blocked_entry(hass)
+    manager = await _flow_manager(hass)
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        result = await manager.async_init(
+            DOMAIN, data={"issue_id": blocked_issue_id(entry.entry_id)}
+        )
+        ent_reg = er.async_get(hass)
+        ent_reg.async_update_entity(owned.entity_id, new_unique_id="user-kept")
+        await manager.async_configure(result["flow_id"], {})
+    assert ent_reg.async_get(owned.entity_id) is not None
+
+
+async def test_retry_flows_reload(hass: HomeAssistant) -> None:
+    """Interrupted and write-failed issues: submitting retries (reloads)."""
+    entry = MockConfigEntry(domain=DOMAIN, version=2)
+    entry.add_to_hass(hass)
+    hass.config.components.add(DOMAIN)
+    manager = await _flow_manager(hass)
+    for key in (ISSUE_LEGACY_MIGRATION_PARTIAL, ISSUE_LEGACY_MIGRATION_WRITE_FAILED):
+        issue_id = blocked_issue_id(entry.entry_id)
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=True,
+            data={"entry_id": entry.entry_id, "flow": "retry"},
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=key,
+        )
+        with patch.object(hass.config_entries, "async_schedule_reload") as reload:
+            result = await manager.async_init(DOMAIN, data={"issue_id": issue_id})
+            assert result["step_id"] == "confirm"
+            reload.assert_not_called()
+            result = await manager.async_configure(result["flow_id"], {})
+        assert result["type"] == "create_entry"
+        reload.assert_called_once_with(entry.entry_id)
+        assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+def _duplicate_entry(hass: HomeAssistant) -> tuple[MockConfigEntry, str, str]:
+    """Two 0.1.x rows for zone 1 under bases of equal weight; corrupt record."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data={CONF_LEGACY_MIGRATION: {"state": "bogus"}},
+    )
+    entry.add_to_hass(hass)
+    ent_reg = er.async_get(hass)
+    first = ent_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "aaaa:zone:1",
+        config_entry=entry,
+        suggested_object_id="zone_first",
+    )
+    second = ent_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "bbbb:zone:1",
+        config_entry=entry,
+        suggested_object_id="zone_second",
+    )
+    # The user edits the older duplicate after upgrading: it is now newest.
+    ent_reg.async_update_entity(first.entity_id, icon="mdi:door")
+    return entry, first.entity_id, second.entity_id
+
+
+async def test_rebuild_with_user_edited_duplicate_needs_confirm(
+    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unclear keeper is shown keep vs leave; nothing changes until submit."""
+    entry, edited, other = _duplicate_entry(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    issue_id = record_issue_id(entry.entry_id)
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.is_fixable
+    assert issue.translation_key == ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED
+    assert not issue.translation_placeholders
+    before = _registry_view(hass, entry.entry_id)
+    stored = dict(entry.data[CONF_LEGACY_MIGRATION])
+
+    manager = await _flow_manager(hass)
+    with patch.object(hass.config_entries, "async_schedule_reload") as reload:
+        result = await manager.async_init(DOMAIN, data={"issue_id": issue_id})
+        result = await manager.async_configure(result["flow_id"], {})
+        assert result["step_id"] == "keepers"
+        assert edited in result["description_placeholders"]["keep"]
+        assert other in result["description_placeholders"]["leave"]
+        assert entry.data[CONF_LEGACY_MIGRATION] == stored
+        reload.assert_not_called()
+        result = await manager.async_configure(result["flow_id"], {})
+    assert result["type"] == "create_entry"
+    reload.assert_called_once_with(entry.entry_id)
+    record = entry.data[CONF_LEGACY_MIGRATION]
+    assert record["state"] == MIGRATION_STATE_PENDING
+    ent_reg = er.async_get(hass)
+    keeper = ent_reg.async_get(edited)
+    assert keeper is not None
+    assert [row["entity_registry_id"] for row in record["plan"]] == [keeper.id]
+    assert [row["entity_id"] for row in record["duplicates"]] == [other]
+    # Only the record is written: no unique_id, name or device_class.
+    assert _registry_view(hass, entry.entry_id) == before
+
+
+async def test_rebuild_is_deterministic_on_rerun(hass: HomeAssistant) -> None:
+    """The same registry always rebuilds the same record; a valid one is kept."""
+    entry, _edited, _other = _duplicate_entry(hass)
+    assert async_rebuild_legacy_record(hass, entry) == MIGRATION_STATE_PENDING
+    first = entry.data[CONF_LEGACY_MIGRATION]
+    assert async_rebuild_legacy_record(hass, entry) == "valid"
+    assert entry.data[CONF_LEGACY_MIGRATION] == first
+    hass.config_entries.async_update_entry(
+        entry, data={CONF_LEGACY_MIGRATION: {"state": "bogus"}}
+    )
+    assert async_rebuild_legacy_record(hass, entry) == MIGRATION_STATE_PENDING
+    assert entry.data[CONF_LEGACY_MIGRATION] == first
+
+
+def test_strings_and_translation_match_without_field_placeholder() -> None:
+    """strings.json equals en.json; user text never names a record field."""
+    strings = (_STRINGS_DIR / "strings.json").read_text(encoding="utf-8")
+    english = (_STRINGS_DIR / "translations/en.json").read_text(encoding="utf-8")
+    assert json.loads(strings) == json.loads(english)
+    assert not re.search(r"\{field\}", strings)
+    assert "more)" not in strings

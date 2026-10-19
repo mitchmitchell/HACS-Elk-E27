@@ -27,6 +27,7 @@ ISSUE_LEGACY_DUPLICATES = "legacy_duplicates"
 ISSUE_LEGACY_MIGRATION_PARTIAL = "legacy_migration_partial"
 # Same issue id as blocked; a registry write failed and every write was undone.
 ISSUE_LEGACY_MIGRATION_WRITE_FAILED = "legacy_migration_write_failed"
+ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED = "legacy_migration_record_malformed"
 DISCOVER_HOST_TIMEOUT = 3.0
 ISSUE_PANEL_MAC_MISMATCH = "panel_mac_mismatch"
 
