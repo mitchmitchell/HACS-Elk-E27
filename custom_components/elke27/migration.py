@@ -27,7 +27,6 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.diagnostics import REDACTED
 from homeassistant.const import Platform
 from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
@@ -67,6 +66,10 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+# Same marker the diagnostics component uses; kept local so this module does
+# not import the diagnostics component at load time.
+REDACTED = "**REDACTED**"
 
 # Right-anchored: a 0.1.8/0.1.9 base is a formatted MAC and contains colons.
 LEGACY_UNIQUE_ID_RE = re.compile(

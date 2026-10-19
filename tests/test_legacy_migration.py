@@ -40,6 +40,7 @@ from custom_components.elke27.const import (
     DOMAIN,
     ISSUE_LEGACY_DUPLICATES,
     ISSUE_LEGACY_MIGRATION_BLOCKED,
+    ISSUE_LEGACY_MIGRATION_PARTIAL,
 )
 from custom_components.elke27.diagnostics import migration_diagnostics
 from custom_components.elke27.migration import (
@@ -679,6 +680,48 @@ async def test_failed_undo_stays_pending_and_logs_counts_only(
         assert LEGACY_SERIAL not in message
         assert "binary_sensor." not in message
         assert "registry unchanged" not in message
+
+
+async def test_reload_after_partial_undo_finishes_the_upgrade(
+    hass: HomeAssistant, panel: ClientHarness
+) -> None:
+    """A reload with no fault after a failed undo reaches LOADED, clears issue."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    legacy = seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    await _phase_a_on_relinked(hass, entry)
+    real_update = er.EntityRegistry.async_update_entity
+    calls = {"n": 0}
+
+    def flaky(self: er.EntityRegistry, entity_id: str, **kwargs: Any) -> Any:
+        calls["n"] += 1
+        if calls["n"] >= 4:  # the 4th write and every undo fail
+            msg = "simulated registry failure"
+            raise ValueError(msg)
+        return real_update(self, entity_id, **kwargs)
+
+    with patch.object(er.EntityRegistry, "async_update_entity", flaky):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    issue_reg = ir.async_get(hass)
+    issue = issue_reg.async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
+    assert issue is not None
+    assert issue.translation_key == ISSUE_LEGACY_MIGRATION_PARTIAL
+    assert legacy_migration_pending(entry)
+
+    # Fault gone: the retry finishes from the partly rewritten registry.
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert not legacy_migration_pending(entry)
+    assert issue_reg.async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id)) is None
+    current = er.async_get(hass).async_get(legacy["area:1"])
+    assert current is not None
+    assert current.unique_id == _new_uid("area", 1)
 
 
 async def test_failure_on_device_move_writes_nothing(
