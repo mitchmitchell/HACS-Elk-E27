@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from homeassistant.const import Platform
 from homeassistant.core import callback
-from homeassistant.exceptions import ConfigEntryError
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
 from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
@@ -24,6 +24,14 @@ from .entity import (
     snapshot_is_full,
 )
 from .identity import is_valid_integration_id
+from .migration import (
+    async_apply_legacy_migration,
+    async_migrate_legacy_entry,
+    async_refresh_duplicates_issue,
+    blocked_issue_id,
+    duplicates_issue_id,
+    legacy_migration_pending,
+)
 from .models import Elke27ConfigEntry, Elke27RuntimeData
 from .panel_mac import mismatch_issue_id
 from .services import (  # noqa: F401  # re-exported; tests and callers import these from the package
@@ -89,10 +97,14 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Set up Elke27 from a config entry."""
-    # E1: the client sn is the flow-generated integration ID. Entries made
-    # before E1 have none (the panel bound their link to the old sn), so they
-    # must be deleted and added again; there is no migration or backfill.
+    # E1: the client sn is the flow-generated integration ID. A 0.1.x entry
+    # (migration pending) has none: the re-link (reauth) draws one and links
+    # again. A 0.2.x entry without a valid one can't occur; it stays an error.
     if not is_valid_integration_id(entry.data.get(CONF_INTEGRATION_ID)):
+        if legacy_migration_pending(entry):
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN, translation_key="legacy_relink_required"
+            )
         raise ConfigEntryError(
             translation_domain=DOMAIN, translation_key="integration_id_invalid"
         )
@@ -101,6 +113,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
     entry.async_on_unload(coordinator.async_shutdown_client)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = Elke27RuntimeData(coordinator=coordinator)
+    # 0.1.x upgrade, Phase B: before the panel device is created and before the
+    # platforms register entities, or the new unique_ids would collide.
+    if legacy_migration_pending(entry):
+        async_apply_legacy_migration(
+            hass, entry, entry_identity_key(coordinator, entry)
+        )
+    async_refresh_duplicates_issue(hass, entry)
     # E2: register the panel device first so area devices can link to it.
     # Area entities link to it by device id (via_device_id) where HA supports it.
     panel_device = dr.async_get(hass).async_get_or_create(
@@ -108,6 +127,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
     )
     coordinator.panel_device_id = panel_device.id
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
+    """Migrate a config entry to VERSION 2 (0.1.x upgrade in place, Phase A)."""
+    if entry.version > 2:  # noqa: PLR2004  # VERSION in config_flow
+        # Written by a newer release: refuse rather than mis-read it.
+        return False
+    if entry.version == 1:
+        return await async_migrate_legacy_entry(hass, entry)
     return True
 
 
@@ -166,3 +195,5 @@ def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) ->
     ir.async_delete_issue(hass, DOMAIN, _duplicate_unique_id_issue_id(entry.entry_id))
     ir.async_delete_issue(hass, DOMAIN, _reconnect_failed_issue_id(entry.entry_id))
     ir.async_delete_issue(hass, DOMAIN, mismatch_issue_id(entry.entry_id))
+    ir.async_delete_issue(hass, DOMAIN, blocked_issue_id(entry.entry_id))
+    ir.async_delete_issue(hass, DOMAIN, duplicates_issue_id(entry.entry_id))

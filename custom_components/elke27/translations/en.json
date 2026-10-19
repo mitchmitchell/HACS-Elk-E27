@@ -63,7 +63,7 @@
           "access_code": "The panel access code used during linking. It is not a PIN.",
           "passphrase": "The passphrase used during linking."
         },
-        "description": "Enter the access code and passphrase to relink the panel.",
+        "description": "Enter the access code and passphrase to relink the panel. After an upgrade from 0.1.x this one relink finishes the upgrade: entity IDs, areas, icons and history are kept.",
         "title": "Relink panel"
       },
       "user": {
@@ -129,6 +129,14 @@
     "panel_mac_mismatch": {
       "title": "Different panel at this address",
       "description": "The panel at {host} reports MAC {discovered}, but this entry was set up for the panel with MAC {stored}. The existing identity was kept. If you replaced the panel, delete this entry and add the new panel; otherwise check the address of this entry."
+    },
+    "legacy_migration_blocked": {
+      "title": "Elk E27 upgrade blocked",
+      "description": "The upgrade of {title} from 0.1.x could not finish because these new-format entities or devices already exist: {conflicts}. Nothing was changed and the entry will not load until this is fixed. Delete the conflicting entities (for example left over from a 0.2.0 trial) under Settings → Devices & services → Entities, then reload the integration."
+    },
+    "legacy_duplicates": {
+      "title": "Duplicate Elk E27 entities from 0.1.x",
+      "description": "While upgrading {title}, these older duplicate entities were left unchanged because another entity with the same panel number was kept: {entities}. They stay unavailable. Delete them under Settings → Devices & services → Entities."
     }
   },
   "exceptions": {
@@ -149,6 +157,12 @@
     },
     "panel_not_ready": {
       "message": "The client did not become ready before timeout."
+    },
+    "legacy_relink_required": {
+      "message": "This entry was upgraded from 0.1.x. Relink the panel (enter the access code and passphrase) to finish the upgrade; entity IDs are kept."
+    },
+    "legacy_migration_blocked": {
+      "message": "The upgrade from 0.1.x is blocked by {count} conflict(s); see Repairs. Nothing was changed."
     }
   },
   "selector": {

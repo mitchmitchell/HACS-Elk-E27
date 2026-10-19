@@ -922,35 +922,54 @@ whole °F, so setpoints you set in °C are rounded.
 
 ## Upgrading
 
-### To 0.2.0
-
-> [!WARNING]
-> **One-time delete and re-add required.** 0.2.0 can't upgrade an existing entry in place.
-> Entity IDs and names change, so update your automations, dashboards and scripts.
-> Entries left over from 0.1.x fail setup with:
-> "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
+### To 0.2.1
 
 > [!IMPORTANT]
-> **Upgrade step: delete and re-add the integration.**
-> Home Assistant will **not** show a Repairs notice for this upgrade. After updating, the old entry
-> simply fails setup with: "This entry was created before the client ID existed, or its client ID is
-> invalid. Delete the integration and add it again." To upgrade, delete the Elk E27 Alarm Engine
-> Integration and add it again (see the upgrade steps below).
+> **Upgrade in place, one re-link.** From any 0.1.x, update to 0.2.1 in HACS, restart Home
+> Assistant, then enter your access code and passphrase once on the **Relink panel** card.
+> Do **not** delete the integration. Your entity IDs, registry IDs, names you set, icons,
+> areas, labels, disabled and hidden state, automations, dashboards and history are kept.
 
-1. Make a Home Assistant backup.
-2. Note the entity IDs your automations, dashboards and scripts use.
-3. Delete the integration: Settings → Devices & services → Elk E27 Alarm Engine Integration → ⋮ → Delete.
-4. Update in HACS and restart Home Assistant.
-5. Add the integration again with the same access code and passphrase.
-6. Update automations, dashboards and scripts to the new entity IDs.
+1. Make a Home Assistant backup (include the database). Restoring it is the only way back:
+   0.1.x refuses to load an upgraded entry.
+2. Update in HACS and restart Home Assistant. The integration shows **Relink panel** under
+   Settings → Devices & services (and in Repairs notifications).
+3. Enter the access code and passphrase. This links Home Assistant to the panel again with a
+   new client ID; the panel's Network Devices list gets a new entry, and you can remove the
+   old 0.1.x one there when you like.
+4. Done. On that first start the integration rewrites its unique IDs and moves the panel
+   device to the new identity before any entity loads. It is all or nothing: if anything
+   conflicts (for example entities left over from a 0.2.0 trial), nothing is changed, a
+   **Elk E27 upgrade blocked** Repairs issue lists the conflicts, and the entry waits. Delete
+   the listed entities and reload the integration; it then completes. Entities left over as
+   duplicates from very old versions are listed in a Repairs issue and left untouched for you
+   to delete.
 
-Each area now appears as its own device, with its zones under it; the area's alarm panel is
+What changes: each area the panel reports is now its own device, and its alarm panel and
+zones sit under it, named after the area (for example "Main House Front Door"). Entity IDs
+do not change, so only dashboard captions that show friendly names look different. Alarm
+panels and zones that took their area from the panel device keep that area. If you want the
+old displayed names back, `scripts/restore_entity_names.py` renames entities from a saved
+list (dry run by default, with undo; see its `--help`).
+
+Already on 0.2.0 (deleted and re-added)? Nothing changes for you. Went from 0.1.x to 0.2.0 by
+mistake? Don't delete the entry: update to 0.2.1 and re-link. Requires elke27 0.3.14, which
+Home Assistant installs for you.
+
+### To 0.2.0
+
+0.2.0 has no in-place upgrade from 0.1.x. **Go from 0.1.x straight to
+[0.2.1](#to-021)**, which upgrades in place with one re-link. If you did install 0.2.0 over
+0.1.x, the entry shows "This entry was created before the client ID existed, or its client ID
+is invalid." Don't delete it: reinstall 0.1.7 (0.2.0 doesn't change the entry) or update to
+0.2.1 and re-link.
+
+Each area appears as its own device, with its zones under it; the area's alarm panel is
 named after the area, and zones are named "<area> <zone>". Zones with no area and panel-wide
-entities (outputs, lights, locks, thermostats, panel status) stay on the panel device. New
-entity IDs follow the new names, for example `alarm_control_panel.<panel>_<area>` becomes
+entities (outputs, lights, locks, thermostats, panel status) stay on the panel device. A new
+0.2.0 install (not an upgrade) creates entity IDs from those names, for example
 `alarm_control_panel.<area>`, and areas or zones with the same name get `_2`, `_3` IDs.
-Going back to 0.1.x also needs a delete and re-add. Requires elke27 0.3.14, which Home
-Assistant installs for you.
+Requires elke27 0.3.14, which Home Assistant installs for you.
 <!-- PENDING MITCH: Network Devices clean-up step -->
 See the [0.2.0 release notes](docs/release-notes/v0.2.0.md).
 

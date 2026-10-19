@@ -52,6 +52,7 @@ from .identity import (
     panel_mac_from_info,
     panel_serial_tier,
 )
+from .migration import legacy_reauth_data_updates
 from .panel_mac import (
     async_discover_panel_mac,
     async_reauth_mac_fill,
@@ -145,7 +146,9 @@ def _async_try_backfill_config_entry_unique_id(
 class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Elke27."""
 
-    VERSION = 1
+    # 2: 0.2.x identity; 0.1.x (VERSION 1) entries are migrated in place, and an
+    # older release refuses to load a VERSION 2 entry instead of mis-reading it.
+    VERSION = 2
     MINOR_VERSION = 1
 
     def __init__(self) -> None:
@@ -446,6 +449,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 mac_fill = async_reauth_mac_fill(self.hass, entry, panel_mac)
                 mac_refused = not mac_fill
                 data.update(mac_fill)
+            data.update(legacy_reauth_data_updates(entry, data, stored_mac))
             panel_unique_id = config_entry_unique_id(panel_info)
             if entry.unique_id is None:
                 if (
