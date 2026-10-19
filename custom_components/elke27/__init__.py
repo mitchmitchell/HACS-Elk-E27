@@ -25,6 +25,7 @@ from .entity import (
 )
 from .identity import is_valid_integration_id
 from .migration import (
+    LegacyMigrationRecordError,
     async_apply_legacy_migration,
     async_migrate_legacy_entry,
     async_refresh_duplicates_issue,
@@ -116,9 +117,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
     # 0.1.x upgrade, Phase B: before the panel device is created and before the
     # platforms register entities, or the new unique_ids would collide.
     if legacy_migration_pending(entry):
-        async_apply_legacy_migration(
-            hass, entry, entry_identity_key(coordinator, entry)
-        )
+        try:
+            async_apply_legacy_migration(
+                hass, entry, entry_identity_key(coordinator, entry)
+            )
+        except LegacyMigrationRecordError as err:
+            # Type and field only (the message names no value); the record
+            # stays pending and the entry stays unloaded: a retry can't fix it.
+            _LOGGER.error("Elke27 upgrade: %s: %s", type(err).__name__, err)  # noqa: TRY400
+            raise ConfigEntryError(
+                translation_domain=DOMAIN,
+                translation_key="legacy_migration_record_malformed",
+                translation_placeholders={"field": err.field},
+            ) from None
     async_refresh_duplicates_issue(hass, entry)
     # E2: register the panel device first so area devices can link to it.
     # Area entities link to it by device id (via_device_id) where HA supports it.

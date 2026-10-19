@@ -14,7 +14,6 @@ from collections.abc import Generator
 import dataclasses
 import json
 import logging
-from pathlib import Path
 import re
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -34,7 +33,7 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
 
-from custom_components.elke27 import async_migrate_entry, migration as migration_module
+from custom_components.elke27 import async_migrate_entry
 from custom_components.elke27.config_flow import (
     CONF_ACCESS_CODE,
     CONF_PASSPHRASE,
@@ -57,6 +56,7 @@ from custom_components.elke27.diagnostics import (
     migration_diagnostics,
 )
 from custom_components.elke27.migration import (
+    LegacyMigrationRecordError,
     async_apply_legacy_migration,
     blocked_issue_id,
     duplicates_issue_id,
@@ -1175,13 +1175,16 @@ async def test_blocked_raises_not_ready(hass: HomeAssistant) -> None:
     assert legacy_migration_pending(entry)
 
 
-@pytest.mark.parametrize(
-    "drop", ["plan", "from", "state"], ids=["no-plan", "no-from", "no-state"]
-)
+@pytest.mark.parametrize("drop", ["plan", "from", "state"])
 async def test_malformed_record_raises_not_done(
     hass: HomeAssistant, panel: ClientHarness, drop: str
 ) -> None:
-    """Strict reads: a malformed record raises; it is never marked done."""
+    """
+    Strict reads: a malformed record raises the dedicated error, never done.
+
+    Phase B (no-plan) raises and writes nothing; diagnostics degrade to the
+    error type and field name. Neither names a value or key.
+    """
     entry = entry_relinked()
     entry.add_to_hass(hass)
     seed_legacy_registry(hass, entry, base=KEY, device_identifier=KEY)
@@ -1190,13 +1193,55 @@ async def test_malformed_record_raises_not_done(
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
     )
+    before = registry_view(hass, entry.entry_id)
+    devices_before = device_view(hass, entry.entry_id)
+    message = rf"^legacy migration record is malformed \(missing {drop}\)$"
     if drop == "plan":
-        with pytest.raises(KeyError):
+        with pytest.raises(LegacyMigrationRecordError, match=message) as info:
             async_apply_legacy_migration(hass, entry, KEY)
-        assert entry.data[CONF_LEGACY_MIGRATION].get("done_at") is None
-    else:
-        with pytest.raises(KeyError):
-            migration_diagnostics(entry)
+        assert info.value.field == "plan"
+    assert entry.data[CONF_LEGACY_MIGRATION] == record  # never marked done
+    assert registry_view(hass, entry.entry_id) == before
+    assert device_view(hass, entry.entry_id) == devices_before
+    diag = migration_diagnostics(entry)
+    assert diag == {"error": "LegacyMigrationRecordError", "field": drop}
+
+
+async def test_malformed_record_fails_setup_cleanly(
+    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Setup: SETUP_ERROR, record stays pending, log names type and field only."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(hass, entry, base=KEY, device_identifier=KEY)
+    await _phase_a_on_relinked(hass, entry)
+    record = dict(entry.data[CONF_LEGACY_MIGRATION])
+    record["plan"] = [
+        {k: v for k, v in row.items() if k != "old_unique_id"} for row in record["plan"]
+    ]
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
+    )
+    before = registry_view(hass, entry.entry_id)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert legacy_migration_pending(entry)
+    assert registry_view(hass, entry.entry_id) == before
+    logs = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name.startswith("custom_components.elke27")
+        and "malformed" in r.getMessage()
+    ]
+    assert logs == [
+        (
+            "Elke27 upgrade: LegacyMigrationRecordError: legacy migration record "
+            "is malformed (missing plan[].old_unique_id)"
+        )
+    ]
+    assert KEY not in caplog.text
+    assert LEGACY_SERIAL not in caplog.text
 
 
 async def test_unmappable_plan_row_raises(hass: HomeAssistant) -> None:
@@ -1211,7 +1256,10 @@ async def test_unmappable_plan_row_raises(hass: HomeAssistant) -> None:
         entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
     )
     before = registry_view(hass, entry.entry_id)
-    with pytest.raises(ValueError, match="unmappable"):
+    with pytest.raises(
+        LegacyMigrationRecordError,
+        match=r"^legacy migration record is malformed \(unmappable plan\[\]\.kind\)$",
+    ):
         async_apply_legacy_migration(hass, entry, KEY)
     assert legacy_migration_pending(entry)
     assert registry_view(hass, entry.entry_id) == before
@@ -1306,12 +1354,6 @@ async def test_user_device_class_override_survives_upgrade(
     assert state.attributes.get("device_class") == "window"
     assert calls  # Phase B did rewrite unique_ids through the registry
     assert not [c for c in calls if "device_class" in c]
-
-
-def test_migration_source_never_names_device_class() -> None:
-    """Guard: migration.py has no code path that could set device_class."""
-    source = Path(migration_module.__file__).read_text(encoding="utf-8")
-    assert "device_class" not in source
 
 
 async def test_removing_entry_clears_migration_issues(

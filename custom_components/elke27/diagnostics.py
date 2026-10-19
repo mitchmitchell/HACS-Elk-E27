@@ -26,7 +26,12 @@ from .const import (
     MANUFACTURER_NUMBER,
 )
 from .entity import area_has_device
-from .migration import LEGACY_UNIQUE_ID_RE, legacy_migration_state
+from .migration import (
+    LEGACY_UNIQUE_ID_RE,
+    LegacyMigrationRecordError,
+    legacy_migration_state,
+    record_field,
+)
 
 # Host, MAC, panel serial (unique_id may be a serial or MAC), integration ID and
 # link keys never leave the box unredacted. Link keys are not emitted at all.
@@ -171,16 +176,22 @@ def migration_diagnostics(entry: Elke27ConfigEntry) -> dict[str, Any] | None:
         return [
             {
                 **{k: v for k, v in row.items() if k != "old_unique_id"},
-                "old_unique_id": redact(str(row["old_unique_id"])),
+                "old_unique_id": redact(
+                    str(record_field(row, "old_unique_id", f"{name}[]."))
+                ),
             }
-            for row in state[name]
+            for row in record_field(state, name)
         ]
 
-    return {
-        "from": state["from"],
-        "state": state["state"],
-        "done_at": state.get("done_at"),
-        "plan": rows("plan"),
-        "duplicates": rows("duplicates"),
-        "skipped": rows("skipped"),
-    }
+    try:
+        return {
+            "from": record_field(state, "from"),
+            "state": record_field(state, "state"),
+            "done_at": state.get("done_at"),
+            "plan": rows("plan"),
+            "duplicates": rows("duplicates"),
+            "skipped": rows("skipped"),
+        }
+    except LegacyMigrationRecordError as err:
+        # Degrade, never crash: the error type and field name only, no values.
+        return {"error": type(err).__name__, "field": err.field}

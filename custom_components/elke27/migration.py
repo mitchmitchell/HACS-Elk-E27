@@ -22,6 +22,7 @@ disabled/hidden state are never touched (only unique_id, plus the area pin of
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 import logging
 import re
@@ -60,12 +61,35 @@ from .identity import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class LegacyMigrationRecordError(ValueError):
+    """
+    The stored 0.1.x upgrade record is malformed.
+
+    The message names the field only: never a value, registry id or key.
+    """
+
+    def __init__(self, field: str, problem: str = "missing") -> None:
+        """Name the malformed field (no values)."""
+        self.field = field
+        super().__init__(f"legacy migration record is malformed ({problem} {field})")
+
+
+def record_field(record: Any, field: str, where: str = "") -> Any:
+    """Return ``record[field]`` or raise LegacyMigrationRecordError naming it."""
+    name = f"{where}{field}"
+    if not isinstance(record, Mapping):
+        raise LegacyMigrationRecordError(where.rstrip(".") or "record", "invalid")
+    try:
+        return record[field]
+    except KeyError:
+        raise LegacyMigrationRecordError(name) from None
+
 
 # Same marker the diagnostics component uses; kept local so this module does
 # not import the diagnostics component at load time.
@@ -444,7 +468,10 @@ def _plan_device(
 def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
     """Pre-scan with no writes: what Phase B would change, and any conflict."""
     # Strict reads: a malformed record raises instead of being marked done.
-    state = entry.data[CONF_LEGACY_MIGRATION]
+    state = record_field(entry.data, CONF_LEGACY_MIGRATION)
+    rows = record_field(state, "plan")
+    if not isinstance(rows, list):
+        raise LegacyMigrationRecordError("plan", "invalid")  # noqa: EM101  # field name, not a message
     plan = _Plan([], None, set(), None, [], 0)
     device_area = _plan_device(hass, entry, key, plan)
     registry = er.async_get(hass)
@@ -453,13 +480,19 @@ def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
         for reg in er.async_entries_for_config_entry(registry, entry.entry_id)
     }
     targets: set[tuple[str, str]] = set()
-    for row in state["plan"]:
-        reg = current.get(row["entity_registry_id"])
-        target = new_unique_id(key, row["kind"], int(row["n"]))
+    for row in rows:
+        reg = current.get(record_field(row, "entity_registry_id", "plan[]."))
+        kind = record_field(row, "kind", "plan[].")
+        raw_n = record_field(row, "n", "plan[].")
+        try:
+            n = int(raw_n)
+        except (TypeError, ValueError):
+            raise LegacyMigrationRecordError("plan[].n", "invalid") from None  # noqa: EM101  # field name, not a message
+        target = new_unique_id(key, kind, n)
         if target is None:
             # Phase A never plans a row without a 0.2.x unique_id.
-            msg = "Elke27 upgrade record has an unmappable row"
-            raise ValueError(msg)
+            raise LegacyMigrationRecordError("plan[].kind", "unmappable")  # noqa: EM101  # field name, not a message
+        old_unique_id = record_field(row, "old_unique_id", "plan[].")
         if reg is None:
             # Removed by the user since Phase A: nothing to keep.
             plan.skipped += 1
@@ -473,7 +506,7 @@ def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
             if pin is not None:
                 plan.changes.append(_Change(reg.entity_id, target, target, pin))
             continue
-        if reg.unique_id != row["old_unique_id"] or (reg.domain, target) in targets:
+        if reg.unique_id != old_unique_id or (reg.domain, target) in targets:
             plan.skipped += 1
             continue
         owner = registry.async_get_entity_id(reg.domain, DOMAIN, target)
@@ -619,7 +652,7 @@ def async_apply_legacy_migration(
             translation_placeholders={"count": str(len(plan.conflicts))},
         )
 
-    state = dict(entry.data[CONF_LEGACY_MIGRATION])
+    state = dict(record_field(entry.data, CONF_LEGACY_MIGRATION))
     state["state"] = MIGRATION_STATE_DONE
     state["done_at"] = dt_util.utcnow().isoformat()
     data = {k: v for k, v in entry.data.items() if k != CONF_INTEGRATION_SERIAL}

@@ -170,6 +170,9 @@
     },
     "legacy_migration_partial": {
       "message": "The upgrade from 0.1.x was interrupted and some changes could not be undone; see Repairs. Reload to finish it."
+    },
+    "legacy_migration_record_malformed": {
+      "message": "The stored upgrade record from 0.1.x is malformed (field {field}). Nothing was changed. Restore the backup taken before the upgrade, or delete and re-add the integration."
     }
   },
   "selector": {
