@@ -145,8 +145,10 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 - Setting a brightness sends a level from 1 to 99; full brightness (255 or 100%) is level
   99, which the panel reports back as 100 and Home Assistant shows as brightness 255.
   These level rules are confirmed by Elk.
-- After a change, the integration asks the panel for the light's status right away and
-  again about 3 seconds later, because some (Z-Wave) dimmers report their new state late.
+- After a change, the integration asks the panel for the light's status again about
+  3 seconds later, because some (Z-Wave) dimmers report their new state late. After turning
+  a light off it also asks right away; after turning one on it waits, because an immediate
+  read can briefly report the light as off while it ramps up.
   A short delay before the state updates is normal.
 
 ### Locks
@@ -199,6 +201,8 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| 0.2.0 | [0.3.14](https://pypi.org/project/elke27/0.3.14/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
+| 0.1.9 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.8 | [0.3.12](https://pypi.org/project/elke27/0.3.12/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
@@ -325,7 +329,7 @@ doesn't answer discovery: the new address counts as a new panel.
 If the stored link keys are missing or rejected when the integration **loads**, Home Assistant
 shows a **reauthentication** notice. Open it and enter the **access code** and **passphrase**
 again (*Relink panel*). The flow checks that you are linking the **same panel** by comparing
-**MAC address or panel serial** (not the integration serial used for E27 pairing). The entry
+**MAC address or panel serial** (not the integration's client ID). The entry
 reloads with new link keys. Your entities and their IDs stay the same. Re-linking only
 refreshes the link keys for the stored address; to change the address, see
 [Changing the panel's address](#changing-the-panels-address).
@@ -333,6 +337,10 @@ refreshes the link keys for the stored address; to change the address, see
 If the keys are rejected while **reconnecting**, the integration stops retrying and starts the
 **reauthentication** flow once, so the notice appears. Entities stay unavailable until you
 re-link (or reload the integration).
+
+You can't start a re-link from Home Assistant. To re-link on purpose, remove Home Assistant's
+link from the panel in the Elk Connect mobile app (this needs your installer code), then reload
+the integration and open the notice. *(This procedure has not been hardware-tested yet.)*
 
 ---
 
@@ -619,10 +627,10 @@ conditions:
   own ID, not a panel serial number.
 - **Reconnects:** if the connection drops, entities become unavailable and the integration
   keeps reconnecting with a delay that starts at 2 seconds and doubles up to 60 seconds (about 72 s with jitter) between
-  attempts, with no limit on attempts. When the
+  attempts, with no limit on attempts (0.2.1 and later; 0.2.0 doubled up to 5 minutes). When the
   connection comes back, it refreshes everything from the panel. If the panel rejects the link
-  keys, it stops retrying without showing a notice. Reload the integration (or restart Home
-  Assistant) to get the re-link prompt.
+  keys, it stops retrying and shows a re-link (reauthentication) notice once (see
+  [Re-linking](#re-linking-reauthentication)).
 - **Detecting a dropped connection:** a dead connection is usually noticed within about
   35 seconds for an idle link (30 seconds without traffic, plus a 5-second probe). If a command
   is in flight, the integration first waits for that command's timeout, then probes. *"Panel connection lost"* is
@@ -853,7 +861,7 @@ Go to **Settings → Devices & services → Elk E27 Alarm Engine Integration**, 
 **Download diagnostics**.
 
 - The download contains the panel snapshot, with sensitive values redacted by the library.
-- It also contains the panel host/port and the integration's client serial number.
+- Host, panel MAC, unique ID and client ID are redacted; link keys are never included.
 
 Attach it to bug reports.
 
