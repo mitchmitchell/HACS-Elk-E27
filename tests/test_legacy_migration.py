@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import dataclasses
+import json
 import logging
+import re
 from types import MappingProxyType
 from typing import Any
 from unittest.mock import AsyncMock, create_autospec, patch
@@ -42,7 +44,10 @@ from custom_components.elke27.const import (
     ISSUE_LEGACY_MIGRATION_BLOCKED,
     ISSUE_LEGACY_MIGRATION_PARTIAL,
 )
-from custom_components.elke27.diagnostics import migration_diagnostics
+from custom_components.elke27.diagnostics import (
+    async_get_config_entry_diagnostics,
+    migration_diagnostics,
+)
 from custom_components.elke27.migration import (
     async_apply_legacy_migration,
     blocked_issue_id,
@@ -625,7 +630,8 @@ async def test_failure_mid_write_rolls_back_everything(
     issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
     assert issue is not None
     assert issue.translation_placeholders is not None
-    assert issue.translation_placeholders["conflicts"] == "1 without an entity ID"
+    assert issue.translation_placeholders["conflicts"] == ""
+    assert issue.translation_placeholders["other"] == "1"
 
     # Next attempt (no fault) completes.
     await hass.config_entries.async_reload(entry.entry_id)
@@ -774,7 +780,7 @@ async def test_repairs_and_logs_never_name_the_panel_key(
     assert issue.translation_placeholders is not None
     conflicts = issue.translation_placeholders["conflicts"]
     assert trial.entity_id in conflicts
-    assert "1 without an entity ID" in conflicts
+    assert issue.translation_placeholders["other"] == "1"
 
     # Partial: the conflicts are gone, but a write and every undo fail with
     # the panel key in the error text.
@@ -1235,3 +1241,103 @@ def test_parse_legacy_unique_id(
 def test_new_unique_id_table(kind: str, n: int, expected: str | None) -> None:
     """The design §2.3 c mapping table."""
     assert new_unique_id(KEY, kind, n) == expected
+
+
+# Tester probe for #107 (comment 6274122036): planted panel key, device and
+# host must never reach Repairs placeholders, logs or diagnostics, and the
+# conflicts placeholder lists entity IDs only.
+_EID_RE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
+_PLANT_NAME = "PLANTED-DEVICE-7f3e9c"
+
+
+def _forbidden(*extra: str) -> list[str]:
+    return [
+        KEY,
+        KEY.replace(":", ""),
+        RAW_MAC,
+        LEGACY_SERIAL,
+        ACCESS,
+        PASSPHRASE,
+        HOST,
+        *extra,
+    ]
+
+
+async def _assert_no_identifiers(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    forbidden: list[str],
+) -> dict[str, str]:
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
+    assert issue is not None
+    placeholders = dict(issue.translation_placeholders or {})
+    logs = "\n".join(
+        r.getMessage() for r in caplog.records if r.name.startswith("custom_components")
+    )
+    diagnostics = json.dumps(
+        await async_get_config_entry_diagnostics(hass, entry), default=str
+    )
+    for text in (json.dumps(placeholders), logs, diagnostics):
+        assert not [f for f in forbidden if f.lower() in text.lower()]
+    items = [x.strip() for x in placeholders.get("conflicts", "").split(",")]
+    items = [re.sub(r" \(\+\d+ more\)$", "", x) for x in items if x]
+    assert all(_EID_RE.match(x) for x in items)
+    return placeholders
+
+
+async def test_entity_conflict_lists_entity_id_only(
+    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A planted new-format unique_id is reported by its entity_id only."""
+    entry = entry_017()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    assert await async_migrate_entry(hass, entry)
+    relinked = entry_relinked()
+    hass.config_entries.async_update_entry(
+        entry,
+        unique_id=KEY,
+        data={
+            **relinked.data,
+            CONF_LEGACY_MIGRATION: entry.data[CONF_LEGACY_MIGRATION],
+        },
+    )
+    trial = er.async_get(hass).async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        _new_uid("zone", 2),
+        config_entry=entry,
+        suggested_object_id="trial_planted",
+    )
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    placeholders = await _assert_no_identifiers(
+        hass, entry, caplog, _forbidden(_new_uid("zone", 2))
+    )
+    assert trial.entity_id in placeholders["conflicts"]
+
+
+async def test_device_conflict_is_counted_not_named(
+    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A device owning the panel key is counted; its id and name never shown."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    other = MockConfigEntry(domain=DOMAIN, version=2, title="trial")
+    other.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=other.entry_id, identifiers={(DOMAIN, KEY)}, name=_PLANT_NAME
+    )
+    await _phase_a_on_relinked(hass, entry)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    placeholders = await _assert_no_identifiers(
+        hass, entry, caplog, _forbidden(device.id, _PLANT_NAME)
+    )
+    assert placeholders["other"] == "1"

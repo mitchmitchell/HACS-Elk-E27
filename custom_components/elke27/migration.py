@@ -222,7 +222,7 @@ async def async_migrate_legacy_entry(hass: HomeAssistant, entry: ConfigEntry) ->
     rows = _order_by_newest(hass, entry, _legacy_rows(hass, entry))
     if is_valid_integration_id(entry.data.get(CONF_INTEGRATION_ID)) and not rows:
         hass.config_entries.async_update_entry(entry, version=2, minor_version=1)
-        _LOGGER.debug("Elke27 entry %s: 0.2.0 entry, version bump only", entry.title)
+        _LOGGER.debug("Elke27 entry: 0.2.0 entry, version bump only")
         return True
 
     plan, duplicates, unmapped = _build_plan(rows)
@@ -259,9 +259,8 @@ async def async_migrate_legacy_entry(hass: HomeAssistant, entry: ConfigEntry) ->
     if duplicates:
         _async_raise_duplicates_issue(hass, entry, duplicates)
     _LOGGER.info(
-        "Elke27 entry %s upgraded to version 2: %d entities planned, %d duplicates, "
+        "Elke27 entry upgraded to version 2: %d entities planned, %d duplicates, "
         "%d without a counterpart; re-link the panel to finish",
-        entry.title,
         len(plan),
         len(duplicates),
         len(unmapped),
@@ -332,7 +331,6 @@ def _async_raise_duplicates_issue(
         severity=ir.IssueSeverity.WARNING,
         translation_key=ISSUE_LEGACY_DUPLICATES,
         translation_placeholders={
-            "title": entry.title,
             "entities": _listing(row["entity_id"] for row in duplicates),
         },
     )
@@ -601,8 +599,9 @@ def async_apply_legacy_migration(
                 else ISSUE_LEGACY_MIGRATION_BLOCKED
             ),
             translation_placeholders={
-                "title": entry.title,
-                "conflicts": _conflict_listing(plan.conflicts),
+                "count": str(len(plan.conflicts)),
+                "other": str(sum(1 for c in plan.conflicts if c is None)),
+                "conflicts": _listing(c for c in plan.conflicts if c is not None),
             },
         )
         raise ConfigEntryNotReady(
@@ -623,9 +622,8 @@ def async_apply_legacy_migration(
     hass.config_entries.async_update_entry(entry, data=data)
     ir.async_delete_issue(hass, DOMAIN, blocked_issue_id(entry.entry_id))
     _LOGGER.info(
-        "Elke27 upgrade of %s done: %d entities rewritten (%d area pins), "
+        "Elke27 upgrade done: %d entities rewritten (%d area pins), "
         "panel device %s, %d skipped",
-        entry.title,
         sum(1 for c in plan.changes if c.old_unique_id != c.new_unique_id),
         sum(1 for c in plan.changes if c.pin_area is not None),
         "moved" if plan.device_id else "unchanged",
