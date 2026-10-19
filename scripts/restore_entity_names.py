@@ -238,7 +238,25 @@ def write_map(path: Path, changes: list[Change]) -> None:
             for c in changes
         ],
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    # Atomic: write a temp file in the same folder, fsync it, then os.replace.
+    # A failed write (disk full, killed mid-way) leaves any existing map intact.
+    text = json.dumps(payload, indent=2) + "\n"
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        tmp.replace(path)  # os.replace: atomic on the same filesystem
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    if hasattr(os, "O_DIRECTORY"):
+        dir_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
 
 
 def map_exists(path: Path) -> bool:

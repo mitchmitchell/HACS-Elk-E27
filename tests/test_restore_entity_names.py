@@ -406,3 +406,30 @@ async def test_existing_map_is_not_overwritten_without_force(tmp_path: Path) -> 
         "binary_sensor.elk_back",
     ]
     assert tool.parse_args(["--url", "ws://x", "n.csv", "--force"]).force
+
+
+def _tmp_files(folder: Path) -> list[Path]:
+    return [p for p in folder.iterdir() if p.suffix == ".tmp"]
+
+
+async def test_failed_force_rewrite_keeps_the_old_map_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A --force rewrite that fails mid-write leaves the existing map as it was."""
+    map_path = tmp_path / "map.json"
+    tool.write_map(map_path, [tool.Change("light.x", None, "Lamp")])
+    before = map_path.read_bytes()
+    ha = FakeHA(registry())
+    names = tool.read_names(names_csv(tmp_path))
+
+    def broken_fsync(_fd: int) -> None:
+        msg = "disk full"
+        raise OSError(msg)
+
+    monkeypatch.setattr(tool.os, "fsync", broken_fsync)
+    with pytest.raises(OSError, match="disk full"):
+        await tool.run_rename(ha, names, apply=True, map_path=map_path, force=True)
+    assert ha.writes == []
+    assert map_path.read_bytes() == before
+    assert [c.entity_id for c in tool.read_map(map_path)] == ["light.x"]
+    assert not _tmp_files(tmp_path)
