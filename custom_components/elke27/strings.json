@@ -152,7 +152,7 @@
     },
     "legacy_duplicates": {
       "title": "Duplicate Elk E27 entities from the older version",
-      "description": "The upgrade kept one entity for each panel item. These older duplicates were left and stay unavailable:{entities}\n\nDelete them under Settings → Devices & services → Entities."
+      "description": "The upgrade kept one entity for each panel item. These older duplicates were left and stay unavailable:{entities}\n\nTo remove them: go to Settings → Devices & services → Entities, search for each entity ID above, open it, select the gear icon, then select **Delete**. Then reload Elk E27 (Settings → Devices & services → Elk E27 → ⋮ → **Reload**) and this notice clears."
     },
     "legacy_migration_partial": {
       "title": "Elk E27 upgrade interrupted",

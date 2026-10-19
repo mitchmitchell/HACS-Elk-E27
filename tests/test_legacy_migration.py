@@ -2032,3 +2032,85 @@ def test_strings_and_translation_match_without_field_placeholder() -> None:
     assert json.loads(strings) == json.loads(english)
     assert not re.search(r"\{field\}", strings)
     assert "more)" not in strings
+
+
+async def test_rebuild_after_partial_run_skips_converted_entities(
+    hass: HomeAssistant,
+) -> None:
+    """A rebuild after a partial run plans only the rows still in 0.1.x form."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data={
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
+            CONF_LEGACY_MIGRATION: {"state": "bogus"},
+        },
+    )
+    entry.add_to_hass(hass)
+    ent_reg = er.async_get(hass)
+    pending = ent_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "aaaa:zone:1",
+        config_entry=entry,
+        suggested_object_id="zone_pending",
+    )
+    converted = ent_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        _new_uid("zone", 2),
+        config_entry=entry,
+        suggested_object_id="zone_converted",
+    )
+    before = _registry_view(hass, entry.entry_id)
+    assert async_rebuild_legacy_record(hass, entry) == MIGRATION_STATE_PENDING
+    record = entry.data[CONF_LEGACY_MIGRATION]
+    planned = [row["entity_registry_id"] for row in record["plan"]]
+    assert planned == [pending.id]
+    assert converted.id not in planned
+    assert record["duplicates"] == []
+    assert _registry_view(hass, entry.entry_id) == before
+
+
+async def test_rebuild_when_nothing_left_records_done_and_is_a_no_op(
+    hass: HomeAssistant,
+) -> None:
+    """Every entity already converted: the rebuild marks done and changes nothing."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data={
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
+            CONF_LEGACY_MIGRATION: {"state": "bogus"},
+        },
+    )
+    entry.add_to_hass(hass)
+    er.async_get(hass).async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        _new_uid("zone", 1),
+        config_entry=entry,
+        suggested_object_id="zone_done",
+    )
+    before = _registry_view(hass, entry.entry_id)
+    assert async_rebuild_legacy_record(hass, entry) == "done"
+    record = entry.data[CONF_LEGACY_MIGRATION]
+    assert record["state"] == "done"
+    assert record["plan"] == []
+    assert record["duplicates"] == []
+    assert not legacy_migration_pending(entry)
+    # Re-running on the done record keeps it as is.
+    assert async_rebuild_legacy_record(hass, entry) == "valid"
+    assert entry.data[CONF_LEGACY_MIGRATION] == record
+    assert _registry_view(hass, entry.entry_id) == before
+
+
+def test_duplicates_issue_gives_the_exact_manual_step() -> None:
+    """The duplicates text names where to delete and how to clear the notice."""
+    for path in ("strings.json", "translations/en.json"):
+        data = json.loads((_STRINGS_DIR / path).read_text(encoding="utf-8"))
+        text = data["issues"][ISSUE_LEGACY_DUPLICATES]["description"]
+        assert "{entities}" in text
+        assert "Settings → Devices & services → Entities" in text
+        assert "**Delete**" in text
+        assert "**Reload**" in text
