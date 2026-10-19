@@ -363,13 +363,18 @@ def async_refresh_duplicates_issue(hass: HomeAssistant, entry: ConfigEntry) -> N
 class PartialRollbackError(HomeAssistantError):
     """Undo after a failed Phase B write could not revert every write."""
 
-    def __init__(self, failed: int, total: int) -> None:
-        """Keep counts only; the message carries no identifiers."""
+    def __init__(
+        self, failed: int, total: int, entity_ids: list[str] | None = None
+    ) -> None:
+        """Keep counts only in the message; ``entity_ids`` lists rows not undone."""
         super().__init__(
             f"undo incomplete: {failed} of {total} writes not reverted; "
             "reload to finish (restoring the pre-upgrade backup is also safe)"
         )
         self.failed = failed
+        # Entity IDs of rows whose undo failed; failures with no entity ID
+        # (the panel device move) are only counted.
+        self.entity_ids: list[str] = list(entity_ids or [])
 
 
 @dataclass(slots=True)
@@ -386,8 +391,20 @@ class _Plan:
     device_id: str | None
     old_identifiers: set[tuple[str, str]]
     new_identifiers: set[tuple[str, str]] | None
-    conflicts: list[str]
+    # One item per conflict: the entity_id it concerns, or None when it has
+    # none (device identifiers, registry errors). Never a unique_id or key.
+    conflicts: list[str | None]
     skipped: int
+
+
+def _conflict_listing(conflicts: list[str | None]) -> str:
+    """Entity IDs only; conflicts with no entity ID are shown as a count."""
+    listed = _listing(c for c in conflicts if c is not None)
+    others = sum(1 for c in conflicts if c is None)
+    if not others:
+        return listed
+    counted = f"{others} without an entity ID"
+    return f"{listed}; {counted}" if listed else counted
 
 
 def _panel_devices(hass: HomeAssistant, entry: ConfigEntry) -> list[dr.DeviceEntry]:
@@ -407,10 +424,7 @@ def _plan_device(
     """Fill the panel device move into ``plan``; return the device's area."""
     devices = _panel_devices(hass, entry)
     if len(devices) > 1:
-        plan.conflicts.append(
-            "more than one panel device: "
-            + _listing(device.name or device.id for device in devices)
-        )
+        plan.conflicts.append(None)  # more than one panel device
         return None
     if not devices:
         return None
@@ -418,7 +432,7 @@ def _plan_device(
     target = (DOMAIN, key)
     owner = dr.async_get(hass).async_get_device(identifiers={target})
     if owner is not None and owner.id != device.id:
-        plan.conflicts.append(f"device identifier {key} (device {owner.id})")
+        plan.conflicts.append(None)  # the panel key is owned by another device
         return device.area_id
     if {ident for ident in device.identifiers if ident[0] == DOMAIN} != {target}:
         plan.device_id = device.id
@@ -461,7 +475,7 @@ def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:
             continue
         owner = registry.async_get_entity_id(reg.domain, DOMAIN, target)
         if owner is not None and owner != reg.entity_id:
-            plan.conflicts.append(f"{target} ({owner})")
+            plan.conflicts.append(owner)
             continue
         targets.add((reg.domain, target))
         plan.changes.append(_Change(reg.entity_id, reg.unique_id, target, pin))
@@ -513,6 +527,7 @@ def _async_write(hass: HomeAssistant, plan: _Plan) -> None:
             undo.append(change)
     except (ValueError, HomeAssistantError) as err:
         failed = 0
+        not_undone: list[str] = []
         for change in reversed(undo):
             try:
                 _async_update_row(
@@ -524,6 +539,7 @@ def _async_write(hass: HomeAssistant, plan: _Plan) -> None:
                 )
             except (ValueError, HomeAssistantError):
                 failed += 1
+                not_undone.append(change.entity_id)
         if device_moved and plan.device_id is not None:
             try:
                 dev_reg.async_update_device(
@@ -532,7 +548,9 @@ def _async_write(hass: HomeAssistant, plan: _Plan) -> None:
             except (ValueError, HomeAssistantError):
                 failed += 1
         if failed:
-            raise PartialRollbackError(failed, len(undo) + int(device_moved)) from err
+            raise PartialRollbackError(
+                failed, len(undo) + int(device_moved), not_undone
+            ) from err
         raise
 
 
@@ -555,18 +573,20 @@ def async_apply_legacy_migration(
             _async_write(hass, plan)
         except PartialRollbackError as err:
             partial = True
-            plan.conflicts.append(str(err))
+            plan.conflicts.extend(err.entity_ids)
+            plan.conflicts.extend([None] * (err.failed - len(err.entity_ids)))
             # Counts only, no identifiers (the error text carries none).
             _LOGGER.error(  # noqa: TRY400  # a traceback would carry identifiers
                 "Elke27 upgrade: registry partly migrated, %s", err
             )
-        except (ValueError, HomeAssistantError) as err:
-            plan.conflicts.append(str(err))
+        except (ValueError, HomeAssistantError):
+            # The error text can carry identifiers: counted, never shown.
+            plan.conflicts.append(None)
     if plan.conflicts and not partial:
         _LOGGER.error(
             "Elke27 upgrade blocked, registry unchanged: %d conflict(s): %s",
             len(plan.conflicts),
-            "; ".join(c.replace(key, REDACTED) for c in plan.conflicts),
+            _conflict_listing(plan.conflicts),
         )
     if plan.conflicts:
         ir.async_create_issue(
@@ -582,7 +602,7 @@ def async_apply_legacy_migration(
             ),
             translation_placeholders={
                 "title": entry.title,
-                "conflicts": _listing(plan.conflicts),
+                "conflicts": _conflict_listing(plan.conflicts),
             },
         )
         raise ConfigEntryNotReady(

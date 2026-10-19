@@ -625,7 +625,7 @@ async def test_failure_mid_write_rolls_back_everything(
     issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
     assert issue is not None
     assert issue.translation_placeholders is not None
-    assert "simulated registry failure" in issue.translation_placeholders["conflicts"]
+    assert issue.translation_placeholders["conflicts"] == "1 without an entity ID"
 
     # Next attempt (no fault) completes.
     await hass.config_entries.async_reload(entry.entry_id)
@@ -674,7 +674,7 @@ async def test_failed_undo_stays_pending_and_logs_counts_only(
     assert any("3 of 4 writes not reverted" in m for m in errors)
     issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
     assert issue is not None
-    assert issue.translation_key == "legacy_migration_partial"
+    assert issue.translation_key == ISSUE_LEGACY_MIGRATION_PARTIAL
     for message in errors:
         assert KEY not in message
         assert LEGACY_SERIAL not in message
@@ -722,6 +722,86 @@ async def test_reload_after_partial_undo_finishes_the_upgrade(
     current = er.async_get(hass).async_get(legacy["area:1"])
     assert current is not None
     assert current.unique_id == _new_uid("area", 1)
+
+
+def _assert_key_absent(
+    hass: HomeAssistant, entry: MockConfigEntry, caplog: pytest.LogCaptureFixture
+) -> ir.IssueEntry:
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    for value in issue.translation_placeholders.values():
+        assert KEY not in value
+        assert LEGACY_SERIAL not in value
+    for record in caplog.records:
+        assert KEY not in record.getMessage()
+        assert LEGACY_SERIAL not in record.getMessage()
+    return issue
+
+
+async def test_repairs_and_logs_never_name_the_panel_key(
+    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Blocked and partial issues list entity IDs or counts, never the panel key."""
+    caplog.set_level(logging.DEBUG, logger="custom_components.elke27")
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    legacy = seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    await _phase_a_on_relinked(hass, entry)
+    ent_reg = er.async_get(hass)
+
+    # Blocked: another device owns (elke27, KEY) and a trial entity owns a
+    # new-format unique_id built from KEY.
+    other = MockConfigEntry(domain=DOMAIN, version=2, title="trial")
+    other.add_to_hass(hass)
+    trial_device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=other.entry_id, identifiers={(DOMAIN, KEY)}
+    )
+    trial = ent_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        _new_uid("zone", 2),
+        config_entry=other,
+        suggested_object_id="trial_garage",
+    )
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    issue = _assert_key_absent(hass, entry, caplog)
+    assert issue.translation_key == ISSUE_LEGACY_MIGRATION_BLOCKED
+    assert issue.translation_placeholders is not None
+    conflicts = issue.translation_placeholders["conflicts"]
+    assert trial.entity_id in conflicts
+    assert "1 without an entity ID" in conflicts
+
+    # Partial: the conflicts are gone, but a write and every undo fail with
+    # the panel key in the error text.
+    ent_reg.async_remove(trial.entity_id)
+    dr.async_get(hass).async_remove_device(trial_device.id)
+    real_update = er.EntityRegistry.async_update_entity
+    calls = {"n": 0}
+
+    def flaky(self: er.EntityRegistry, entity_id: str, **kwargs: Any) -> Any:
+        calls["n"] += 1
+        if calls["n"] >= 4:
+            msg = f"simulated registry failure for {KEY}"
+            raise ValueError(msg)
+        return real_update(self, entity_id, **kwargs)
+
+    with patch.object(er.EntityRegistry, "async_update_entity", flaky):
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    issue = _assert_key_absent(hass, entry, caplog)
+    assert issue.translation_key == ISSUE_LEGACY_MIGRATION_PARTIAL
+    assert issue.translation_placeholders is not None
+    conflicts = issue.translation_placeholders["conflicts"]
+    # Three rows were rewritten before the fault and none could be undone.
+    listed = conflicts.split(", ")
+    assert len(listed) == 3
+    assert set(listed) <= set(legacy.values())
 
 
 async def test_failure_on_device_move_writes_nothing(
