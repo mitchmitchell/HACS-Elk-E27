@@ -60,12 +60,14 @@ def _test_modules() -> list[Path]:
 
 # --- noqa escapes for SLF001 / BLE001 ------------------------------------------
 
-_NOQA = re.compile(r"#\s*(ruff:\s*)?noqa:([^#]*)")
+_NOQA = re.compile(r"#\s*(ruff:\s*)?noqa\b(?::([^#]*))?", re.IGNORECASE)
 WATCHED = ("SLF001", "BLE001")
 
 # "<file>:<code>" -> lines that silence it. The key ends in ":file" for a
 # file-level ruff noqa header. Codes may be comma- or space-separated, as ruff
-# accepts both. New tests use the public API and never add to this.
+# accepts both, in any case. A bare line-level noqa (no codes) silences every
+# rule, so it counts for each watched code. New tests use the public API and
+# never add to this.
 NOQA_CEILING: dict[str, int] = {
     "custom_components/elke27/coordinator.py:BLE001": 4,
     "custom_components/elke27/panel_mac.py:BLE001": 1,
@@ -87,9 +89,11 @@ def _noqa_counts() -> dict[str, int]:
     for path in [*_files(SOURCE), *_test_modules()]:
         for line in path.read_text(encoding="utf-8").splitlines():
             for match in _NOQA.finditer(line):
-                codes = set(re.split(r"[\s,]+", match.group(2).strip()))
+                listed = (match.group(2) or "").strip()
+                codes = set(re.split(r"[\s,]+", listed.upper()))
+                bare = not listed and not match.group(1)
                 for code in WATCHED:
-                    if code in codes:
+                    if bare or code in codes:
                         key = f"{_rel(path)}:{code}" + (
                             ":file" if match.group(1) else ""
                         )
