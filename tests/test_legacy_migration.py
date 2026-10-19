@@ -484,7 +484,7 @@ async def test_fresh_020_entry_only_gets_the_version_bump(
 
 
 async def test_conflict_writes_nothing_and_raises_repairs(
-    hass: HomeAssistant, panel: ClientHarness
+    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
 ) -> None:
     """§8 N1: a new-format entity already exists -> blocked, registry unchanged."""
     entry = entry_017()
@@ -522,6 +522,11 @@ async def test_conflict_writes_nothing_and_raises_repairs(
     assert registry_view(hass, entry.entry_id) == before
     assert device_view(hass, entry.entry_id) == devices_before
     assert blocked_issue_id(entry.entry_id) in our_issues(hass)
+    blocked_logs = [
+        r.getMessage() for r in caplog.records if "blocked" in r.getMessage()
+    ]
+    assert blocked_logs
+    assert not any(KEY in m for m in blocked_logs)
     issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
     assert issue is not None
     assert issue.translation_key == ISSUE_LEGACY_MIGRATION_BLOCKED
@@ -665,7 +670,10 @@ async def test_failed_undo_stays_pending_and_logs_counts_only(
         for r in caplog.records
         if r.levelno == logging.ERROR and r.name.startswith("custom_components")
     ]
-    assert any("undo incomplete: 3 of 4" in m or "3 of 4 writes" in m for m in errors)
+    assert any("3 of 4 writes not reverted" in m for m in errors)
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
+    assert issue is not None
+    assert issue.translation_key == "legacy_migration_partial"
     for message in errors:
         assert KEY not in message
         assert LEGACY_SERIAL not in message
@@ -926,6 +934,7 @@ async def test_skipped_panel_sensors_are_logged_and_in_diagnostics(
         assert await async_migrate_entry(hass, entry)
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert any(reg.entity_id in r.getMessage() for r in warnings)
+    assert not any(LEGACY_SERIAL in r.getMessage() for r in caplog.records)
     state = entry.data[CONF_LEGACY_MIGRATION]
     assert [row["entity_registry_id"] for row in state["skipped"]] == [reg.id]
     assert state["plan"] == []

@@ -933,8 +933,9 @@ whole °F, so setpoints you set in °C are rounded.
 1. **Take a full Home Assistant backup first** (Settings → System → Backups, include the
    database) and keep a copy off the machine. **Restoring that backup is the only way to roll
    back to 0.1.x**: there is no downgrade, and 0.1.x refuses to load an upgraded entry.
-2. Update in HACS and restart Home Assistant. The integration shows **Relink panel** under
-   Settings → Devices & services (and in Repairs notifications).
+2. Update in HACS and restart Home Assistant. Under Settings → Devices & services the
+   integration shows an attention-required card (it is not a Repairs issue); open it to get
+   **Relink panel**.
 3. Enter the access code and passphrase. This links Home Assistant to the panel again with a
    new client ID; the panel's Network Devices list gets a new entry, and you can remove the
    old 0.1.x one there when you like.

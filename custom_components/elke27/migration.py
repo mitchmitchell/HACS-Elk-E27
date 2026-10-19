@@ -27,6 +27,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.components.diagnostics import REDACTED
 from homeassistant.const import Platform
 from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
@@ -47,6 +48,7 @@ from .const import (
     DOMAIN,
     ISSUE_LEGACY_DUPLICATES,
     ISSUE_LEGACY_MIGRATION_BLOCKED,
+    ISSUE_LEGACY_MIGRATION_PARTIAL,
     MIGRATION_STATE_DONE,
     MIGRATION_STATE_PENDING,
 )
@@ -249,7 +251,7 @@ async def async_migrate_legacy_entry(hass: HomeAssistant, entry: ConfigEntry) ->
         _LOGGER.warning(
             "Elke27 upgrade: %s (%s) has no 0.2.x counterpart and is left unchanged",
             row.entity_id,
-            row.old_unique_id,
+            f"{REDACTED}:{row.kind}:{row.n}",
         )
     if duplicates:
         _async_raise_duplicates_issue(hass, entry, duplicates)
@@ -362,7 +364,7 @@ class PartialRollbackError(HomeAssistantError):
         """Keep counts only; the message carries no identifiers."""
         super().__init__(
             f"undo incomplete: {failed} of {total} writes not reverted; "
-            "restore the backup taken before the upgrade"
+            "reload to finish (restoring the pre-upgrade backup is also safe)"
         )
         self.failed = failed
 
@@ -559,9 +561,9 @@ def async_apply_legacy_migration(
             plan.conflicts.append(str(err))
     if plan.conflicts and not partial:
         _LOGGER.error(
-            "Elke27 upgrade of %s blocked, registry unchanged: %s",
-            entry.title,
-            "; ".join(plan.conflicts),
+            "Elke27 upgrade blocked, registry unchanged: %d conflict(s): %s",
+            len(plan.conflicts),
+            "; ".join(c.replace(key, REDACTED) for c in plan.conflicts),
         )
     if plan.conflicts:
         ir.async_create_issue(
@@ -570,7 +572,11 @@ def async_apply_legacy_migration(
             blocked_issue_id(entry.entry_id),
             is_fixable=False,
             severity=ir.IssueSeverity.ERROR,
-            translation_key=ISSUE_LEGACY_MIGRATION_BLOCKED,
+            translation_key=(
+                ISSUE_LEGACY_MIGRATION_PARTIAL
+                if partial
+                else ISSUE_LEGACY_MIGRATION_BLOCKED
+            ),
             translation_placeholders={
                 "title": entry.title,
                 "conflicts": _listing(plan.conflicts),
@@ -578,7 +584,11 @@ def async_apply_legacy_migration(
         )
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN,
-            translation_key="legacy_migration_blocked",
+            translation_key=(
+                ISSUE_LEGACY_MIGRATION_PARTIAL
+                if partial
+                else ISSUE_LEGACY_MIGRATION_BLOCKED
+            ),
             translation_placeholders={"count": str(len(plan.conflicts))},
         )
 

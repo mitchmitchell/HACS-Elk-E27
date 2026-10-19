@@ -137,6 +137,10 @@
     "legacy_duplicates": {
       "title": "Duplicate Elk E27 entities from 0.1.x",
       "description": "While upgrading {title}, these older duplicate entities were left unchanged because another entity with the same panel number was kept: {entities}. They stay unavailable. Delete them under Settings → Devices & services → Entities."
+    },
+    "legacy_migration_partial": {
+      "title": "Elk E27 upgrade interrupted",
+      "description": "The upgrade of {title} from 0.1.x hit an error and some changes could not be undone: {conflicts}. The entry will not load until the upgrade finishes. Reloading the integration (or restarting Home Assistant) completes it: entities already converted are kept and the rest are converted. Restoring the backup taken before the upgrade is also safe, but not required."
     }
   },
   "exceptions": {
@@ -163,6 +167,9 @@
     },
     "legacy_migration_blocked": {
       "message": "The upgrade from 0.1.x is blocked by {count} conflict(s); see Repairs. Nothing was changed."
+    },
+    "legacy_migration_partial": {
+      "message": "The upgrade from 0.1.x was interrupted and some changes could not be undone; see Repairs. Reload to finish it."
     }
   },
   "selector": {

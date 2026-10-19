@@ -23,6 +23,8 @@ MIGRATION_STATE_PENDING = "pending"
 MIGRATION_STATE_DONE = "done"
 ISSUE_LEGACY_MIGRATION_BLOCKED = "legacy_migration_blocked"
 ISSUE_LEGACY_DUPLICATES = "legacy_duplicates"
+# Same issue id as blocked; different text when an undo could not revert every write.
+ISSUE_LEGACY_MIGRATION_PARTIAL = "legacy_migration_partial"
 DISCOVER_HOST_TIMEOUT = 3.0
 ISSUE_PANEL_MAC_MISMATCH = "panel_mac_mismatch"
 
