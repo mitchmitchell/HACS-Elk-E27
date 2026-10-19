@@ -132,7 +132,7 @@
     },
     "legacy_migration_blocked": {
       "title": "Elk E27 upgrade blocked",
-      "description": "The upgrade of the Elk E27 integration from 0.1.x could not finish: {count} new-format entities or devices already exist ({other} of them are not entities, for example a device left over from a 0.2.0 trial). Conflicting entities: {conflicts}. Nothing was changed and the entry will not load until this is fixed. Delete the conflicting entities (for example left over from a 0.2.0 trial) under Settings → Devices & services → Entities, then reload the integration."
+      "description": "The upgrade of the Elk E27 integration from 0.1.x could not finish: {count} new-format entities already exist. Conflicting entities: {conflicts}. Nothing was changed and the entry will not load until this is fixed. Delete the conflicting entities (for example left over from a 0.2.0 trial) under Settings → Devices & services → Entities, then reload the integration."
     },
     "legacy_duplicates": {
       "title": "Duplicate Elk E27 entities from 0.1.x",
@@ -140,7 +140,27 @@
     },
     "legacy_migration_partial": {
       "title": "Elk E27 upgrade interrupted",
-      "description": "The upgrade of the Elk E27 integration from 0.1.x hit an error and {count} changes could not be undone ({other} of them not on an entity). Affected entities: {conflicts}. The entry will not load until the upgrade finishes. Reloading the integration (or restarting Home Assistant) completes it: entities already converted are kept and the rest are converted. Restoring the backup taken before the upgrade is also safe, but not required."
+      "description": "The upgrade of the Elk E27 integration from 0.1.x hit an error and {count} changes could not be undone. Affected entities: {conflicts}. The entry will not load until the upgrade finishes. Reloading the integration (or restarting Home Assistant) completes it: entities already converted are kept and the rest are converted. Restoring the backup taken before the upgrade is also safe, but not required."
+    },
+    "legacy_migration_blocked_devices": {
+      "title": "Elk E27 upgrade blocked",
+      "description": "The upgrade of the Elk E27 integration from 0.1.x could not finish: {count} new-format devices already exist (for example a device left over from a 0.2.0 trial). Nothing was changed and the entry will not load until this is fixed. Delete the leftover Elk E27 device under Settings → Devices & services → Devices, then reload the integration."
+    },
+    "legacy_migration_blocked_mixed": {
+      "title": "Elk E27 upgrade blocked",
+      "description": "The upgrade of the Elk E27 integration from 0.1.x could not finish: {count} new-format entities or devices already exist, {other} of them devices rather than entities (for example a device left over from a 0.2.0 trial). Conflicting entities: {conflicts}. Nothing was changed and the entry will not load until this is fixed. Delete the conflicting entities and the leftover device under Settings → Devices & services, then reload the integration."
+    },
+    "legacy_migration_partial_devices": {
+      "title": "Elk E27 upgrade interrupted",
+      "description": "The upgrade of the Elk E27 integration from 0.1.x hit an error and {count} device changes could not be undone. The entry will not load until the upgrade finishes. Reloading the integration (or restarting Home Assistant) completes it: entities already converted are kept and the rest are converted. Restoring the backup taken before the upgrade is also safe, but not required."
+    },
+    "legacy_migration_partial_mixed": {
+      "title": "Elk E27 upgrade interrupted",
+      "description": "The upgrade of the Elk E27 integration from 0.1.x hit an error and {count} changes could not be undone, {other} of them on the device rather than an entity. Affected entities: {conflicts}. The entry will not load until the upgrade finishes. Reloading the integration (or restarting Home Assistant) completes it: entities already converted are kept and the rest are converted. Restoring the backup taken before the upgrade is also safe, but not required."
+    },
+    "legacy_migration_write_failed": {
+      "title": "Elk E27 upgrade could not finish writing",
+      "description": "The upgrade of the Elk E27 integration from 0.1.x could not finish writing to the Home Assistant registry. Every change it made was undone, so your entities are as they were. The entry will not load until the upgrade finishes. Reload the integration (or restart Home Assistant) to retry. If it keeps failing, restore the backup taken before the upgrade."
     }
   },
   "exceptions": {
@@ -173,6 +193,9 @@
     },
     "legacy_migration_record_malformed": {
       "message": "The stored 0.1.x upgrade record is malformed (field {field}), so the upgrade was not run and nothing was changed. To recover, restore the Home Assistant backup taken before the upgrade, or reinstall Elk E27 0.1.x and upgrade again. See the README troubleshooting section."
+    },
+    "legacy_migration_write_failed": {
+      "message": "The upgrade from 0.1.x could not finish writing to the registry; nothing was changed. Reload to retry, or restore the pre-upgrade backup; see Repairs."
     }
   },
   "selector": {

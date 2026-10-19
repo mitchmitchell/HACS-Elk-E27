@@ -49,6 +49,7 @@ from .const import (
     ISSUE_LEGACY_DUPLICATES,
     ISSUE_LEGACY_MIGRATION_BLOCKED,
     ISSUE_LEGACY_MIGRATION_PARTIAL,
+    ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
     MIGRATION_STATE_DONE,
     MIGRATION_STATE_PENDING,
 )
@@ -471,6 +472,26 @@ def _conflict_listing(conflicts: list[str | None]) -> str:
     return f"{listed}; {counted}" if listed else counted
 
 
+def issue_variant(base: str, conflicts: list[str | None]) -> tuple[str, dict[str, str]]:
+    """
+    Pick the Repairs text variant so no placeholder is ever empty or zero.
+
+    ``base`` alone: only entities; ``base_devices``: none are entities;
+    ``base_mixed``: both. Placeholders hold entity IDs and counts only.
+    """
+    entities = [c for c in conflicts if c is not None]
+    others = len(conflicts) - len(entities)
+    placeholders = {"count": str(len(conflicts))}
+    if entities:
+        placeholders["conflicts"] = _listing(entities)
+    if entities and others:
+        placeholders["other"] = str(others)
+        return f"{base}_mixed", placeholders
+    if entities:
+        return base, placeholders
+    return f"{base}_devices", placeholders
+
+
 def _panel_devices(hass: HomeAssistant, entry: ConfigEntry) -> list[dr.DeviceEntry]:
     """Return the entry's devices whose elke27 identifiers are not area devices."""
     registry = dr.async_get(hass)
@@ -637,6 +658,7 @@ def async_apply_legacy_migration(
     """
     plan = _build_phase_b(hass, entry, key)
     partial = False
+    write_failed = False
     if not plan.conflicts:
         try:
             _async_write(hass, plan)
@@ -649,8 +671,27 @@ def async_apply_legacy_migration(
                 "Elke27 upgrade: registry partly migrated, %s", err
             )
         except (ValueError, HomeAssistantError):
-            # The error text can carry identifiers: counted, never shown.
-            plan.conflicts.append(None)
+            # Not a conflict: a registry write failed and was fully undone.
+            # The error text can carry identifiers: never shown or logged.
+            write_failed = True
+            _LOGGER.error(  # noqa: TRY400  # a traceback would carry identifiers
+                "Elke27 upgrade: a registry write failed, all %d planned "
+                "change(s) undone; reload to retry",
+                len(plan.changes),
+            )
+    if write_failed:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            blocked_issue_id(entry.entry_id),
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
+        )
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN,
+            translation_key=ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
+        )
     if plan.conflicts and not partial:
         _LOGGER.error(
             "Elke27 upgrade blocked, registry unchanged: %d conflict(s): %s",
@@ -658,30 +699,24 @@ def async_apply_legacy_migration(
             _conflict_listing(plan.conflicts),
         )
     if plan.conflicts:
+        base = (
+            ISSUE_LEGACY_MIGRATION_PARTIAL
+            if partial
+            else ISSUE_LEGACY_MIGRATION_BLOCKED
+        )
+        issue_key, placeholders = issue_variant(base, plan.conflicts)
         ir.async_create_issue(
             hass,
             DOMAIN,
             blocked_issue_id(entry.entry_id),
             is_fixable=False,
             severity=ir.IssueSeverity.ERROR,
-            translation_key=(
-                ISSUE_LEGACY_MIGRATION_PARTIAL
-                if partial
-                else ISSUE_LEGACY_MIGRATION_BLOCKED
-            ),
-            translation_placeholders={
-                "count": str(len(plan.conflicts)),
-                "other": str(sum(1 for c in plan.conflicts if c is None)),
-                "conflicts": _listing(c for c in plan.conflicts if c is not None),
-            },
+            translation_key=issue_key,
+            translation_placeholders=placeholders,
         )
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN,
-            translation_key=(
-                ISSUE_LEGACY_MIGRATION_PARTIAL
-                if partial
-                else ISSUE_LEGACY_MIGRATION_BLOCKED
-            ),
+            translation_key=base,
             translation_placeholders={"count": str(len(plan.conflicts))},
         )
 

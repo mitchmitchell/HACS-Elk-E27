@@ -14,6 +14,7 @@ from collections.abc import Generator
 import dataclasses
 import json
 import logging
+from pathlib import Path
 import re
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -50,6 +51,7 @@ from custom_components.elke27.const import (
     ISSUE_LEGACY_DUPLICATES,
     ISSUE_LEGACY_MIGRATION_BLOCKED,
     ISSUE_LEGACY_MIGRATION_PARTIAL,
+    ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
 )
 from custom_components.elke27.diagnostics import (
     async_get_config_entry_diagnostics,
@@ -60,6 +62,7 @@ from custom_components.elke27.migration import (
     async_apply_legacy_migration,
     blocked_issue_id,
     duplicates_issue_id,
+    issue_variant,
     legacy_migration_pending,
     new_unique_id,
     parse_legacy_unique_id,
@@ -643,9 +646,9 @@ async def test_failure_mid_write_rolls_back_everything(
     assert device_view(hass, entry.entry_id) == devices_before
     issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
     assert issue is not None
-    assert issue.translation_placeholders is not None
-    assert issue.translation_placeholders["conflicts"] == ""
-    assert issue.translation_placeholders["other"] == "1"
+    # A write failure, not a conflict: own text, no empty placeholders.
+    assert issue.translation_key == ISSUE_LEGACY_MIGRATION_WRITE_FAILED
+    assert not issue.translation_placeholders
 
     # Next attempt (no fault) completes.
     await hass.config_entries.async_reload(entry.entry_id)
@@ -790,7 +793,7 @@ async def test_repairs_and_logs_never_name_the_panel_key(
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_RETRY
     issue = _assert_key_absent(hass, entry, caplog)
-    assert issue.translation_key == ISSUE_LEGACY_MIGRATION_BLOCKED
+    assert issue.translation_key == f"{ISSUE_LEGACY_MIGRATION_BLOCKED}_mixed"
     assert issue.translation_placeholders is not None
     conflicts = issue.translation_placeholders["conflicts"]
     assert trial.entity_id in conflicts
@@ -825,7 +828,7 @@ async def test_repairs_and_logs_never_name_the_panel_key(
 
 
 async def test_failure_on_device_move_writes_nothing(
-    hass: HomeAssistant, panel: ClientHarness
+    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A device registry error on the first write leaves every row as it was."""
     entry = entry_relinked()
@@ -841,13 +844,25 @@ async def test_failure_on_device_move_writes_nothing(
         msg = "simulated device failure"
         raise HomeAssistantError(msg)
 
-    with patch.object(dr.DeviceRegistry, "async_update_device", broken):
+    with (
+        patch.object(dr.DeviceRegistry, "async_update_device", broken),
+        caplog.at_level(logging.ERROR, logger="custom_components.elke27"),
+    ):
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
     assert registry_view(hass, entry.entry_id) == before
     assert device_view(hass, entry.entry_id) == devices_before
+    # A write failure is not a conflict: its own text, never "delete entities".
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
+    assert issue is not None
+    assert issue.translation_key == ISSUE_LEGACY_MIGRATION_WRITE_FAILED
+    assert not issue.translation_placeholders
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("registry write failed" in m for m in messages)
+    assert not any("conflict" in m for m in messages)
+    assert not any("simulated device failure" in m for m in messages)
 
 
 async def test_migration_is_idempotent(
@@ -1593,7 +1608,11 @@ async def test_device_conflict_is_counted_not_named(
     placeholders = await _assert_no_identifiers(
         hass, entry, caplog, _forbidden(device.id, _PLANT_NAME)
     )
-    assert placeholders["other"] == "1"
+    # Device-only conflict: the _devices variant, a count and nothing empty.
+    assert placeholders == {"count": "1"}
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
+    assert issue is not None
+    assert issue.translation_key == f"{ISSUE_LEGACY_MIGRATION_BLOCKED}_devices"
 
 
 def entry_017_discovered() -> MockConfigEntry:
@@ -1713,3 +1732,43 @@ def test_diagnostics_degrade_on_non_list_or_non_mapping_rows(
         "error": "LegacyMigrationRecordError",
         "field": field,
     }
+
+
+@pytest.mark.parametrize(
+    "base", ["legacy_migration_blocked", "legacy_migration_partial"]
+)
+@pytest.mark.parametrize(
+    ("conflicts", "suffix", "expected"),
+    [
+        (
+            ["binary_sensor.a", "sensor.b"],
+            "",
+            {"count": "2", "conflicts": "binary_sensor.a, sensor.b"},
+        ),
+        ([None, None], "_devices", {"count": "2"}),
+        (
+            ["binary_sensor.a", None],
+            "_mixed",
+            {"count": "2", "conflicts": "binary_sensor.a", "other": "1"},
+        ),
+    ],
+    ids=["entities_only", "non_entities_only", "both"],
+)
+def test_issue_variant_never_leaves_a_placeholder_empty(
+    base: str, conflicts: list[str | None], suffix: str, expected: dict[str, str]
+) -> None:
+    """Each variant's text uses exactly its placeholders; none empty or zero."""
+    key, placeholders = issue_variant(base, conflicts)
+    assert key == f"{base}{suffix}"
+    assert placeholders == expected
+    strings = json.loads(
+        (
+            Path(__file__).parent.parent / "custom_components/elke27/strings.json"
+        ).read_text(encoding="utf-8")
+    )
+    text = strings["issues"][key]["description"]
+    used = set(re.findall(r"{(\w+)}", text))
+    assert used == set(placeholders)
+    for value in placeholders.values():
+        assert value
+        assert value != "0"
