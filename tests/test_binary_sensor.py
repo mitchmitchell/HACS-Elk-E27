@@ -53,9 +53,9 @@ EXPECTED = {
     8: "smoke",
     9: "smoke",
     10: None,
-    11: None,
+    11: "moisture",
     12: None,
-    13: None,
+    13: "carbon_monoxide",
     14: None,
     15: None,
     16: None,
@@ -160,6 +160,8 @@ async def test_name_does_not_change_device_class(
     assert cls(6) == "opening"
     # A non-burglary zone named like a motion detector stays generic.
     assert cls(10) is None
+    # A water zone named "Front Door" with zone_type Door is moisture.
+    assert cls(11) == "moisture"
 
 
 async def test_user_device_class_override_survives_reload(

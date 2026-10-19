@@ -75,7 +75,7 @@
     'name': None,
     'options': dict({
     }),
-    'original_device_class': None,
+    'original_device_class': <BinarySensorDeviceClass.CO: 'carbon_monoxide'>,
     'original_icon': 'mdi:molecule-co',
     'original_name': 'CO',
     'platform': 'elke27',
@@ -92,6 +92,7 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'CARBON MONOXIDE',
+      'device_class': 'carbon_monoxide',
       'friendly_name': 'House CO',
       'icon': 'mdi:molecule-co',
       'trouble': None,
@@ -180,7 +181,7 @@
     'name': None,
     'options': dict({
     }),
-    'original_device_class': None,
+    'original_device_class': <BinarySensorDeviceClass.MOISTURE: 'moisture'>,
     'original_icon': 'mdi:water',
     'original_name': 'Front Door',
     'platform': 'elke27',
@@ -197,6 +198,7 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'WATER',
+      'device_class': 'moisture',
       'friendly_name': 'House Front Door',
       'icon': 'mdi:water',
       'trouble': None,

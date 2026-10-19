@@ -74,6 +74,8 @@ _DEVICE_CLASS_BY_DEFINITION: dict[str, BinarySensorDeviceClass] = {
     "BURG PERIM INST": BinarySensorDeviceClass.OPENING,
     "BURG EE DELAY": BinarySensorDeviceClass.OPENING,
     "FIRE": BinarySensorDeviceClass.SMOKE,
+    "CARBON MONOXIDE": BinarySensorDeviceClass.CO,
+    "WATER": BinarySensorDeviceClass.MOISTURE,
 }
 
 
