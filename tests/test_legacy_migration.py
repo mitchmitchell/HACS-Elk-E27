@@ -630,6 +630,49 @@ async def test_failure_mid_write_rolls_back_everything(
     assert current.unique_id == _new_uid("area", 1)
 
 
+async def test_failed_undo_stays_pending_and_logs_counts_only(
+    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """If the undo itself fails: pending, blocked issue, ERROR with no identifiers."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    await _phase_a_on_relinked(hass, entry)
+    real_update = er.EntityRegistry.async_update_entity
+    calls = {"n": 0}
+
+    def flaky(self: er.EntityRegistry, entity_id: str, **kwargs: Any) -> Any:
+        calls["n"] += 1
+        if calls["n"] >= 4:  # the 4th write and every undo fail
+            msg = "simulated registry failure"
+            raise ValueError(msg)
+        return real_update(self, entity_id, **kwargs)
+
+    with (
+        patch.object(er.EntityRegistry, "async_update_entity", flaky),
+        caplog.at_level(logging.ERROR, logger="custom_components.elke27"),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert legacy_migration_pending(entry)
+    assert blocked_issue_id(entry.entry_id) in our_issues(hass)
+    errors = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.ERROR and r.name.startswith("custom_components")
+    ]
+    assert any("undo incomplete: 3 of 4" in m or "3 of 4 writes" in m for m in errors)
+    for message in errors:
+        assert KEY not in message
+        assert LEGACY_SERIAL not in message
+        assert "binary_sensor." not in message
+        assert "registry unchanged" not in message
+
+
 async def test_failure_on_device_move_writes_nothing(
     hass: HomeAssistant, panel: ClientHarness
 ) -> None:

@@ -355,6 +355,18 @@ def async_refresh_duplicates_issue(hass: HomeAssistant, entry: ConfigEntry) -> N
         ir.async_delete_issue(hass, DOMAIN, duplicates_issue_id(entry.entry_id))
 
 
+class PartialRollbackError(HomeAssistantError):
+    """Undo after a failed Phase B write could not revert every write."""
+
+    def __init__(self, failed: int, total: int) -> None:
+        """Keep counts only; the message carries no identifiers."""
+        super().__init__(
+            f"undo incomplete: {failed} of {total} writes not reverted; "
+            "restore the backup taken before the upgrade"
+        )
+        self.failed = failed
+
+
 @dataclass(slots=True)
 class _Change:
     entity_id: str
@@ -476,20 +488,31 @@ def _async_write(hass: HomeAssistant, plan: _Plan) -> None:
                     change.entity_id, new_unique_id=change.new_unique_id
                 )
             undo.append(change)
-    except (ValueError, HomeAssistantError):
+    except (ValueError, HomeAssistantError) as err:
+        failed = 0
         for change in reversed(undo):
-            if change.pin_area is not None:
-                ent_reg.async_update_entity(
-                    change.entity_id, new_unique_id=change.old_unique_id, area_id=None
-                )
-            else:
-                ent_reg.async_update_entity(
-                    change.entity_id, new_unique_id=change.old_unique_id
-                )
+            try:
+                if change.pin_area is not None:
+                    ent_reg.async_update_entity(
+                        change.entity_id,
+                        new_unique_id=change.old_unique_id,
+                        area_id=None,
+                    )
+                else:
+                    ent_reg.async_update_entity(
+                        change.entity_id, new_unique_id=change.old_unique_id
+                    )
+            except (ValueError, HomeAssistantError):
+                failed += 1
         if device_moved and plan.device_id is not None:
-            dev_reg.async_update_device(
-                plan.device_id, new_identifiers=plan.old_identifiers
-            )
+            try:
+                dev_reg.async_update_device(
+                    plan.device_id, new_identifiers=plan.old_identifiers
+                )
+            except (ValueError, HomeAssistantError):
+                failed += 1
+        if failed:
+            raise PartialRollbackError(failed, len(undo) + int(device_moved)) from err
         raise
 
 
@@ -506,17 +529,26 @@ def async_apply_legacy_migration(
     conflicts, and ConfigEntryNotReady stops the platforms from loading.
     """
     plan = _build_phase_b(hass, entry, key)
+    partial = False
     if not plan.conflicts:
         try:
             _async_write(hass, plan)
+        except PartialRollbackError as err:
+            partial = True
+            plan.conflicts.append(str(err))
+            # Counts only, no identifiers (the error text carries none).
+            _LOGGER.error(  # noqa: TRY400  # a traceback would carry identifiers
+                "Elke27 upgrade: registry partly migrated, %s", err
+            )
         except (ValueError, HomeAssistantError) as err:
             plan.conflicts.append(str(err))
-    if plan.conflicts:
+    if plan.conflicts and not partial:
         _LOGGER.error(
             "Elke27 upgrade of %s blocked, registry unchanged: %s",
             entry.title,
             "; ".join(plan.conflicts),
         )
+    if plan.conflicts:
         ir.async_create_issue(
             hass,
             DOMAIN,

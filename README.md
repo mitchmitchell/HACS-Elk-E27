@@ -930,8 +930,9 @@ whole °F, so setpoints you set in °C are rounded.
 > Do **not** delete the integration. Your entity IDs, registry IDs, names you set, icons,
 > areas, labels, disabled and hidden state, automations, dashboards and history are kept.
 
-1. Make a Home Assistant backup (include the database). Restoring it is the only way back:
-   0.1.x refuses to load an upgraded entry.
+1. **Take a full Home Assistant backup first** (Settings → System → Backups, include the
+   database) and keep a copy off the machine. **Restoring that backup is the only way to roll
+   back to 0.1.x**: there is no downgrade, and 0.1.x refuses to load an upgraded entry.
 2. Update in HACS and restart Home Assistant. The integration shows **Relink panel** under
    Settings → Devices & services (and in Repairs notifications).
 3. Enter the access code and passphrase. This links Home Assistant to the panel again with a
