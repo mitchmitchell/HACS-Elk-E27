@@ -17,7 +17,6 @@ from elke27_lib import AreaState, ZoneState
 from elke27_lib.errors import Elke27PanelError
 import pytest
 
-from custom_components.elke27.errors import PANEL_ERROR_CODES_REJECTED
 from homeassistant.const import ATTR_CODE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
@@ -27,7 +26,8 @@ ALARM = "alarm_control_panel.house"
 CODE = "1234"
 
 
-REJECTED_CODES = sorted(PANEL_ERROR_CODES_REJECTED)
+# Literal panel codes, not read from the set under test.
+REJECTED_CODES = [11004, 11008, 11037]
 
 
 @pytest.fixture(autouse=True, params=REJECTED_CODES, ids=lambda c: f"panel_{c}")

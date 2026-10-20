@@ -30,7 +30,7 @@ NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
 
 # Panel error codes that mean the panel rejected the user code (a wrong code,
 # or a code not allowed for this action). Each is a user error.
-PANEL_ERROR_CODES_REJECTED: frozenset[int] = frozenset({11004, 11008})
+PANEL_ERROR_CODES_REJECTED: frozenset[int] = frozenset({11004, 11008, 11037})
 
 
 def is_code_rejected_panel_error(err: BaseException | None) -> bool:
