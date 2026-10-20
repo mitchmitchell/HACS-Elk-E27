@@ -645,6 +645,21 @@ def blocking_entities(
     target held by a row other than the planned one. None when the blocked
     Phase B key is unknown (for example after a restart): retry only.
     """
+    split = split_blocking_entities(hass, entry)
+    return None if split is None else split[0]
+
+
+def split_blocking_entities(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> tuple[list[er.RegistryEntry], list[er.RegistryEntry]] | None:
+    """
+    Return (owned, not owned) leftover entities blocking Phase B.
+
+    Owned ones belong to this config entry and platform and may be deleted
+    by the fix flow. Not-owned ones hold a planned target but belong to
+    another config entry; the user must remove those by hand. None when the
+    blocked Phase B key is unknown.
+    """
     key = hass.data.get(_BLOCKED_KEYS, {}).get(entry.entry_id)
     if key is None or not legacy_migration_pending(entry):
         return None
@@ -655,23 +670,24 @@ def blocking_entities(
     registry = er.async_get(hass)
     rows = entry.data[CONF_LEGACY_MIGRATION]["plan"]
     planned = {row["entity_registry_id"] for row in rows}
-    found: dict[str, er.RegistryEntry] = {}
+    owned: dict[str, er.RegistryEntry] = {}
+    others: dict[str, er.RegistryEntry] = {}
     for row in rows:
         target = new_unique_id(key, row["kind"], int(row["n"]))
         if target is None:
             continue
         owner_id = registry.async_get_entity_id(row["domain"], DOMAIN, target)
         owner = registry.async_get(owner_id) if owner_id else None
-        if (
-            owner is None
-            or owner.id in planned
-            or owner.config_entry_id != entry.entry_id
-            or owner.platform != DOMAIN
-            or owner.unique_id != target
-        ):
+        if owner is None or owner.id in planned or owner.unique_id != target:
             continue
-        found[owner.entity_id] = owner
-    return [found[entity_id] for entity_id in sorted(found)]
+        if owner.config_entry_id == entry.entry_id and owner.platform == DOMAIN:
+            owned[owner.entity_id] = owner
+        else:
+            others[owner.entity_id] = owner
+    return (
+        [owned[entity_id] for entity_id in sorted(owned)],
+        [others[entity_id] for entity_id in sorted(others)],
+    )
 
 
 def _build_phase_b(hass: HomeAssistant, entry: ConfigEntry, key: str) -> _Plan:

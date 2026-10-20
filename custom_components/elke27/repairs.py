@@ -16,6 +16,7 @@ from .migration import (
     async_rebuild_legacy_record,
     blocking_entities,
     record_issue_id,
+    split_blocking_entities,
 )
 
 if TYPE_CHECKING:
@@ -126,7 +127,8 @@ class BlockedUpgradeFlow(_EntryFlow):
         entry = self._entry()
         if entry is None:
             return self.async_abort(reason="entry_missing")
-        if not blocking_entities(self.hass, entry):
+        split = split_blocking_entities(self.hass, entry)
+        if split is None or not split[0]:
             return await self.async_step_retry()
         return await self.async_step_confirm()
 
@@ -141,18 +143,30 @@ class BlockedUpgradeFlow(_EntryFlow):
             unshown = self._delete(entry, self._shown)
             if not unshown:
                 return self._finish()
-        shown = blocking_entities(self.hass, entry) or []
+        shown, others = split_blocking_entities(self.hass, entry) or ([], [])
         if not shown:
             return self._finish()
-        # Only what this form lists may be deleted on submit.
+        # Only what this form lists for deletion may be deleted on submit.
         self._shown = frozenset(reg.id for reg in shown)
+        placeholders = {
+            "count": str(len(shown)),
+            "entities": _bullets(reg.entity_id for reg in shown),
+        }
+        if others:
+            # Listed in the notice but not ours: say so, so the counts agree.
+            placeholders["kept_count"] = str(len(others))
+            placeholders["kept"] = _bullets(reg.entity_id for reg in others)
         return self.async_show_form(
-            step_id="confirm",
+            step_id="confirm_partial" if others else "confirm",
             data_schema=vol.Schema({}),
-            description_placeholders={
-                "entities": _bullets(reg.entity_id for reg in shown)
-            },
+            description_placeholders=placeholders,
         )
+
+    async def async_step_confirm_partial(
+        self, user_input: dict[str, Any] | None = None
+    ) -> data_entry_flow.FlowResult:
+        """Confirm step that also lists leftovers to remove by hand."""
+        return await self.async_step_confirm(user_input)
 
     async def async_step_retry(
         self, user_input: dict[str, Any] | None = None
@@ -160,7 +174,24 @@ class BlockedUpgradeFlow(_EntryFlow):
         """Nothing this flow may delete: confirm, then retry only."""
         if user_input is not None:
             return self._finish()
+        entry = self._entry()
+        split = split_blocking_entities(self.hass, entry) if entry else None
+        if split is not None and split[1]:
+            return self.async_show_form(
+                step_id="retry_manual",
+                data_schema=vol.Schema({}),
+                description_placeholders={
+                    "count": str(len(split[1])),
+                    "entities": _bullets(reg.entity_id for reg in split[1]),
+                },
+            )
         return self.async_show_form(step_id="retry", data_schema=vol.Schema({}))
+
+    async def async_step_retry_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> data_entry_flow.FlowResult:
+        """Retry step that lists leftovers this flow can't delete."""
+        return await self.async_step_retry(user_input)
 
     def _delete(self, entry: ConfigEntry, shown: frozenset[str]) -> bool:
         """Delete shown leftovers that still block; True if new ones appeared."""
@@ -172,7 +203,7 @@ class BlockedUpgradeFlow(_EntryFlow):
         registry = er.async_get(self.hass)
         for reg in targets:
             registry.async_remove(reg.entity_id)
-        _LOGGER.info("Elke27 upgrade: deleted %d leftover entities", len(targets))
+        _LOGGER.info("Elke27 upgrade: leftover entities deleted: %d", len(targets))
         return len(targets) < len(current)
 
 

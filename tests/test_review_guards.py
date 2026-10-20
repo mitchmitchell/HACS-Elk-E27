@@ -246,6 +246,9 @@ DOCSTRING_CLAIMS: dict[str, tuple[str, ...] | str] = {
     "custom_components/elke27/repairs.py::BlockedUpgradeFlow.async_step_retry": (
         "tests/test_legacy_migration.py::test_retry_flows_reload",
     ),
+    "custom_components/elke27/repairs.py::BlockedUpgradeFlow.async_step_retry_manual": (
+        "tests/test_legacy_migration.py::test_blocked_flow_with_only_unowned_lists_them_and_retries",
+    ),
     "custom_components/elke27/errors.py::is_reconnect_retryable": (
         "tests/test_reconnect.py::test_transport_failures_never_raise_issue",
         "tests/test_reconnect.py::test_non_transport_issue_on_third_failure",
