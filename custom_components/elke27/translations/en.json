@@ -184,7 +184,7 @@
         "step": {
           "retry": {
             "title": "Retry the Elk E27 upgrade",
-            "description": "Remove the leftover entities that block the upgrade of this Elk E27 entry by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
+            "description": "Delete the leftover Elk E27 device or devices that block the upgrade of this Elk E27 entry by hand under Settings → Devices & services → Devices (open each one, ⋮ → **Delete**). Then select **Submit** to retry the upgrade."
           },
           "confirm": {
             "title": "Delete leftover entities",
@@ -211,7 +211,7 @@
         "step": {
           "retry": {
             "title": "Retry the Elk E27 upgrade",
-            "description": "Remove the leftover entities that block the upgrade of this Elk E27 entry by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
+            "description": "Delete any leftover Elk E27 device that blocks the upgrade of this Elk E27 entry by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**). Remove any remaining leftover entities by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
           },
           "confirm": {
             "title": "Delete leftover entities",

@@ -2330,3 +2330,19 @@ async def test_blocked_flow_with_only_unowned_lists_them_and_retries(
     assert result["type"] == "create_entry"
     assert ent_reg.async_get(foreign.entity_id) is not None
     reload.assert_called_once_with(entry.entry_id)
+
+
+def test_plain_retry_text_matches_blocking_kind() -> None:
+    """Plain retry text names Devices when a leftover device can block."""
+    issues = json.loads((_STRINGS_DIR / "strings.json").read_text(encoding="utf-8"))[
+        "issues"
+    ]
+
+    def retry(key: str) -> str:
+        return issues[key]["fix_flow"]["step"]["retry"]["description"]
+
+    assert "→ Devices (" in retry("legacy_migration_blocked_devices")
+    assert "→ Entities" not in retry("legacy_migration_blocked_devices")
+    assert "→ Devices (" in retry("legacy_migration_blocked_mixed")
+    assert "→ Entities" in retry("legacy_migration_blocked_mixed")
+    assert "→ Entities" in retry("legacy_migration_blocked")
