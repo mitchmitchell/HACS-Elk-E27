@@ -3,6 +3,15 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
+## [Unreleased] - 0.2.1 (draft)
+
+### Fixed
+1. **Every way the panel rejects a code is now a user error.** When the panel rejected the
+   code for a disarm, arm, custom bypass (including its rollback), automatic arm or zone
+   bypass in a way 0.2.0 did not recognize, Home Assistant returned a server error and
+   logged an ERROR. It now shows the same "The panel rejected the code" message, event and
+   notification as every other rejected code, and logs nothing at ERROR level.
+
 ## [Unreleased] - 0.2.0 (draft)
 
 ### Breaking

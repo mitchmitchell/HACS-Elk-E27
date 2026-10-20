@@ -28,9 +28,14 @@ from .const import DOMAIN
 NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
 
 
-# The panel refuses a user code it does not accept (wrong code, or a code not
-# allowed for this action) with ELKERR_NOAUTH.
-PANEL_ERROR_CODE_REJECTED = 11008
+# Panel error codes that mean the panel rejected the user code (a wrong code,
+# or a code not allowed for this action). Each is a user error.
+PANEL_ERROR_CODES_REJECTED: frozenset[int] = frozenset({11004, 11008})
+
+
+def is_code_rejected_panel_error(err: BaseException | None) -> bool:
+    """Return True when the panel error code means the code was rejected."""
+    return panel_error_code(err) in PANEL_ERROR_CODES_REJECTED
 
 
 CODE_REJECTED_MESSAGE = (
@@ -122,7 +127,7 @@ def command_error(err: BaseException) -> HomeAssistantError:
     ServiceValidationError; anything else stays a HomeAssistantError. The
     message never includes the code.
     """
-    if panel_error_code(err) == PANEL_ERROR_CODE_REJECTED:
+    if is_code_rejected_panel_error(err):
         return ServiceValidationError(
             CODE_REJECTED_MESSAGE,
             translation_domain=DOMAIN,
@@ -136,7 +141,7 @@ def code_rejected_error(err: BaseException) -> ServiceValidationError | None:
     Return the code_rejected error to re-raise unchanged, or None.
 
     Walks the cause chain: an existing code_rejected ServiceValidationError is
-    returned as is; a bare 11008 panel refusal gets one built by command_error.
+    returned as is; a bare panel code rejection gets one built by command_error.
     """
     seen: BaseException | None = err
     while seen is not None:
@@ -146,7 +151,7 @@ def code_rejected_error(err: BaseException) -> ServiceValidationError | None:
         ):
             return seen
         seen = seen.__cause__
-    if panel_error_code(err) == PANEL_ERROR_CODE_REJECTED:
+    if is_code_rejected_panel_error(err):
         rejected = command_error(err)
         rejected.__cause__ = err
         if isinstance(rejected, ServiceValidationError):

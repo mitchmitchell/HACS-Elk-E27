@@ -1,6 +1,6 @@
 # ruff: noqa: S101, D103, TC001
 """
-A code the panel rejects (11008) while bypassing or arming, through HA.
+A code the panel rejects (any code-rejected panel error), through HA.
 
 The refusal reaches the caller as ServiceValidationError(code_rejected),
 never re-wrapped as a zone-bypass or automatic-arming failure. Zones this
@@ -17,6 +17,7 @@ from elke27_lib import AreaState, ZoneState
 from elke27_lib.errors import Elke27PanelError
 import pytest
 
+from custom_components.elke27.errors import PANEL_ERROR_CODES_REJECTED
 from homeassistant.const import ATTR_CODE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
@@ -26,13 +27,25 @@ ALARM = "alarm_control_panel.house"
 CODE = "1234"
 
 
+REJECTED_CODES = sorted(PANEL_ERROR_CODES_REJECTED)
+
+
+@pytest.fixture(autouse=True, params=REJECTED_CODES, ids=lambda c: f"panel_{c}")
+def rejected_code(request: pytest.FixtureRequest) -> int:
+    """Run every test once per code-rejected panel error code."""
+    ScriptedClient.rejected_code = request.param
+    return int(request.param)
+
+
 class ScriptedClient(FakeClient):
     """Write outcomes popped in order; ``None`` means accepted."""
+
+    rejected_code = 11008
 
     def __init__(self, outcomes: list[BaseException | None]) -> None:
         """Script the outcome of each write, in order."""
         super().__init__(command_result(refresh=True))
-        self.outcomes = outcomes
+        self.outcomes = list(outcomes)
         self.snapshot = snapshot_with(
             self.snapshot,
             areas={1: AreaState(area_id=1, name="House", ready=False)},
@@ -45,6 +58,8 @@ class ScriptedClient(FakeClient):
     async def _write(self, kind: str, **params: Any) -> Any:
         self.calls.append((kind, params))
         outcome = self.outcomes.pop(0) if self.outcomes else None
+        if isinstance(outcome, _PlaceholderRejectedError):
+            raise Elke27PanelError(self.rejected_code, "not authorized")
         if outcome is not None:
             raise outcome
         return self.write_result
@@ -58,8 +73,12 @@ class ScriptedClient(FakeClient):
         ]
 
 
+class _PlaceholderRejectedError(Elke27PanelError):
+    """Scripted refusal; ScriptedClient raises the parametrized panel code."""
+
+
 def _rejected() -> Elke27PanelError:
-    return Elke27PanelError(11008, "not authorized")
+    return _PlaceholderRejectedError(0, "not authorized")
 
 
 def _assert_code_rejected(err: pytest.ExceptionInfo[ServiceValidationError]) -> None:
@@ -290,3 +309,60 @@ async def test_custom_bypass_full_rollback_creates_no_notification(
         key.startswith("elke27_code_rejected_bypass_")
         for key in hass.data.get("persistent_notification", {})
     )
+
+
+def _assert_no_error_logs(caplog: pytest.LogCaptureFixture) -> None:
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+@pytest.mark.parametrize(
+    ("domain", "service", "target", "extra"),
+    [
+        ("alarm_control_panel", "alarm_disarm", ALARM, {}),
+        ("alarm_control_panel", "alarm_arm_away", ALARM, {}),
+        ("alarm_control_panel", "alarm_arm_custom_bypass", ALARM, {}),
+        ("elke27", "alarm_arm_automatic", ALARM, {"mode": "away"}),
+        ("elke27", "zone_bypass", "binary_sensor.house_front_door", {"bypass": True}),
+    ],
+    ids=["disarm", "arm", "custom_bypass", "arm_automatic", "zone_bypass"],
+)
+async def test_every_code_path_raises_code_rejected_without_error_log(
+    hass: HomeAssistant,
+    setup: Setup,
+    caplog: pytest.LogCaptureFixture,
+    domain: str,
+    service: str,
+    target: str,
+    extra: dict[str, Any],
+) -> None:
+    client = ScriptedClient([_rejected(), None, None])
+    await setup(client)
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            domain,
+            service,
+            {"entity_id": target, ATTR_CODE: CODE, **extra},
+            blocking=True,
+        )
+    _assert_code_rejected(err)
+    await hass.async_block_till_done()
+    _assert_no_error_logs(caplog)
+
+
+async def test_custom_bypass_rollback_raises_code_rejected_without_error_log(
+    hass: HomeAssistant, setup: Setup, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = ScriptedClient([None, None, _rejected(), _rejected(), None])
+    await setup(client)
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            "alarm_control_panel",
+            "alarm_arm_custom_bypass",
+            {"entity_id": ALARM, ATTR_CODE: CODE},
+            blocking=True,
+        )
+    _assert_code_rejected(err)
+    await hass.async_block_till_done()
+    _assert_no_error_logs(caplog)
