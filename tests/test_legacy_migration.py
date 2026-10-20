@@ -2,8 +2,7 @@
 """
 0.1.x -> 0.2.x upgrade in place (config entry VERSION 1 -> 2).
 
-Design: grokbots/architecture/Elk/design-prod-upgrade-zone-migration.md §2 and
-§8. Every test drives Home Assistant's public entry points (setup, reload,
+Every test drives Home Assistant's public entry points (setup, reload,
 reauth flow, registries) and the integration's public helpers; no private
 members. Registry fixtures mirror production's shape with made-up identifiers.
 """
