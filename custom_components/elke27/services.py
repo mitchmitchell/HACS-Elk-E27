@@ -30,6 +30,7 @@ from .arming import (
     zone_bypass_label,
 )
 from .const import DOMAIN
+from .errors import code_rejected_error
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -151,7 +152,9 @@ async def _async_handle_alarm_arm_automatic(
             )
         except HomeAssistantError as err:
             failures.append(err)
-    if len(failures) == 1:
+    if len(failures) == 1 or (
+        failures and all(code_rejected_error(err) is err for err in failures)
+    ):
         raise failures[0]
     if failures:
         details = "; ".join(str(err) for err in failures)
@@ -306,6 +309,15 @@ async def _async_arm_automatic_locked(
             still_bypassed_zones=still_bypassed,
             config_entry_id=_config_entry_id(entity_entry),
         )
+        rejected = code_rejected_error(cause) if cause is not None else None
+        if rejected is not None:
+            # A rejected code is a user error: reported above, raised as is.
+            if still_bypassed:
+                _LOGGER.warning(
+                    "Code rejected; zones still bypassed after rollback: %s",
+                    ", ".join(str(item.zone_id) for item in still_bypassed),
+                )
+            raise rejected
         detail = f"{zone_bypass_label(zone)}: {reason}" if zone is not None else reason
         msg = f"Area {area_id} was not armed: {_sentence(detail)}"
         if summary:
@@ -372,7 +384,12 @@ async def _async_arm_automatic_locked(
         await _fail("arm", ARM_NOT_SENT_REASON, cause=None)
     try:
         bypassed = await coordinator.async_bypass_faulted_zones(
-            area_id, snapshot, code, attempted=attempted, gate=_gate
+            area_id,
+            snapshot,
+            code,
+            attempted=attempted,
+            gate=_gate,
+            raise_code_rejected=False,
         )
     except ZoneBypassFailedError as err:
         if is_already_armed_refusal(err):
@@ -397,6 +414,10 @@ async def _async_arm_automatic_locked(
     except Elke27PinRequiredError as err:
         await _fail("arm", PIN_REQUIRED_REASON, bypassed=bypassed, cause=err)
     except HomeAssistantError as err:
+        rejected = code_rejected_error(err)
+        if rejected is not None:
+            # A rejected code is a user error: undo, report, then raise it as is.
+            await _fail("arm", str(rejected), bypassed=bypassed, cause=err)
         # "Already armed" means the area may rely on these bypasses: keep them.
         if is_already_armed_refusal(err):
             await _already_armed(str(err), bypassed, err)

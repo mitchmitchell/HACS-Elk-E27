@@ -22,6 +22,7 @@ from .arming import ZoneBypassFailedError, area_faulted_zones, is_definitive_ref
 from .const import DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import area_device_info, build_unique_id, raise_if_not_sent, unique_base
+from .errors import code_rejected_error
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -158,7 +159,7 @@ class Elke27AreaAlarmControlPanel(
         async with self.coordinator.area_arm_lock(self._area_id):
             snapshot = self.coordinator.get_snapshot() or self.coordinator.data
             try:
-                await self.coordinator.async_bypass_faulted_zones(
+                bypassed = await self.coordinator.async_bypass_faulted_zones(
                     self._area_id, snapshot, code
                 )
             except ZoneBypassFailedError as err:
@@ -166,7 +167,16 @@ class Elke27AreaAlarmControlPanel(
                     raise
                 msg = "PIN required to perform this action."
                 raise HomeAssistantError(msg) from err
-            await self._async_arm(ArmMode.ARMED_AWAY, code)
+            try:
+                await self._async_arm(ArmMode.ARMED_AWAY, code)
+            except HomeAssistantError as err:
+                rejected = code_rejected_error(err)
+                if rejected is None:
+                    raise
+                # A rejected code is a user error: undo, then re-raise it as is.
+                await self.coordinator.async_raise_code_rejected(
+                    rejected, bypassed, code
+                )
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Disarm the area."""
