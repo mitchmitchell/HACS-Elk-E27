@@ -336,11 +336,9 @@ def connection_errors() -> Iterator[None]:
     """Turn aiohttp transport errors into ConnectionError (an OSError)."""
     import aiohttp  # noqa: PLC0415  # only needed for a real run
 
-    errors: tuple[type[BaseException], ...] = (aiohttp.ClientError,)
-    # A websocket closed mid-read: receive_json raises this (a TypeError).
-    ws_type_error = getattr(aiohttp, "WSMessageTypeError", None)
-    if ws_type_error is not None:
-        errors = (*errors, ws_type_error)
+    # A websocket closed mid-read: receive_json raises WSMessageTypeError
+    # (a TypeError, aiohttp 3.11+).
+    errors = (aiohttp.ClientError, aiohttp.WSMessageTypeError)
     try:
         yield
     except errors as err:
@@ -367,9 +365,10 @@ class WebsocketTransport:
         with connection_errors():
             self._ws = await self._session.ws_connect(self._url)
             first = await self._ws.receive_json()
-            if first.get("type") != "auth_required":
-                msg = "unexpected reply from Home Assistant"
-                raise RuntimeError(msg)
+        if first.get("type") != "auth_required":
+            msg = "unexpected reply from Home Assistant"
+            raise RuntimeError(msg)
+        with connection_errors():
             await self._ws.send_json({"type": "auth", "access_token": self._token})
             reply = await self._ws.receive_json()
         if reply.get("type") != "auth_ok":

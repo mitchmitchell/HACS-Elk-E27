@@ -33,6 +33,7 @@ from .identity import is_valid_integration_id
 from .migration import (
     LegacyMigrationRecordError,
     async_apply_legacy_migration,
+    async_forget_blocked_key,
     async_migrate_legacy_entry,
     async_refresh_duplicates_issue,
     blocked_issue_id,
@@ -199,6 +200,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> b
 async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
     """Clean up integration state when a config entry is removed."""
     _async_delete_entry_issues(hass, entry)
+    async_forget_blocked_key(hass, entry.entry_id)
 
 
 def _entry_area_ids(

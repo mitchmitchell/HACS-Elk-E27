@@ -1940,7 +1940,7 @@ async def test_blocked_flow_deletes_nothing_until_confirm_submitted(
 
         caplog.clear()
         result = await manager.async_configure(result["flow_id"], {})
-    assert result["type"] == "create_entry"
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert ent_reg.async_get(owned.entity_id) is None
     assert ent_reg.async_get(foreign.entity_id) is not None
     reload.assert_called_once_with(entry.entry_id)
@@ -1991,14 +1991,14 @@ async def test_blocked_flow_deletes_only_shown_and_reconfirms_new(
         # Only the shown entity is deleted; the new one is confirmed again.
         assert ent_reg.async_get(owned.entity_id) is None
         assert ent_reg.async_get(late.entity_id) is not None
-        assert result["type"] == "form"
+        assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "confirm_partial"
         listed = result["description_placeholders"]["entities"]
         assert late.entity_id in listed
         assert owned.entity_id not in listed
         reload.assert_not_called()
         result = await manager.async_configure(result["flow_id"], {})
-    assert result["type"] == "create_entry"
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert ent_reg.async_get(late.entity_id) is None
     reload.assert_called_once_with(entry.entry_id)
 
@@ -2025,7 +2025,7 @@ async def test_retry_flows_reload(hass: HomeAssistant) -> None:
             assert result["step_id"] == "confirm"
             reload.assert_not_called()
             result = await manager.async_configure(result["flow_id"], {})
-        assert result["type"] == "create_entry"
+        assert result["type"] is FlowResultType.CREATE_ENTRY
         reload.assert_called_once_with(entry.entry_id)
         assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
 
@@ -2085,7 +2085,7 @@ async def test_rebuild_with_user_edited_duplicate_needs_confirm(
         assert entry.data[CONF_LEGACY_MIGRATION] == stored
         reload.assert_not_called()
         result = await manager.async_configure(result["flow_id"], {})
-    assert result["type"] == "create_entry"
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     reload.assert_called_once_with(entry.entry_id)
     record = entry.data[CONF_LEGACY_MIGRATION]
     assert record["state"] == MIGRATION_STATE_PENDING
@@ -2327,7 +2327,7 @@ async def test_blocked_flow_with_only_unowned_lists_them_and_retries(
         assert foreign.entity_id in placeholders["entities"]
         reload.assert_not_called()
         result = await manager.async_configure(result["flow_id"], {})
-    assert result["type"] == "create_entry"
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert ent_reg.async_get(foreign.entity_id) is not None
     reload.assert_called_once_with(entry.entry_id)
 

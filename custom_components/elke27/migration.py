@@ -36,6 +36,7 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.util import dt as dt_util
+from homeassistant.util.hass_dict import HassKey
 
 from .const import (
     CONF_INTEGRATION_ID,
@@ -123,7 +124,7 @@ _FORMATTED_MAC_RE = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 # In-memory only (never persisted, never logged): the identity key the last
 # blocked Phase B used, so the Repairs flow can recompute the same targets.
 # Issues are not persistent either, so both vanish together on restart.
-_BLOCKED_KEYS = f"{DOMAIN}_legacy_blocked_keys"
+_BLOCKED_KEYS: HassKey[dict[str, str]] = HassKey(f"{DOMAIN}_legacy_blocked_keys")
 
 
 @dataclass(frozen=True, slots=True)
@@ -630,6 +631,12 @@ def _plan_device(
             ident for ident in device.identifiers if ident[0] != DOMAIN
         } | {target}
     return device.area_id
+
+
+@callback
+def async_forget_blocked_key(hass: HomeAssistant, entry_id: str) -> None:
+    """Drop the stored blocked Phase B key of a removed config entry."""
+    hass.data.get(_BLOCKED_KEYS, {}).pop(entry_id, None)
 
 
 def blocking_entities(
