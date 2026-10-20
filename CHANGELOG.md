@@ -30,7 +30,38 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 - The 0.2.0 "delete and re-add" advice is replaced by the above. Displayed names follow the
   0.2.x area-style names; entity IDs do not change.
 
-## [Unreleased] - 0.2.0 (draft)
+### Changed
+- Zone sensors take their device class only from the panel's Zone Definition: `BURG INTERIOR`
+  is motion, perimeter and entry/exit are opening, `FIRE` smoke, `CARBON MONOXIDE` carbon
+  monoxide, `WATER` moisture, everything else generic. Zones the panel typed as Door/Window
+  now show as opening; undefined or unlisted zones change from opening to generic. "Show as"
+  overrides are kept across reloads and upgrades. (#110, supersedes #102; fixes #101)
+- Entities go unavailable as soon as the panel connection drops, not on the next update.
+  (#98, fixes #97)
+- "Panel connection lost" is logged once per drop at WARNING (was INFO). (#83, fixes #80)
+- Reconnect backoff is capped at 60 s (about 72 s with jitter), down from 5 minutes. (#82, fixes #79)
+- Lights: full brightness is sent as level 99 (the panel reports 100). A plain turn-on restores
+  the last level, and the reported level is scaled correctly. (#92, #100; fixes #91, #99)
+
+### Fixed
+- No brief false "off" after turning on or dimming a light; the immediate re-read is gone.
+  (#93, fixes #89)
+- An all-zero user code is a validation error, not a server error. (#94, fixes #90)
+- A code the panel rejects (not authorized) is a user error (`code_rejected`) on arm, disarm,
+  bypass and auto-arm. The code is never shown or logged. (#108, fixes #109)
+- PENDING #107/#111: upgrade Repairs issues for unreadable upgrade notes, leftover
+  entities/devices/items, interrupted or failed saves, and duplicates (with guided
+  delete-and-retry). Strict reads of the upgrade record: setup fails cleanly on a damaged one.
+  Old identifiers are kept out of logs.
+
+### Docs
+- README accuracy fixes. (#95)
+
+### Internal
+- Integration ID read directly; typed library calls instead of getattr. (#88, #103)
+- More tests: feature-map coverage, review-guard checks. (#86, #96, #104, #105)
+
+## [0.2.0] - 2026-10-16
 
 ### Breaking
 1. **No in-place upgrade from 0.1.x in 0.2.0; go straight to 0.2.1**, which upgrades in
@@ -80,7 +111,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ### Removed
 - Diagnostics field `integration_serial`. `custom_components.elke27.hub`.
 
-## [Unreleased] - 0.1.9 (draft; #50 merged as 139acbe)
+## [0.1.9] - 2026-10-15
 
 ### Changed
 - Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/), same as 0.1.8.1 (#50).
