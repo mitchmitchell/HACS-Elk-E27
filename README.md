@@ -964,6 +964,10 @@ whole °F, so setpoints you set in °C are rounded.
    left untouched for you to delete. See
    [Upgrade problems shown in Repairs](#upgrade-problems-shown-in-repairs).
 
+Action targets: `elke27.alarm_arm_automatic` and `elke27.zone_bypass` must target the area
+device (or an alarm panel or zone entity), not the panel device. Since each area is now its own
+device, an automation that targeted the panel device needs to target the area device instead.
+
 What changes: each area the panel reports is now its own device, and its alarm panel and
 zones sit under it, named after the area (for example "Main House Front Door"). Entity IDs
 do not change, so only dashboard captions that show friendly names look different. Alarm

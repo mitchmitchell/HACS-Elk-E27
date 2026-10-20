@@ -59,7 +59,6 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 
 ### Internal
 - Integration ID read directly; typed library calls instead of getattr. (#88, #103)
-- More tests: feature-map coverage, review-guard checks. (#86, #96, #104, #105)
 
 ## [0.2.0] - 2026-10-16
 
