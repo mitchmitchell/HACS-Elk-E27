@@ -18,3 +18,6 @@ updates:
     ignore:
       # Dependabot should not update Home Assistant as that should match the homeassistant key in hacs.json
       - dependency-name: "homeassistant"
+      # pytest-homeassistant-custom-component >=0.13.317 requires Python 3.14 and a newer HA; remove when CI moves to Python 3.14
+      - dependency-name: "pytest-homeassistant-custom-component"
+        versions: [">=0.13.317"]
