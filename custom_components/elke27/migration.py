@@ -514,16 +514,31 @@ def _listing(items: Any) -> str:
 
 @callback
 def async_refresh_duplicates_issue(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Drop the duplicates issue once the user has removed every listed entity."""
+    """
+    Raise the duplicates issue while listed entities remain, else delete it.
+
+    Runs on every setup, so the (non-persistent) issue comes back after a
+    restart or a rebuilt record and clears once every listed entity is gone.
+    """
     state = legacy_migration_state(entry)
+    issue_id = duplicates_issue_id(entry.entry_id)
     if state is None or not state.get("duplicates"):
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
         return
     registry = er.async_get(hass)
-    remaining = {
-        reg.id for reg in er.async_entries_for_config_entry(registry, entry.entry_id)
+    current = {
+        reg.id: reg.entity_id
+        for reg in er.async_entries_for_config_entry(registry, entry.entry_id)
     }
-    if not any(row["entity_registry_id"] in remaining for row in state["duplicates"]):
-        ir.async_delete_issue(hass, DOMAIN, duplicates_issue_id(entry.entry_id))
+    remaining = [
+        {**row, "entity_id": current[row["entity_registry_id"]]}
+        for row in state["duplicates"]
+        if row.get("entity_registry_id") in current
+    ]
+    if remaining:
+        _async_raise_duplicates_issue(hass, entry, remaining)
+    else:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 class PartialRollbackError(HomeAssistantError):

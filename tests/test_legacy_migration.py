@@ -1036,6 +1036,51 @@ async def test_duplicate_legacy_rows_keep_majority_base_and_raise_repairs(
     assert duplicates_issue_id(entry.entry_id) not in our_issues(hass)
 
 
+async def test_rebuild_with_duplicate_raises_issue_that_survives_reload(
+    hass: HomeAssistant, panel: ClientHarness
+) -> None:
+    """A rebuilt record's duplicates get the issue on setup, again on reload."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    ent_reg = er.async_get(hass)
+    stale = ent_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "old-host-base:zone:1",
+        config_entry=entry,
+        suggested_object_id="elk_front_door_old",
+    )
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_LEGACY_MIGRATION: {"state": "bogus"}}
+    )
+    assert async_rebuild_legacy_record(hass, entry) == MIGRATION_STATE_PENDING
+    record = entry.data[CONF_LEGACY_MIGRATION]
+    assert [row["entity_registry_id"] for row in record["duplicates"]] == [stale.id]
+    issue_id = duplicates_issue_id(entry.entry_id)
+    assert issue_id not in our_issues(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_key == ISSUE_LEGACY_DUPLICATES
+    assert stale.entity_id in issue.translation_placeholders["entities"]
+
+    # Non-persistent issue: a restart drops it, the next setup restores it.
+    ir.async_delete_issue(hass, DOMAIN, issue_id)
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert issue_id in our_issues(hass)
+
+    ent_reg.async_remove(stale.entity_id)
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert issue_id not in our_issues(hass)
+
+
 async def test_duplicate_tie_keeps_newest(hass: HomeAssistant) -> None:
     """Equal base counts: the most recently modified registry row is kept."""
     entry = entry_017()
