@@ -2,8 +2,7 @@
 r"""
 Rename Elk E27 entities back to their old displayed names, with undo.
 
-Fallback for the 0.1.x -> 0.2.x upgrade (design: grokbots/architecture/Elk/
-design-prod-upgrade-zone-migration.md §6, Mitch's answer 4). After the upgrade
+Fallback for the 0.1.x -> 0.2.x upgrade. After the upgrade
 the entity IDs are unchanged but displayed names are area-style ("Main House
 Front Door"). This sets each entity's registry name to the name saved before
 the upgrade. It uses Home Assistant's websocket API only
@@ -23,9 +22,8 @@ Dry run is the default: nothing is written without ``--apply``.
         --apply
 
 The names file is CSV with ``entity_id`` and ``name`` columns (extra columns
-are ignored), or, with ``--from-markdown``, the Markdown names table Home
-Automation saved before the upgrade (vault: grokbots/home/
-elk-entity-names-pre-0.2.1.md). A registry name replaces the whole displayed
+are ignored), or, with ``--from-markdown``, a Markdown names table
+saved before the upgrade. A registry name replaces the whole displayed
 name, so from that table the default is the exact old displayed name (device
 name plus original_name, e.g. "<device> Front Door"); ``--original-name`` takes
 the bare override-or-original_name instead ("Front Door"). ``--to-csv out.csv``
@@ -228,6 +226,17 @@ async def apply_changes(transport: Transport, changes: list[Change]) -> None:
         )
 
 
+class PartialApplyError(RuntimeError):
+    """A write failed after some renames may already have been applied."""
+
+    def __init__(self, map_path: Path, *, undo: bool, cause: BaseException) -> None:
+        """Remember the map so the CLI can print the recovery command."""
+        self.map_path = map_path
+        self.undo = undo
+        self.cause = cause
+        super().__init__(f"{type(cause).__name__}: {cause}")
+
+
 def write_map(path: Path, changes: list[Change]) -> None:
     """Save before/after names (no secrets) so ``--undo`` can reverse them."""
     payload = {
@@ -286,7 +295,10 @@ async def run_rename(
             raise ValueError(msg)
         # An unwritable path fails here with nothing changed.
         write_map(map_path, plan.changes)
-        await apply_changes(transport, plan.changes)
+        try:
+            await apply_changes(transport, plan.changes)
+        except Exception as err:
+            raise PartialApplyError(map_path, undo=False, cause=err) from err
     return plan
 
 
@@ -307,7 +319,10 @@ async def run_undo(transport: Transport, map_path: Path, *, apply: bool) -> Plan
         ordered = sorted(
             plan.changes, key=lambda c: order.index(c.entity_id), reverse=True
         )
-        await apply_changes(transport, ordered)
+        try:
+            await apply_changes(transport, ordered)
+        except Exception as err:
+            raise PartialApplyError(map_path, undo=True, cause=err) from err
         remove_map(map_path)
     return plan
 
@@ -372,7 +387,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="?",
         type=Path,
         help="CSV with entity_id,name columns, or with --from-markdown the saved "
-        "names table (grokbots/home/elk-entity-names-pre-0.2.1.md)",
+        "Markdown names table saved before the upgrade",
     )
     parser.add_argument(
         "--from-markdown",
@@ -445,9 +460,29 @@ def main(argv: list[str] | None = None) -> int:
             print(f"wrote {len(names)} rows to {args.to_csv}")  # noqa: T201  # CLI output
             return 0
         return asyncio.run(amain(args))
+    except PartialApplyError as err:
+        print(recovery_message(args, err), file=sys.stderr)  # noqa: T201  # CLI output
+        return 1
     except (ValueError, RuntimeError, PermissionError, OSError) as err:
         print(f"error: {err}", file=sys.stderr)  # noqa: T201  # CLI output
         return 1
+    except Exception as err:  # noqa: BLE001  # websocket/aiohttp errors: no traceback
+        print(f"error: {type(err).__name__}: {err}", file=sys.stderr)  # noqa: T201  # CLI output
+        return 1
+
+
+def recovery_message(args: argparse.Namespace, err: PartialApplyError) -> str:
+    """Explain a partial --apply and give the exact command that reverses it."""
+    command = (
+        "HA_TOKEN=... scripts/restore_entity_names.py"
+        f" --url {args.url} --undo {err.map_path} --apply"
+    )
+    what = "the undo" if err.undo else "the renames"
+    return (
+        f"error: {err}\n"
+        f"{what.capitalize()} stopped partway: some renames may already be applied.\n"
+        f"To restore the previous names, run (it is safe to re-run):\n  {command}"
+    )
 
 
 if __name__ == "__main__":

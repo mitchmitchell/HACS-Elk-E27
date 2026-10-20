@@ -998,7 +998,7 @@ Home Assistant installs for you.
 0.2.0 has no in-place upgrade from 0.1.x. **Go from 0.1.x straight to
 [0.2.1](#to-021)**, which upgrades in place with one re-link. If you did install 0.2.0 over
 0.1.x, the entry shows "This entry was created before the client ID existed, or its client ID
-is invalid." Don't delete it: reinstall 0.1.7 (0.2.0 doesn't change the entry) or update to
+is invalid." Don't delete it: reinstall the 0.1.x you had (0.2.0 doesn't change the entry) or update to
 0.2.1 and re-link.
 
 Each area appears as its own device, with its zones under it; the area's alarm panel is

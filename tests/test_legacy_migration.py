@@ -2293,7 +2293,7 @@ def test_mixed_confirm_text_counts_owned_and_unowned() -> None:
         },
     )
     assert "These 25 entities are left over" in one
-    assert "1 more listed entity isn't owned by this Elk E27 integration" in one
+    assert "1 more listed entity isn't owned by this Elk E27 entry" in one
     assert "Remove it by hand" in one
     assert "- switch.orphan" in one
     many = _render_icu(

@@ -353,7 +353,7 @@ async def test_drop_after_first_write_applied_keeps_map_and_undo_restores(
     ha = Dropping(registry())
     before = {k: v["name"] for k, v in ha.rows.items()}
     map_path = tmp_path / "map.json"
-    with pytest.raises(ConnectionError):
+    with pytest.raises(tool.PartialApplyError, match="ConnectionError"):
         await tool.run_rename(
             ha, tool.read_names(names_csv(tmp_path)), apply=True, map_path=map_path
         )
@@ -385,7 +385,7 @@ async def test_failed_undo_keeps_map(tmp_path: Path) -> None:
                 raise ConnectionError(msg)
             return await super().call(message)
 
-    with pytest.raises(ConnectionError):
+    with pytest.raises(tool.PartialApplyError, match="ConnectionError"):
         await tool.run_undo(Failing(list(ha.rows.values())), map_path, apply=True)
     assert map_path.exists()
 
@@ -406,3 +406,88 @@ async def test_existing_map_is_not_overwritten_without_force(tmp_path: Path) -> 
         "binary_sensor.elk_back",
     ]
     assert tool.parse_args(["--url", "ws://x", "n.csv", "--force"]).force
+
+
+def _fail_run(monkeypatch: pytest.MonkeyPatch, err: BaseException) -> None:
+    async def boom(_args: Any) -> int:
+        raise err
+
+    monkeypatch.setattr(tool, "amain", boom)
+
+
+async def test_partial_apply_raises_with_map(tmp_path: Path) -> None:
+    """A write failing midway reports that renames may be applied."""
+    ha = FakeHA(registry(), fail_on="binary_sensor.elk_back")
+    map_path = tmp_path / "map.json"
+    with pytest.raises(tool.PartialApplyError) as info:
+        await tool.run_rename(ha, NAMES, apply=True, map_path=map_path)
+    assert info.value.map_path == map_path
+    assert not info.value.undo
+    assert map_path.is_file()
+
+
+def test_partial_apply_prints_exact_undo_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    map_path = tmp_path / "map.json"
+    _fail_run(
+        monkeypatch,
+        tool.PartialApplyError(map_path, undo=False, cause=RuntimeError("boom")),
+    )
+    code = tool.main(
+        [
+            "--url",
+            "ws://ha:8123",
+            str(names_csv(tmp_path)),
+            "--apply",
+            "--map",
+            str(map_path),
+        ]
+    )
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "some renames may already be applied" in err
+    assert f"--url ws://ha:8123 --undo {map_path} --apply" in err
+    assert "Traceback" not in err
+
+
+def test_partial_undo_also_prints_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    map_path = tmp_path / "map.json"
+    _fail_run(
+        monkeypatch,
+        tool.PartialApplyError(map_path, undo=True, cause=RuntimeError("boom")),
+    )
+    code = tool.main(["--url", "ws://ha:8123", "--undo", str(map_path), "--apply"])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "some renames may already be applied" in err
+    assert f"--undo {map_path} --apply" in err
+
+
+class _WebsocketError(Exception):
+    """Stand-in for aiohttp.ClientError / WSServerHandshakeError."""
+
+
+def test_websocket_error_has_no_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _fail_run(monkeypatch, _WebsocketError("connection reset"))
+    code = tool.main(["--url", "ws://ha:8123", str(names_csv(tmp_path))])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert err.startswith("error: _WebsocketError: connection reset")
+
+
+async def test_websocket_error_mid_apply_is_partial(tmp_path: Path) -> None:
+    class DropHA(FakeHA):
+        async def call(self, message: dict[str, Any]) -> Any:
+            if message["type"] == "config/entity_registry/update" and self.writes:
+                msg = "closed"
+                raise _WebsocketError(msg)
+            return await super().call(message)
+
+    ha = DropHA(registry())
+    with pytest.raises(tool.PartialApplyError, match="_WebsocketError"):
+        await tool.run_rename(ha, NAMES, apply=True, map_path=tmp_path / "m.json")

@@ -1,8 +1,6 @@
 """
 Upgrade 0.1.x config entries in place (config entry VERSION 1 -> 2).
 
-Design: grokbots/architecture/Elk/design-prod-upgrade-zone-migration.md §2.
-
 Phase A (``async_migrate_legacy_entry``) runs from ``async_migrate_entry``
 with no panel I/O. It classifies the entry, builds a plan of the legacy
 entity registry rows and marks the migration pending. It clears an entry
