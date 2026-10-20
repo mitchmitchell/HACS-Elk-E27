@@ -470,14 +470,58 @@ class _WebsocketError(Exception):
     """Stand-in for aiohttp.ClientError / WSServerHandshakeError."""
 
 
-def test_websocket_error_has_no_traceback(
+def test_connection_error_has_no_traceback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _fail_run(monkeypatch, _WebsocketError("connection reset"))
+    _fail_run(monkeypatch, ConnectionError("connection to Home Assistant failed"))
     code = tool.main(["--url", "ws://ha:8123", str(names_csv(tmp_path))])
     err = capsys.readouterr().err
     assert code == 1
-    assert err.startswith("error: _WebsocketError: connection reset")
+    assert err == "error: connection to Home Assistant failed\n"
+
+
+def test_unexpected_error_keeps_its_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bug in the script is not turned into a one-line message."""
+    _fail_run(monkeypatch, TypeError("bug"))
+    with pytest.raises(TypeError, match="bug"):
+        tool.main(["--url", "ws://ha:8123", str(names_csv(tmp_path))])
+
+
+def test_connection_errors_maps_aiohttp_errors() -> None:
+    aiohttp = pytest.importorskip("aiohttp")
+    msg = "reset"
+    with (
+        pytest.raises(ConnectionError, match="ClientConnectionError: reset") as info,
+        tool.connection_errors(),
+    ):
+        raise aiohttp.ClientConnectionError(msg)
+    assert isinstance(info.value.__cause__, aiohttp.ClientError)
+    bug = "bug"
+    with pytest.raises(TypeError, match="bug"), tool.connection_errors():
+        raise TypeError(bug)
+
+
+class _RefusingSession:
+    async def ws_connect(self, _url: str) -> Any:
+        import aiohttp  # noqa: PLC0415
+
+        msg = "connection refused"
+        raise aiohttp.ClientConnectionError(msg)
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_transport_connect_failure_is_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aiohttp = pytest.importorskip("aiohttp")
+    monkeypatch.setattr(aiohttp, "ClientSession", _RefusingSession)
+    with pytest.raises(ConnectionError, match="connection refused"):
+        async with tool.WebsocketTransport("ws://ha:8123", "token"):
+            pass
 
 
 async def test_websocket_error_mid_apply_is_partial(tmp_path: Path) -> None:

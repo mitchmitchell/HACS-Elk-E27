@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import voluptuous as vol
 
@@ -15,7 +15,6 @@ from .migration import (
     ambiguous_keepers,
     async_rebuild_legacy_record,
     blocking_entities,
-    record_issue_id,
     split_blocking_entities,
 )
 
@@ -213,9 +212,11 @@ async def async_create_fix_flow(
     data: dict[str, str | int | float | None] | None,
 ) -> RepairsFlow:
     """Create the fix flow for one of the upgrade issues."""
-    entry_id = str((data or {}).get("entry_id"))
-    flow = (data or {}).get("flow")
-    if flow == "rebuild" or issue_id == record_issue_id(entry_id):
+    # Every fixable issue is created with entry_id and flow in its data.
+    issue_data = cast("dict[str, str]", data)
+    entry_id = issue_data["entry_id"]
+    flow = issue_data["flow"]
+    if flow == "rebuild":
         return RecordRebuildFlow(issue_id, entry_id)
     if flow == "blocked":
         return BlockedUpgradeFlow(issue_id, entry_id)

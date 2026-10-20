@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import csv
 from dataclasses import dataclass
 import getpass
@@ -47,7 +48,10 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Any, Protocol, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 PLATFORM = "elke27"
 MAP_VERSION = 1
@@ -327,6 +331,23 @@ async def run_undo(transport: Transport, map_path: Path, *, apply: bool) -> Plan
     return plan
 
 
+@contextlib.contextmanager
+def connection_errors() -> Iterator[None]:
+    """Turn aiohttp transport errors into ConnectionError (an OSError)."""
+    import aiohttp  # noqa: PLC0415  # only needed for a real run
+
+    errors: tuple[type[BaseException], ...] = (aiohttp.ClientError,)
+    # A websocket closed mid-read: receive_json raises this (a TypeError).
+    ws_type_error = getattr(aiohttp, "WSMessageTypeError", None)
+    if ws_type_error is not None:
+        errors = (*errors, ws_type_error)
+    try:
+        yield
+    except errors as err:
+        msg = f"connection to Home Assistant failed: {type(err).__name__}: {err}"
+        raise ConnectionError(msg) from err
+
+
 class WebsocketTransport:
     """Home Assistant websocket client (aiohttp), authenticated with a token."""
 
@@ -343,13 +364,14 @@ class WebsocketTransport:
         import aiohttp  # noqa: PLC0415  # only needed for a real run
 
         self._session = aiohttp.ClientSession()
-        self._ws = await self._session.ws_connect(self._url)
-        first = await self._ws.receive_json()
-        if first.get("type") != "auth_required":
-            msg = "unexpected reply from Home Assistant"
-            raise RuntimeError(msg)
-        await self._ws.send_json({"type": "auth", "access_token": self._token})
-        reply = await self._ws.receive_json()
+        with connection_errors():
+            self._ws = await self._session.ws_connect(self._url)
+            first = await self._ws.receive_json()
+            if first.get("type") != "auth_required":
+                msg = "unexpected reply from Home Assistant"
+                raise RuntimeError(msg)
+            await self._ws.send_json({"type": "auth", "access_token": self._token})
+            reply = await self._ws.receive_json()
         if reply.get("type") != "auth_ok":
             msg = "Home Assistant rejected the token"
             raise PermissionError(msg)
@@ -365,16 +387,17 @@ class WebsocketTransport:
     async def call(self, message: dict[str, Any]) -> Any:
         """Send one command and wait for its result."""
         self._next_id += 1
-        await self._ws.send_json({**message, "id": self._next_id})
-        while True:
-            reply = await self._ws.receive_json()
-            if reply.get("id") != self._next_id:
-                continue
-            if not reply.get("success"):
-                error = reply.get("error", {})
-                msg = f"{message['type']} failed: {error.get('message', 'unknown')}"
-                raise RuntimeError(msg)
-            return reply.get("result")
+        with connection_errors():
+            await self._ws.send_json({**message, "id": self._next_id})
+            while True:
+                reply = await self._ws.receive_json()
+                if reply.get("id") == self._next_id:
+                    break
+        if not reply.get("success"):
+            error = reply.get("error", {})
+            msg = f"{message['type']} failed: {error.get('message', 'unknown')}"
+            raise RuntimeError(msg)
+        return reply.get("result")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -464,10 +487,9 @@ def main(argv: list[str] | None = None) -> int:
         print(recovery_message(args, err), file=sys.stderr)  # noqa: T201  # CLI output
         return 1
     except (ValueError, RuntimeError, PermissionError, OSError) as err:
+        # Expected failures (bad input, HA refusing, connection lost) get one
+        # line; anything else is a bug and keeps its traceback.
         print(f"error: {err}", file=sys.stderr)  # noqa: T201  # CLI output
-        return 1
-    except Exception as err:  # noqa: BLE001  # websocket/aiohttp errors: no traceback
-        print(f"error: {type(err).__name__}: {err}", file=sys.stderr)  # noqa: T201  # CLI output
         return 1
 
 

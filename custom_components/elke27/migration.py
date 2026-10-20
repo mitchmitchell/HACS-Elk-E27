@@ -531,7 +531,7 @@ def async_refresh_duplicates_issue(hass: HomeAssistant, entry: ConfigEntry) -> N
     remaining = [
         {**row, "entity_id": current[row["entity_registry_id"]]}
         for row in state["duplicates"]
-        if row.get("entity_registry_id") in current
+        if row["entity_registry_id"] in current
     ]
     if remaining:
         _async_raise_duplicates_issue(hass, entry, remaining)
@@ -661,24 +661,22 @@ def split_blocking_entities(
     key = hass.data.get(_BLOCKED_KEYS, {}).get(entry.entry_id)
     if key is None or not legacy_migration_pending(entry):
         return None
-    try:
-        validate_legacy_migration_record(entry)
-    except LegacyMigrationRecordError:
-        return None
+    # Setup validated the record before the blocked Phase B stored the key,
+    # and the rebuild flow only writes valid records.
     registry = er.async_get(hass)
     rows = entry.data[CONF_LEGACY_MIGRATION]["plan"]
     planned = {row["entity_registry_id"] for row in rows}
     owned: dict[str, er.RegistryEntry] = {}
     others: dict[str, er.RegistryEntry] = {}
     for row in rows:
-        target = new_unique_id(key, row["kind"], int(row["n"]))
-        if target is None:
-            continue
+        # Never None: the validator rejects an unmappable row as malformed.
+        target = cast("str", new_unique_id(key, row["kind"], int(row["n"])))
+        # Looked up by platform and unique id, so both already match.
         owner_id = registry.async_get_entity_id(row["domain"], DOMAIN, target)
         owner = registry.async_get(owner_id) if owner_id else None
-        if owner is None or owner.id in planned or owner.unique_id != target:
+        if owner is None or owner.id in planned:
             continue
-        if owner.config_entry_id == entry.entry_id and owner.platform == DOMAIN:
+        if owner.config_entry_id == entry.entry_id:
             owned[owner.entity_id] = owner
         else:
             others[owner.entity_id] = owner
