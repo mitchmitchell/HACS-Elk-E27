@@ -287,13 +287,13 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
 
     def test_schema_requires_code(self) -> None:
         """The code is required."""
-        with self.assertRaises(integration.vol.Invalid):
+        with self.assertRaises(integration.probatio.Invalid):
             integration.SERVICE_ZONE_BYPASS_SCHEMA({"entity_id": ["binary_sensor.x"]})
 
     def test_schema_rejects_all_zero_code(self) -> None:
         """An all-zero code is refused by the schema (400), never sent (#90)."""
         for code in ("0", "0000"):
-            with self.assertRaises(integration.vol.Invalid):
+            with self.assertRaises(integration.probatio.Invalid):
                 integration.SERVICE_ZONE_BYPASS_SCHEMA(
                     {"entity_id": ["binary_sensor.x"], "code": code}
                 )
@@ -301,14 +301,14 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
     def test_schema_rejects_non_ascii_and_huge_zero_codes(self) -> None:
         """Non-ASCII digits and a 5,000-zero code are refused cleanly (#94 review)."""
         for code in ["\u00b2", "\uff11\uff12\uff13\uff14", "0" * 5000]:
-            with self.assertRaises(integration.vol.Invalid):
+            with self.assertRaises(integration.probatio.Invalid):
                 integration.SERVICE_ZONE_BYPASS_SCHEMA(
                     {"entity_id": ["binary_sensor.x"], "code": code}
                 )
 
     def test_schema_rejects_non_numeric_code(self) -> None:
         """The code must be numeric."""
-        with self.assertRaises(integration.vol.Invalid):
+        with self.assertRaises(integration.probatio.Invalid):
             integration.SERVICE_ZONE_BYPASS_SCHEMA(
                 {"entity_id": ["binary_sensor.x"], "code": "12ab"}
             )
@@ -1667,7 +1667,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             "mode": "away",
             "code": "x",
         }
-        with self.assertRaises(integration.vol.Invalid):
+        with self.assertRaises(integration.probatio.Invalid):
             integration.SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA(bad_call)
 
     async def test_uncontended_automatic_arm_does_not_poll_or_sleep(self) -> None:

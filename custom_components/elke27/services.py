@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from elke27_lib import ArmMode, PanelSnapshot, ZoneState
 from elke27_lib.errors import Elke27PinRequiredError
-import probatio as vol
+import probatio
 
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntryState
@@ -97,17 +97,17 @@ def _numeric_service_code(value: str) -> str:
     code = cv.string(value).strip()
     if not (code.isascii() and code.isdigit()):
         msg = "Code must be numeric"
-        raise vol.Invalid(msg)
+        raise probatio.Invalid(msg)
     if not code.strip("0"):
         msg = "Code must not be all zeros"
-        raise vol.Invalid(msg)
+        raise probatio.Invalid(msg)
     return code
 
 
 SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_MODE): vol.In(("away", "home")),
-        vol.Required(ATTR_CODE): _numeric_service_code,
+        probatio.Required(ATTR_MODE): probatio.In(("away", "home")),
+        probatio.Required(ATTR_CODE): _numeric_service_code,
     }
 )
 
@@ -120,8 +120,8 @@ ATTR_BYPASS = "bypass"
 
 SERVICE_ZONE_BYPASS_SCHEMA = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_CODE): _numeric_service_code,
-        vol.Optional(ATTR_BYPASS, default=True): cv.boolean,
+        probatio.Required(ATTR_CODE): _numeric_service_code,
+        probatio.Optional(ATTR_BYPASS, default=True): cv.boolean,
     }
 )
 
