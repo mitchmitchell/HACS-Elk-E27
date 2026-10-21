@@ -9,9 +9,12 @@ from datetime import UTC, datetime
 import importlib.util
 from pathlib import Path
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import unittest
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
 
 _HAS_DEPS = all(
     importlib.util.find_spec(name) is not None
@@ -81,20 +84,15 @@ def _event(event_type: Any, data: dict[str, Any]) -> Any:
     )
 
 
-@unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
-class HubConnectTest(unittest.IsolatedAsyncioTestCase):
-    """Test the hub connection lifecycle against the client API."""
+if _HAS_DEPS:
 
-    async def test_connect_sets_identity_and_skips_discovery(self) -> None:
+    async def test_connect_sets_identity_and_skips_discovery(
+        hass: HomeAssistant,
+    ) -> None:
         """Connect uses set_client_identity and never runs UDP discovery."""
         client = _client()
         client.wait_ready.return_value = True
         link_keys = LinkKeys(tempkey_hex="00", linkkey_hex="11", linkhmac_hex="22")
-        hass = MagicMock()
-        # Run background work as plain loop tasks, as HA would.
-        hass.async_create_background_task.side_effect = lambda coro, _name: (
-            asyncio.get_running_loop().create_task(coro)
-        )
         hub = make_coordinator(hass, link_keys_json=link_keys.to_json())
         # The panel MAC check is stubbed (autospec; its behaviour is covered in
         # test_panel_mac.py), so this test only checks that connect starts it.
@@ -103,7 +101,7 @@ class HubConnectTest(unittest.IsolatedAsyncioTestCase):
             patch.object(hub_module, "async_verify_panel_mac", autospec=True) as verify,
         ):
             await hub.async_connect()
-            await asyncio.sleep(0)
+            await hass.async_block_till_done()
         verify.assert_awaited_once_with(hass, hub.config_entry)
 
         client.set_client_identity.assert_called_once_with(

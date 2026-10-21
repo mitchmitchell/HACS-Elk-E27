@@ -137,7 +137,6 @@ class Elke27Thermostat(
         """Return if the entity is available."""
         return (
             super().available
-            and self.coordinator.is_ready
             and _get_tstat(self.coordinator.data, self._tstat_id) is not None
         )
 

@@ -156,7 +156,6 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         """Return if the entity is available."""
         return (
             super().available
-            and self.coordinator.is_ready
             and _get_light(self.coordinator.data, self._light_id) is not None
         )
 
