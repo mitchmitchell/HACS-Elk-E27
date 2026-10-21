@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from elke27_lib.errors import (
     E27Error,
     E27NotReady,
@@ -25,32 +27,54 @@ from homeassistant.exceptions import (
 
 from .const import DOMAIN
 
-NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
+NOT_ACCEPTED_MESSAGE = (
+    "The panel didn't accept the command. Check that the area is ready, then try again."
+)
 
 
-# The panel refuses a user code it does not accept (wrong code, or a code not
-# allowed for this action) with ELKERR_NOAUTH.
 PANEL_ERROR_CODE_REJECTED = 11008
 
 
 CODE_REJECTED_MESSAGE = (
-    "The panel rejected the code. Check the user code and that it is allowed"
-    " for this area."
+    "The panel rejected your user code. Check the user code and that it's allowed "
+    "for this area."
 )
 
 
 TIMEOUT_MESSAGE = (
-    "The panel did not respond in time; the command may not have been applied."
+    "The panel didn't respond in time. Check the panel to see if the command worked."
 )
 
 
 CONNECTION_MESSAGE = (
-    "Lost connection to the panel; the command may not have been applied."
+    "The connection to the panel dropped. Check the panel to see if the command worked."
 )
 
 
-# Every library failure a command can surface: elke27's public errors, its
-# lower-level E27 errors (async_execute returns these), and raw timeouts/OS errors.
+NOT_CONNECTED_MESSAGE = (
+    "The panel isn't connected. The command wasn't sent. "
+    "Check its network connection, then try again."
+)
+
+
+PANEL_ERROR_MESSAGE = (
+    "The panel couldn't complete the command. Try again. "
+    "If it keeps happening, check the panel."
+)
+
+
+PinAction = Literal["arm", "disarm", "bypass", "unlock", "lock", "control"]
+
+_PIN_REQUIRED: dict[PinAction, tuple[str, str]] = {
+    "arm": ("pin_required_arm", "Enter your user code to arm this area."),
+    "disarm": ("pin_required_disarm", "Enter your user code to disarm this area."),
+    "bypass": ("pin_required_bypass", "Enter your user code to bypass this zone."),
+    "unlock": ("pin_required_unlock", "Enter your user code to unlock this lock."),
+    "lock": ("pin_required_lock", "Enter your user code to lock this lock."),
+    "control": ("pin_required_control", "Enter your user code to control this device."),
+}
+
+
 COMMAND_ERRORS: tuple[type[Exception], ...] = (
     Elke27Error,
     Elke27InvalidArgument,
@@ -65,6 +89,79 @@ AUTH_ERRORS: tuple[type[Exception], ...] = (
     Elke27AuthError,
     Elke27CryptoError,
 )
+
+
+def homeassistant_error(
+    translation_key: str,
+    message: str,
+    /,
+    *,
+    translation_placeholders: dict[str, str] | None = None,
+) -> HomeAssistantError:
+    """Build a translated HomeAssistantError for this integration."""
+    kwargs: dict[str, Any] = {
+        "translation_domain": DOMAIN,
+        "translation_key": translation_key,
+    }
+    if translation_placeholders is not None:
+        kwargs["translation_placeholders"] = translation_placeholders
+    return HomeAssistantError(message, **kwargs)
+
+
+def service_validation_error(
+    translation_key: str,
+    message: str,
+    /,
+    *,
+    translation_placeholders: dict[str, str] | None = None,
+) -> ServiceValidationError:
+    """Build a translated ServiceValidationError for this integration."""
+    kwargs: dict[str, Any] = {
+        "translation_domain": DOMAIN,
+        "translation_key": translation_key,
+    }
+    if translation_placeholders is not None:
+        kwargs["translation_placeholders"] = translation_placeholders
+    return ServiceValidationError(message, **kwargs)
+
+
+def pin_required_error(action: PinAction | None = None) -> ServiceValidationError:
+    """Return the error when the panel requires a user code for an action."""
+    if action is not None:
+        key, message = _PIN_REQUIRED[action]
+        return service_validation_error(key, message)
+    message = "Enter your user code and try again."
+    return service_validation_error("pin_required_fallback", message)
+
+
+def code_not_numeric_error() -> ServiceValidationError:
+    """Return the error for a non-numeric user code."""
+    return service_validation_error(
+        "code_not_numeric", "Your user code can only contain numbers."
+    )
+
+
+def code_all_zero_error() -> ServiceValidationError:
+    """Return the error for an all-zero user code."""
+    return service_validation_error(
+        "code_all_zero", "Your user code can't be all zeros."
+    )
+
+
+def arm_mode_not_supported_error() -> HomeAssistantError:
+    """Return the error for an unsupported arming mode."""
+    return homeassistant_error(
+        "arm_mode_not_supported",
+        "This panel doesn't support that arming mode.",
+    )
+
+
+def arm_mode_not_supported_validation() -> ServiceValidationError:
+    """Return the service validation error for an unsupported arming mode."""
+    return service_validation_error(
+        "arm_mode_not_supported",
+        "This panel doesn't support that arming mode.",
+    )
 
 
 def panel_error_code(err: BaseException | None) -> int | None:
@@ -105,16 +202,16 @@ def is_connection_error(err: BaseException) -> bool:
     )
 
 
-def _error_message(err: BaseException) -> str:
-    """Return a user-facing message for a library error."""
+def command_homeassistant_error(err: BaseException) -> HomeAssistantError:
+    """Return a translated HomeAssistantError for a failed panel command."""
     if is_timeout_error(err):
-        return TIMEOUT_MESSAGE
+        return homeassistant_error("command_timeout", TIMEOUT_MESSAGE)
     if is_connection_error(err):
-        return CONNECTION_MESSAGE
-    return str(err) or type(err).__name__
+        return homeassistant_error("command_connection_lost", CONNECTION_MESSAGE)
+    return homeassistant_error("panel_error", PANEL_ERROR_MESSAGE)
 
 
-def command_error(err: BaseException) -> HomeAssistantError:
+def command_error(err: BaseException) -> HomeAssistantError | ServiceValidationError:
     """
     Return the Home Assistant error to raise for a failed code command.
 
@@ -123,12 +220,8 @@ def command_error(err: BaseException) -> HomeAssistantError:
     message never includes the code.
     """
     if panel_error_code(err) == PANEL_ERROR_CODE_REJECTED:
-        return ServiceValidationError(
-            CODE_REJECTED_MESSAGE,
-            translation_domain=DOMAIN,
-            translation_key="code_rejected",
-        )
-    return HomeAssistantError(_error_message(err))
+        return service_validation_error("code_rejected", CODE_REJECTED_MESSAGE)
+    return command_homeassistant_error(err)
 
 
 def code_rejected_error(err: BaseException) -> ServiceValidationError | None:

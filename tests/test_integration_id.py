@@ -107,7 +107,7 @@ async def test_setup_rejects_entry_without_valid_integration_id(
         await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_ERROR
     assert entry.reason is not None
-    assert "Delete the integration" in entry.reason
+    assert "Remove it and add it again" in entry.reason
     client_cls.assert_not_called()
     # Nothing is written back: no backfill, no migration.
     assert CONF_INTEGRATION_ID not in entry.data or entry.data == {

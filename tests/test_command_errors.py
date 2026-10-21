@@ -114,6 +114,7 @@ class SwitchCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _switch(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_turn_on()
+        assert ctx.exception.translation_key == "command_timeout"
         assert str(ctx.exception) == TIMEOUT_MESSAGE
         assert isinstance(ctx.exception.__cause__, Elke27TimeoutError)
         client.request_link_check.assert_called_once()
@@ -125,6 +126,7 @@ class SwitchCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _switch(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_turn_off()
+        assert ctx.exception.translation_key == "command_connection_lost"
         assert str(ctx.exception) == CONNECTION_MESSAGE
         client.request_link_check.assert_not_called()
 
@@ -142,6 +144,7 @@ class LightCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _light(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_turn_on()
+        assert ctx.exception.translation_key == "command_timeout"
         assert str(ctx.exception) == TIMEOUT_MESSAGE
         assert "seq=" not in str(ctx.exception)
         client.request_link_check.assert_called_once()
@@ -153,6 +156,7 @@ class LightCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _light(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_turn_off()
+        assert ctx.exception.translation_key == "command_connection_lost"
         assert str(ctx.exception) == CONNECTION_MESSAGE
 
 
@@ -169,6 +173,7 @@ class LockCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _lock(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_unlock()
+        assert ctx.exception.translation_key == "command_timeout"
         assert str(ctx.exception) == TIMEOUT_MESSAGE
         client.request_link_check.assert_called_once()
 
@@ -179,4 +184,5 @@ class LockCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _lock(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_lock()
+        assert ctx.exception.translation_key == "command_timeout"
         assert str(ctx.exception) == TIMEOUT_MESSAGE

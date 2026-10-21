@@ -35,6 +35,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 9. **Requires elke27 0.3.14** (was 0.3.13).
 
 ### Added
+- Translated exception messages for panel commands and services (`exceptions` in `strings.json`).
 - Diagnostics: `client_present`, `client_ready`, `last_update_success`, `reconnect_attempts`,
   `repairs_issue_active`, `reauth_requested`, `snapshot_stale`, `stale_area_ids`,
   `stale_zone_ids`, `fallback_refresh_count`, `last_fallback_at`, `stale_auto_refresh_count`

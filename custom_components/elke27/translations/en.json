@@ -132,26 +132,218 @@
     }
   },
   "exceptions": {
+    "arm_automatic_cancelled_arm_sent_named": {
+      "message": "Automatic arming for {area_name} (area {area_number}) stopped because someone disarmed it. The arm had already been sent. If these zones are still bypassed, clear them with the zone bypass service: {bypassed_zone_numbers}."
+    },
+    "arm_automatic_cancelled_arm_sent_unnamed": {
+      "message": "Automatic arming for Area {area_number} stopped because someone disarmed it. The arm had already been sent. If these zones are still bypassed, clear them with the zone bypass service: {bypassed_zone_numbers}."
+    },
+    "arm_automatic_cancelled_bypasses_named": {
+      "message": "Automatic arming for {area_name} (area {area_number}) stopped because someone disarmed it. These zones may still be bypassed: {bypassed_zone_numbers}. If they are, clear them with the zone bypass service."
+    },
+    "arm_automatic_cancelled_bypasses_unnamed": {
+      "message": "Automatic arming for Area {area_number} stopped because someone disarmed it. These zones may still be bypassed: {bypassed_zone_numbers}. If they are, clear them with the zone bypass service."
+    },
+    "arm_automatic_cancelled_named": {
+      "message": "Automatic arming for {area_name} (area {area_number}) stopped because someone disarmed it."
+    },
+    "arm_automatic_cancelled_unnamed": {
+      "message": "Automatic arming for Area {area_number} stopped because someone disarmed it."
+    },
+    "arm_automatic_multi_failed": {
+      "message": "Automatic arming failed for {failed_count} of {total_count} areas. Open each area's notification for details."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Check the zone's status, then try again."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Check the zone's status, then try again."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Check the zone's status, then try again."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Check the zone's status, then try again."
+    },
+    "arm_automatic_not_armed_disconnected_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel isn't connected. Check its network connection, then try again."
+    },
+    "arm_automatic_not_armed_disconnected_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel isn't connected. Check its network connection, then try again."
+    },
+    "arm_automatic_not_armed_refused_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't accept the command. Check that the area is ready, then try again."
+    },
+    "arm_automatic_not_armed_refused_partial_rollback_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't accept the command. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_refused_partial_rollback_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't accept the command. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_refused_rolled_back_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't accept the command. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_refused_rolled_back_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't accept the command. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_refused_still_bypassed_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't accept the command. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_refused_still_bypassed_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't accept the command. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_refused_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't accept the command. Check that the area is ready, then try again."
+    },
+    "arm_automatic_not_armed_zone_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Close or bypass open zones, then try again."
+    },
+    "arm_automatic_not_armed_zone_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Zone {zone_number} couldn't be bypassed. Close or bypass open zones, then try again."
+    },
+    "arm_automatic_not_armed_zone_partial_rollback_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_partial_rollback_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Zone {zone_number} couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_partial_rollback_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_partial_rollback_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. Zone {zone_number} couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_rolled_back_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_zone_rolled_back_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Zone {zone_number} couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_zone_rolled_back_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_zone_rolled_back_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. Zone {zone_number} couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_zone_still_bypassed_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_still_bypassed_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Zone {zone_number} couldn't be bypassed. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_still_bypassed_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_still_bypassed_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. Zone {zone_number} couldn't be bypassed. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Close or bypass open zones, then try again."
+    },
+    "arm_automatic_not_armed_zone_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. Zone {zone_number} couldn't be bypassed. Close or bypass open zones, then try again."
+    },
+    "arm_automatic_uncertain_named": {
+      "message": "{area_name} (area {area_number}) may or may not be armed. Check the area on the panel."
+    },
+    "arm_automatic_uncertain_unnamed": {
+      "message": "Area {area_number} may or may not be armed. Check the area on the panel."
+    },
+    "arm_automatic_uncertain_with_bypasses_named": {
+      "message": "{area_name} (area {area_number}) may or may not be armed. Check the area on the panel. These zones were left bypassed: {bypassed_zone_numbers}. If the area isn't armed, clear the bypasses with the zone bypass service."
+    },
+    "arm_automatic_uncertain_with_bypasses_unnamed": {
+      "message": "Area {area_number} may or may not be armed. Check the area on the panel. These zones were left bypassed: {bypassed_zone_numbers}. If the area isn't armed, clear the bypasses with the zone bypass service."
+    },
+    "arm_mode_not_supported": {
+      "message": "This panel doesn't support that arming mode."
+    },
     "auth_failed": {
-      "message": "The panel no longer accepts the stored link. Relink the panel."
+      "message": "The panel no longer accepts this connection. Open the integration and link the panel again."
     },
     "cannot_connect": {
-      "message": "Unable to connect to the panel at {host}:{port}."
-    },
-    "code_rejected": {
-      "message": "The panel rejected the code. Check the user code and that it is allowed for this area."
-    },
-    "code_not_numeric": {
-      "message": "The code must be numeric."
+      "message": "Can't reach the panel at {host}:{port}. Check that it's on and the address is right."
     },
     "code_all_zero": {
-      "message": "The code can't be all zeros."
+      "message": "Your user code can't be all zeros."
+    },
+    "code_not_numeric": {
+      "message": "Your user code can only contain numbers."
+    },
+    "code_rejected": {
+      "message": "The panel rejected your user code. Check the user code and that it's allowed for this area."
+    },
+    "command_connection_lost": {
+      "message": "The connection to the panel dropped. Check the panel to see if the command worked."
+    },
+    "command_timeout": {
+      "message": "The panel didn't respond in time. Check the panel to see if the command worked."
+    },
+    "config_entry_not_loaded": {
+      "message": "The panel integration isn't ready yet. Try again in a moment."
+    },
+    "entity_invalid_area": {
+      "message": "This isn't an Elk E27 alarm area. Pick a different one."
+    },
+    "entity_invalid_zone": {
+      "message": "This isn't an Elk E27 zone. Pick a different one."
+    },
+    "entity_not_linked": {
+      "message": "This entity isn't connected to an Elk E27 panel. Pick a different one."
+    },
+    "fan_mode_not_supported": {
+      "message": "This thermostat doesn't support that fan mode."
+    },
+    "hvac_mode_not_supported": {
+      "message": "This thermostat doesn't support that HVAC mode."
     },
     "integration_id_invalid": {
-      "message": "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
+      "message": "This panel was set up with an older version. Remove it and add it again."
+    },
+    "no_alarm_panel_target": {
+      "message": "No Elk E27 alarm area was selected. Select an alarm area and try again."
+    },
+    "no_zone_target": {
+      "message": "No Elk E27 zone was selected. Select a zone and try again."
+    },
+    "not_accepted": {
+      "message": "The panel didn't accept the command. Check that the area is ready, then try again."
+    },
+    "not_connected": {
+      "message": "The panel isn't connected. The command wasn't sent. Check its network connection, then try again."
+    },
+    "panel_error": {
+      "message": "The panel couldn't complete the command. Try again. If it keeps happening, check the panel."
     },
     "panel_not_ready": {
-      "message": "The client did not become ready before timeout."
+      "message": "The panel didn't finish starting up in time. Try again in a moment."
+    },
+    "pin_required_arm": {
+      "message": "Enter your user code to arm this area."
+    },
+    "pin_required_bypass": {
+      "message": "Enter your user code to bypass this zone."
+    },
+    "pin_required_control": {
+      "message": "Enter your user code to control this device."
+    },
+    "pin_required_disarm": {
+      "message": "Enter your user code to disarm this area."
+    },
+    "pin_required_fallback": {
+      "message": "Enter your user code and try again."
+    },
+    "pin_required_lock": {
+      "message": "Enter your user code to lock this lock."
+    },
+    "pin_required_unlock": {
+      "message": "Enter your user code to unlock this lock."
+    },
+    "temperature_required": {
+      "message": "Set a target temperature."
+    },
+    "zone_bypass_not_acknowledged": {
+      "message": "The panel didn't confirm the bypass. Check the zone's status, then try again."
     }
   },
   "selector": {

@@ -15,10 +15,14 @@ from elke27_lib.errors import (
     Elke27PinRequiredError,
 )
 
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError
 
-from .const import DOMAIN
-from .errors import panel_error_code
+from .errors import (
+    arm_mode_not_supported_error,
+    code_all_zero_error,
+    code_not_numeric_error,
+    panel_error_code,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -288,18 +292,66 @@ def zone_bypass_label(zone: ZoneState) -> str:
     return f"Zone {zone.zone_id}"
 
 
+@dataclasses.dataclass(frozen=True)
+class AreaPhrase:
+    """Panel area identity for translated messages (no English assembled here)."""
+
+    named: bool
+    number: str
+    name: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ZonePhrase:
+    """Panel zone identity for translated messages (no English assembled here)."""
+
+    named: bool
+    number: str
+    name: str
+
+
+def area_automatic_phrase(
+    area_id: int,
+    snapshot: PanelSnapshot | None,
+    *,
+    entity_name: str | None = None,
+) -> AreaPhrase:
+    """Return area name/number parts for automatic arming translation keys."""
+    name = ""
+    if snapshot is not None:
+        area = snapshot.areas.get(area_id)
+        if area is not None:
+            name = (area.name or "").strip()
+    if not name and entity_name:
+        name = entity_name.strip()
+    number = str(area_id)
+    if name:
+        return AreaPhrase(named=True, number=number, name=name)
+    return AreaPhrase(named=False, number=number, name="")
+
+
+def zone_automatic_phrase(zone: ZoneState) -> ZonePhrase:
+    """Return zone name/number parts for automatic arming translation keys."""
+    name = (zone.name or "").strip()
+    number = str(zone.zone_id)
+    if name:
+        return ZonePhrase(named=True, number=number, name=name)
+    return ZonePhrase(named=False, number=number, name="")
+
+
+def zone_number_list(zones: list[ZoneState] | tuple[ZoneState, ...]) -> str:
+    """Return comma-separated zone numbers for translated list placeholders."""
+    return ", ".join(str(zone.zone_id) for zone in zones)
+
+
 def _validated_pin(pin: str) -> str:
     """Return the user code as a digit string; raise if not numeric or all zeros."""
     value = str(pin).strip()
     # ASCII digits only; all-zero detected without int() (no huge-int conversion).
     if not (value.isascii() and value.isdigit()):
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="code_not_numeric"
-        )
+        raise code_not_numeric_error()
     if not value.strip("0"):
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="code_all_zero"
-        )
+        raise code_all_zero_error()
     return value
 
 
@@ -311,5 +363,4 @@ def _library_arm_mode(mode: Any) -> ArmMode:
     # Custom bypass: the entity bypasses open zones first, then arms away.
     if isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS":
         return ArmMode.ARMED_AWAY
-    msg = "Arm mode is not supported."
-    raise HomeAssistantError(msg)
+    raise arm_mode_not_supported_error()
