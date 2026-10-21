@@ -33,6 +33,7 @@ from .arm_automatic_errors import (
 from .arming import (
     PIN_REQUIRED_REASON,
     ZoneBypassFailedError,
+    area_automatic_label,
     is_already_armed_refusal,
     is_definitive_refusal,
     zone_bypass_label,
@@ -268,8 +269,13 @@ async def _async_arm_automatic_entity(
             arm_sent=bool(arm_sent),
         )
         labels = [zone_bypass_label(zone) for zone in attempted]
+        area_label = area_automatic_label(
+            area_id,
+            coordinator.get_snapshot(),
+            entity_name=entity_entry.name or entity_entry.original_name,
+        )
         raise arm_automatic_cancelled_error(
-            area_id, bypassed_labels=labels, arm_sent=bool(arm_sent)
+            area_label, bypassed_labels=labels, arm_sent=bool(arm_sent)
         ) from None
     finally:
         coordinator.unregister_arm_automatic(area_id, task)
@@ -335,8 +341,13 @@ async def _async_arm_automatic_locked(
             pin_required = pin_required or zone_bypass_failed_pin_required(cause)
         rolled_back_labels = [zone_bypass_label(item) for item in rolled_back]
         still_labels = [zone_bypass_label(item) for item in still_bypassed]
-        err = arm_automatic_not_armed_error(
+        area_label = area_automatic_label(
             area_id,
+            coordinator.get_snapshot(),
+            entity_name=entity_entry.name or entity_entry.original_name,
+        )
+        err = arm_automatic_not_armed_error(
+            area_label,
             reason=reason,
             zone_label=zone_label,
             rolled_back_labels=rolled_back_labels,
@@ -361,7 +372,14 @@ async def _async_arm_automatic_locked(
             config_entry_id=_config_entry_id(entity_entry),
         )
         labels = [zone_bypass_label(item) for item in bypassed]
-        raise arm_automatic_uncertain_error(area_id, bypassed_labels=labels) from cause
+        area_label = area_automatic_label(
+            area_id,
+            coordinator.get_snapshot(),
+            entity_name=entity_entry.name or entity_entry.original_name,
+        )
+        raise arm_automatic_uncertain_error(
+            area_label, bypassed_labels=labels
+        ) from cause
 
     # Read the live client snapshot inside the lock, not the debounced
     # coordinator copy, so an earlier call's bypasses and arming are seen.
@@ -655,19 +673,23 @@ def _area_id_from_unique_id(unique_id: str) -> int:
     return _numeric_id_from_unique_id(unique_id, "area")
 
 
-def _numeric_id_from_unique_id(unique_id: str, domain: str) -> int:
+_ENTITY_KIND_LABELS = {"area": "alarm area", "zone": "zone"}
+
+
+def _numeric_id_from_unique_id(unique_id: str, kind: str) -> int:
     """
     Extract the numeric ID from an Elke27 ``<base>:<id>`` unique ID.
 
     The caller has already checked the entity's platform, so the kind
-    (area or zone) is known; ``domain`` only names it in errors.
+    (area or zone) is known; ``kind`` only names it in errors.
     """
+    label = _ENTITY_KIND_LABELS.get(kind, kind)
     if ":" not in unique_id:
         msg = "entity_invalid"
         raise service_validation_error(
             msg,
-            f"This isn't an Elk E27 {domain}. Pick a different one.",
-            translation_placeholders={"entity_kind": domain},
+            f"This isn't an Elk E27 {label}. Pick a different one.",
+            translation_placeholders={"entity_kind": label},
         )
     id_str = unique_id.rsplit(":", 1)[1]
     try:
@@ -676,6 +698,6 @@ def _numeric_id_from_unique_id(unique_id: str, domain: str) -> int:
         msg = "entity_invalid"
         raise service_validation_error(
             msg,
-            f"This isn't an Elk E27 {domain}. Pick a different one.",
-            translation_placeholders={"entity_kind": domain},
+            f"This isn't an Elk E27 {label}. Pick a different one.",
+            translation_placeholders={"entity_kind": label},
         ) from err

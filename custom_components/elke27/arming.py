@@ -292,6 +292,25 @@ def zone_bypass_label(zone: ZoneState) -> str:
     return f"Zone {zone.zone_id}"
 
 
+def area_automatic_label(
+    area_id: int,
+    snapshot: PanelSnapshot | None,
+    *,
+    entity_name: str | None = None,
+) -> str:
+    """Return a user-facing label for an area, such as 'House (area 1)'."""
+    name = ""
+    if snapshot is not None:
+        area = snapshot.areas.get(area_id)
+        if area is not None:
+            name = (area.name or "").strip()
+    if not name and entity_name:
+        name = entity_name.strip()
+    if name:
+        return f"{name} (area {area_id})"
+    return f"Area {area_id}"
+
+
 def _validated_pin(pin: str) -> str:
     """Return the user code as a digit string; raise if not numeric or all zeros."""
     value = str(pin).strip()

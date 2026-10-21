@@ -48,8 +48,13 @@ def _keys_referenced_in_code() -> set[str]:
             "command_timeout",
             "command_connection_lost",
             "panel_error",
-            "pin_required",
+            "pin_required_arm",
+            "pin_required_bypass",
+            "pin_required_control",
+            "pin_required_disarm",
             "pin_required_fallback",
+            "pin_required_lock",
+            "pin_required_unlock",
             "arm_mode_not_supported",
         }
     )

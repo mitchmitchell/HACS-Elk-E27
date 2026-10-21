@@ -1616,8 +1616,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(ServiceValidationError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert ctx.exception.translation_key == "pin_required"
-        assert "Enter your user code to arm" in str(ctx.exception)
+        assert ctx.exception.translation_key == "pin_required_arm"
+        assert "Enter your user code to arm this area." in str(ctx.exception)
         runtime.coordinator.async_arm_area.assert_not_called()
         create_notification.assert_called_once()
         data = hass.bus.async_fire.call_args.args[1]
@@ -1646,8 +1646,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(ServiceValidationError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert ctx.exception.translation_key == "pin_required"
-        assert "Enter your user code to arm" in str(ctx.exception)
+        assert ctx.exception.translation_key == "pin_required_arm"
+        assert "Enter your user code to arm this area." in str(ctx.exception)
         create_notification.assert_called_once()
         hass.bus.async_fire.assert_called_once_with(
             integration.EVENT_ARM_AUTOMATIC_FAILED,

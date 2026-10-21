@@ -133,52 +133,52 @@
   },
   "exceptions": {
     "arm_automatic_cancelled": {
-      "message": "Automatic arming for area {area} stopped because someone disarmed it."
+      "message": "Automatic arming for {area} stopped because someone disarmed it."
     },
     "arm_automatic_cancelled_arm_sent": {
-      "message": "Automatic arming for area {area} stopped because someone disarmed it. The arm had already been sent. If these zones are still bypassed, clear them with the zone bypass service: {zones}."
+      "message": "Automatic arming for {area} stopped because someone disarmed it. The arm had already been sent. If these zones are still bypassed, clear them with the zone bypass service: {zones}."
     },
     "arm_automatic_cancelled_bypasses": {
-      "message": "Automatic arming for area {area} stopped because someone disarmed it. These zones may still be bypassed: {zones}. If they are, clear them with the zone bypass service."
+      "message": "Automatic arming for {area} stopped because someone disarmed it. These zones may still be bypassed: {zones}. If they are, clear them with the zone bypass service."
     },
     "arm_automatic_multi_failed": {
       "message": "Automatic arming failed for {failed_count} of {total_count} areas. Open each area's notification for details."
     },
     "arm_automatic_not_armed_bypass_unconfirmed": {
-      "message": "Area {area} wasn't armed. The panel didn't confirm the bypass for {zone}. Check the zone's status, then try again."
+      "message": "{area} wasn't armed. The panel didn't confirm the bypass for {zone}. Check the zone's status, then try again."
     },
     "arm_automatic_not_armed_disconnected": {
-      "message": "Area {area} wasn't armed. The panel isn't connected. Check its network connection, then try again."
+      "message": "{area} wasn't armed. The panel isn't connected. Check its network connection, then try again."
     },
     "arm_automatic_not_armed_refused": {
-      "message": "Area {area} wasn't armed. The panel didn't accept the command. Check that the area is ready, then try again."
+      "message": "{area} wasn't armed. The panel didn't accept the command. Check that the area is ready, then try again."
     },
     "arm_automatic_not_armed_refused_partial_rollback": {
-      "message": "Area {area} wasn't armed. The panel didn't accept the command. Bypasses were cleared: {cleared_zones}. These zones are still bypassed: {still_bypassed}. Clear them with the zone bypass service."
+      "message": "{area} wasn't armed. The panel didn't accept the command. Bypasses were cleared: {cleared_zones}. These zones are still bypassed: {still_bypassed}. Clear them with the zone bypass service."
     },
     "arm_automatic_not_armed_refused_rolled_back": {
-      "message": "Area {area} wasn't armed. The panel didn't accept the command. Bypasses were cleared: {cleared_zones}."
+      "message": "{area} wasn't armed. The panel didn't accept the command. Bypasses were cleared: {cleared_zones}."
     },
     "arm_automatic_not_armed_refused_still_bypassed": {
-      "message": "Area {area} wasn't armed. The panel didn't accept the command. These zones are still bypassed: {still_bypassed}. Clear them with the zone bypass service."
+      "message": "{area} wasn't armed. The panel didn't accept the command. These zones are still bypassed: {still_bypassed}. Clear them with the zone bypass service."
     },
     "arm_automatic_not_armed_zone": {
-      "message": "Area {area} wasn't armed. {zone} couldn't be bypassed. Close or bypass open zones, then try again."
+      "message": "{area} wasn't armed. {zone} couldn't be bypassed. Close or bypass open zones, then try again."
     },
     "arm_automatic_not_armed_zone_partial_rollback": {
-      "message": "Area {area} wasn't armed. {zone} couldn't be bypassed. Bypasses were cleared: {cleared_zones}. These zones are still bypassed: {still_bypassed}. Clear them with the zone bypass service."
+      "message": "{area} wasn't armed. {zone} couldn't be bypassed. Bypasses were cleared: {cleared_zones}. These zones are still bypassed: {still_bypassed}. Clear them with the zone bypass service."
     },
     "arm_automatic_not_armed_zone_rolled_back": {
-      "message": "Area {area} wasn't armed. {zone} couldn't be bypassed. Bypasses were cleared: {cleared_zones}."
+      "message": "{area} wasn't armed. {zone} couldn't be bypassed. Bypasses were cleared: {cleared_zones}."
     },
     "arm_automatic_not_armed_zone_still_bypassed": {
-      "message": "Area {area} wasn't armed. {zone} couldn't be bypassed. These zones are still bypassed: {still_bypassed}. Clear them with the zone bypass service."
+      "message": "{area} wasn't armed. {zone} couldn't be bypassed. These zones are still bypassed: {still_bypassed}. Clear them with the zone bypass service."
     },
     "arm_automatic_uncertain": {
-      "message": "Area {area} may or may not be armed. Check the area on the panel."
+      "message": "{area} may or may not be armed. Check the area on the panel."
     },
     "arm_automatic_uncertain_with_bypasses": {
-      "message": "Area {area} may or may not be armed. Check the area on the panel. These zones were left bypassed: {zones}. If the area isn't armed, clear the bypasses with the zone bypass service."
+      "message": "{area} may or may not be armed. Check the area on the panel. These zones were left bypassed: {zones}. If the area isn't armed, clear the bypasses with the zone bypass service."
     },
     "arm_mode_not_supported": {
       "message": "This panel doesn't support that arming mode."
@@ -240,11 +240,26 @@
     "panel_not_ready": {
       "message": "The panel didn't finish starting up in time. Try again in a moment."
     },
-    "pin_required": {
-      "message": "Enter your user code to {action}."
+    "pin_required_arm": {
+      "message": "Enter your user code to arm this area."
+    },
+    "pin_required_bypass": {
+      "message": "Enter your user code to bypass this zone."
+    },
+    "pin_required_control": {
+      "message": "Enter your user code to control this device."
+    },
+    "pin_required_disarm": {
+      "message": "Enter your user code to disarm this area."
     },
     "pin_required_fallback": {
       "message": "Enter your user code and try again."
+    },
+    "pin_required_lock": {
+      "message": "Enter your user code to lock this lock."
+    },
+    "pin_required_unlock": {
+      "message": "Enter your user code to unlock this lock."
     },
     "temperature_required": {
       "message": "Set a target temperature."

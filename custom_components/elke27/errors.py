@@ -65,13 +65,13 @@ PANEL_ERROR_MESSAGE = (
 
 PinAction = Literal["arm", "disarm", "bypass", "unlock", "lock", "control"]
 
-_PIN_ACTION_PHRASE: dict[PinAction, str] = {
-    "arm": "arm this area",
-    "disarm": "disarm this area",
-    "bypass": "bypass this zone",
-    "unlock": "unlock this lock",
-    "lock": "lock this lock",
-    "control": "control this device",
+_PIN_REQUIRED: dict[PinAction, tuple[str, str]] = {
+    "arm": ("pin_required_arm", "Enter your user code to arm this area."),
+    "disarm": ("pin_required_disarm", "Enter your user code to disarm this area."),
+    "bypass": ("pin_required_bypass", "Enter your user code to bypass this zone."),
+    "unlock": ("pin_required_unlock", "Enter your user code to unlock this lock."),
+    "lock": ("pin_required_lock", "Enter your user code to lock this lock."),
+    "control": ("pin_required_control", "Enter your user code to control this device."),
 }
 
 
@@ -128,13 +128,8 @@ def service_validation_error(
 def pin_required_error(action: PinAction | None = None) -> ServiceValidationError:
     """Return the error when the panel requires a user code for an action."""
     if action is not None:
-        phrase = _PIN_ACTION_PHRASE[action]
-        message = f"Enter your user code to {phrase}."
-        return service_validation_error(
-            "pin_required",
-            message,
-            translation_placeholders={"action": phrase},
-        )
+        key, message = _PIN_REQUIRED[action]
+        return service_validation_error(key, message)
     message = "Enter your user code and try again."
     return service_validation_error("pin_required_fallback", message)
 

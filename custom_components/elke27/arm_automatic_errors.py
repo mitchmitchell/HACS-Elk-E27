@@ -21,7 +21,7 @@ def _zone_list(labels: Sequence[str]) -> str:
 
 
 def arm_automatic_not_armed_error(
-    area_id: int,
+    area_label: str,
     *,
     reason: str,
     zone_label: str | None,
@@ -34,14 +34,14 @@ def arm_automatic_not_armed_error(
         action: PinAction = "arm"
         return pin_required_error(action)
 
-    area = str(area_id)
+    area = area_label
     cleared = _zone_list(rolled_back_labels)
     still = _zone_list(still_bypassed_labels)
 
     if reason == ARM_NOT_SENT_REASON:
         key = "arm_automatic_not_armed_disconnected"
         message = (
-            f"Area {area} wasn't armed. The panel isn't connected. "
+            f"{area} wasn't armed. The panel isn't connected. "
             "Check its network connection, then try again."
         )
         return homeassistant_error(
@@ -51,7 +51,7 @@ def arm_automatic_not_armed_error(
     if zone_label is not None and reason == "bypass was not acknowledged.":
         key = "arm_automatic_not_armed_bypass_unconfirmed"
         message = (
-            f"Area {area} wasn't armed. The panel didn't confirm the bypass for "
+            f"{area} wasn't armed. The panel didn't confirm the bypass for "
             f"{zone_label}. Check the zone's status, then try again."
         )
         return homeassistant_error(
@@ -64,7 +64,7 @@ def arm_automatic_not_armed_error(
         if still and cleared:
             key = "arm_automatic_not_armed_zone_partial_rollback"
             message = (
-                f"Area {area} wasn't armed. {zone_label} couldn't be bypassed. "
+                f"{area} wasn't armed. {zone_label} couldn't be bypassed. "
                 f"Bypasses were cleared: {cleared}. These zones are still bypassed: "
                 f"{still}. Clear them with the zone bypass service."
             )
@@ -77,7 +77,7 @@ def arm_automatic_not_armed_error(
         elif still:
             key = "arm_automatic_not_armed_zone_still_bypassed"
             message = (
-                f"Area {area} wasn't armed. {zone_label} couldn't be bypassed. "
+                f"{area} wasn't armed. {zone_label} couldn't be bypassed. "
                 f"These zones are still bypassed: {still}. Clear them with the "
                 "zone bypass service."
             )
@@ -89,7 +89,7 @@ def arm_automatic_not_armed_error(
         elif cleared:
             key = "arm_automatic_not_armed_zone_rolled_back"
             message = (
-                f"Area {area} wasn't armed. {zone_label} couldn't be bypassed. "
+                f"{area} wasn't armed. {zone_label} couldn't be bypassed. "
                 f"Bypasses were cleared: {cleared}."
             )
             placeholders = {
@@ -100,7 +100,7 @@ def arm_automatic_not_armed_error(
         else:
             key = "arm_automatic_not_armed_zone"
             message = (
-                f"Area {area} wasn't armed. {zone_label} couldn't be bypassed. "
+                f"{area} wasn't armed. {zone_label} couldn't be bypassed. "
                 "Close or bypass open zones, then try again."
             )
             placeholders = {"area": area, "zone": zone_label}
@@ -109,7 +109,7 @@ def arm_automatic_not_armed_error(
     if still and cleared:
         key = "arm_automatic_not_armed_refused_partial_rollback"
         message = (
-            f"Area {area} wasn't armed. The panel didn't accept the command. "
+            f"{area} wasn't armed. The panel didn't accept the command. "
             f"Bypasses were cleared: {cleared}. These zones are still bypassed: "
             f"{still}. Clear them with the zone bypass service."
         )
@@ -125,7 +125,7 @@ def arm_automatic_not_armed_error(
     if still:
         key = "arm_automatic_not_armed_refused_still_bypassed"
         message = (
-            f"Area {area} wasn't armed. The panel didn't accept the command. "
+            f"{area} wasn't armed. The panel didn't accept the command. "
             f"These zones are still bypassed: {still}. Clear them with the zone "
             "bypass service."
         )
@@ -137,7 +137,7 @@ def arm_automatic_not_armed_error(
     if cleared:
         key = "arm_automatic_not_armed_refused_rolled_back"
         message = (
-            f"Area {area} wasn't armed. The panel didn't accept the command. "
+            f"{area} wasn't armed. The panel didn't accept the command. "
             f"Bypasses were cleared: {cleared}."
         )
         return homeassistant_error(
@@ -147,22 +147,22 @@ def arm_automatic_not_armed_error(
         )
     key = "arm_automatic_not_armed_refused"
     message = (
-        f"Area {area} wasn't armed. The panel didn't accept the command. "
+        f"{area} wasn't armed. The panel didn't accept the command. "
         "Check that the area is ready, then try again."
     )
     return homeassistant_error(key, message, translation_placeholders={"area": area})
 
 
 def arm_automatic_uncertain_error(
-    area_id: int, *, bypassed_labels: Sequence[str]
+    area_label: str, *, bypassed_labels: Sequence[str]
 ) -> HomeAssistantError:
     """Return the translated error when the arm result is unknown."""
-    area = str(area_id)
+    area = area_label
     zones = _zone_list(bypassed_labels)
     if bypassed_labels:
         key = "arm_automatic_uncertain_with_bypasses"
         message = (
-            f"Area {area} may or may not be armed. Check the area on the panel. "
+            f"{area} may or may not be armed. Check the area on the panel. "
             f"These zones were left bypassed: {zones}. If the area isn't armed, "
             "clear the bypasses with the zone bypass service."
         )
@@ -172,31 +172,29 @@ def arm_automatic_uncertain_error(
             translation_placeholders={"area": area, "zones": zones},
         )
     key = "arm_automatic_uncertain"
-    message = f"Area {area} may or may not be armed. Check the area on the panel."
+    message = f"{area} may or may not be armed. Check the area on the panel."
     return homeassistant_error(key, message, translation_placeholders={"area": area})
 
 
 def arm_automatic_cancelled_error(
-    area_id: int,
+    area_label: str,
     *,
     bypassed_labels: Sequence[str],
     arm_sent: bool,
 ) -> HomeAssistantError:
     """Return the translated error when a disarm cancels automatic arming."""
-    area = str(area_id)
+    area = area_label
     zones = _zone_list(bypassed_labels)
     if not bypassed_labels:
         key = "arm_automatic_cancelled"
-        message = (
-            f"Automatic arming for area {area} stopped because someone disarmed it."
-        )
+        message = f"Automatic arming for {area} stopped because someone disarmed it."
         return homeassistant_error(
             key, message, translation_placeholders={"area": area}
         )
     if arm_sent:
         key = "arm_automatic_cancelled_arm_sent"
         message = (
-            f"Automatic arming for area {area} stopped because someone disarmed it. "
+            f"Automatic arming for {area} stopped because someone disarmed it. "
             f"The arm had already been sent. If these zones are still bypassed, "
             f"clear them with the zone bypass service: {zones}."
         )
@@ -207,7 +205,7 @@ def arm_automatic_cancelled_error(
         )
     key = "arm_automatic_cancelled_bypasses"
     message = (
-        f"Automatic arming for area {area} stopped because someone disarmed it. "
+        f"Automatic arming for {area} stopped because someone disarmed it. "
         f"These zones may still be bypassed: {zones}. If they are, clear them "
         "with the zone bypass service."
     )
