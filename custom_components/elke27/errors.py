@@ -45,9 +45,13 @@ PANEL_ERROR_CODES_USER_CONDITION: dict[int, str] = {
 }
 
 # Translation keys of the panel refusals that get the same rollback, event and
-# notification handling as a rejected code. not_allowed_armed is left out on
-# purpose: "already armed" means the area may rely on its bypasses, so the
-# arming code keeps them (see arming.is_already_armed_refusal).
+# notification handling as a rejected code.
+#
+# 11028 (not_allowed_armed) is excluded on purpose. That refusal means the area
+# is already armed, so the bypasses that went with it are meant to stay; rolling
+# them back would un-bypass zones in an armed system. It is still a translated
+# user error (see command_error); the arming code keeps its bypasses via
+# arming.is_already_armed_refusal.
 USER_REFUSAL_KEYS: frozenset[str] = frozenset(
     {"code_rejected", "not_ready", "not_bypassable", "in_alarm"}
 )
