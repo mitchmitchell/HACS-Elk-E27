@@ -11,6 +11,7 @@ import re
 import pytest
 
 from custom_components.elke27 import errors
+from custom_components.elke27.arm_automatic_errors import ARM_AUTOMATIC_KEYS
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "elke27"
@@ -36,9 +37,7 @@ def _keys_referenced_in_code() -> set[str]:
         text = path.read_text(encoding="utf-8")
         keys.update(HELPER_KEY_PATTERN.findall(text))
         keys.update(SETUP_EXCEPTION_PATTERN.findall(text))
-    arm_path = COMPONENT / "arm_automatic_errors.py"
-    if arm_path.exists():
-        keys.update(re.findall(r'key = "([a-z_0-9]+)"', arm_path.read_text()))
+    keys.update(ARM_AUTOMATIC_KEYS)
     keys.update({"not_connected", "not_accepted"})
     keys.update(
         {

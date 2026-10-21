@@ -33,7 +33,6 @@ from .arm_automatic_errors import (
 from .arming import (
     PIN_REQUIRED_REASON,
     ZoneBypassFailedError,
-    area_automatic_label,
     is_already_armed_refusal,
     is_definitive_refusal,
     zone_bypass_label,
@@ -218,7 +217,7 @@ async def _async_arm_automatic_entity(
 ) -> None:
     """Handle the automatic arming service for one entity."""
     entity_entry, runtime_data = _entity_runtime_data(
-        hass, entity_id, Platform.ALARM_CONTROL_PANEL, "alarm area"
+        hass, entity_id, Platform.ALARM_CONTROL_PANEL
     )
     area_id = _area_id_from_unique_id(entity_entry.unique_id)
     coordinator = runtime_data.coordinator
@@ -268,14 +267,12 @@ async def _async_arm_automatic_entity(
             config_entry_id=_config_entry_id(entity_entry),
             arm_sent=bool(arm_sent),
         )
-        labels = [zone_bypass_label(zone) for zone in attempted]
-        area_label = area_automatic_label(
+        raise arm_automatic_cancelled_error(
             area_id,
             coordinator.get_snapshot(),
             entity_name=entity_entry.name or entity_entry.original_name,
-        )
-        raise arm_automatic_cancelled_error(
-            area_label, bypassed_labels=labels, arm_sent=bool(arm_sent)
+            bypassed_zones=attempted,
+            arm_sent=bool(arm_sent),
         ) from None
     finally:
         coordinator.unregister_arm_automatic(area_id, task)
@@ -335,23 +332,17 @@ async def _async_arm_automatic_locked(
                     ", ".join(str(item.zone_id) for item in still_bypassed),
                 )
             raise rejected
-        zone_label = zone_bypass_label(zone) if zone is not None else None
         pin_required = reason == PIN_REQUIRED_REASON
         if isinstance(cause, ZoneBypassFailedError):
             pin_required = pin_required or zone_bypass_failed_pin_required(cause)
-        rolled_back_labels = [zone_bypass_label(item) for item in rolled_back]
-        still_labels = [zone_bypass_label(item) for item in still_bypassed]
-        area_label = area_automatic_label(
+        err = arm_automatic_not_armed_error(
             area_id,
             coordinator.get_snapshot(),
             entity_name=entity_entry.name or entity_entry.original_name,
-        )
-        err = arm_automatic_not_armed_error(
-            area_label,
             reason=reason,
-            zone_label=zone_label,
-            rolled_back_labels=rolled_back_labels,
-            still_bypassed_labels=still_labels,
+            zone=zone,
+            rolled_back_zones=rolled_back,
+            still_bypassed_zones=still_bypassed,
             pin_required=pin_required,
         )
         raise err from cause
@@ -371,14 +362,11 @@ async def _async_arm_automatic_locked(
             still_bypassed_zones=bypassed,
             config_entry_id=_config_entry_id(entity_entry),
         )
-        labels = [zone_bypass_label(item) for item in bypassed]
-        area_label = area_automatic_label(
+        raise arm_automatic_uncertain_error(
             area_id,
             coordinator.get_snapshot(),
             entity_name=entity_entry.name or entity_entry.original_name,
-        )
-        raise arm_automatic_uncertain_error(
-            area_label, bypassed_labels=labels
+            bypassed_zones=bypassed,
         ) from cause
 
     # Read the live client snapshot inside the lock, not the debounced
@@ -585,8 +573,14 @@ def _async_report_arm_automatic_failure(
     )
 
 
+_ENTITY_INVALID_KEY = {
+    Platform.ALARM_CONTROL_PANEL: "entity_invalid_area",
+    Platform.BINARY_SENSOR: "entity_invalid_zone",
+}
+
+
 def _entity_runtime_data(
-    hass: HomeAssistant, entity_id: str, platform: Platform, label: str
+    hass: HomeAssistant, entity_id: str, platform: Platform
 ) -> tuple[er.RegistryEntry, Elke27RuntimeData]:
     """Return the registry entry and loaded runtime data for an Elke27 entity."""
     entity_entry = er.async_get(hass).async_get(entity_id)
@@ -595,11 +589,12 @@ def _entity_runtime_data(
         or entity_entry.platform != DOMAIN
         or entity_entry.domain != platform
     ):
-        msg = "entity_invalid"
+        msg = _ENTITY_INVALID_KEY[platform]
         raise service_validation_error(
             msg,
-            f"This isn't an Elk E27 {label}. Pick a different one.",
-            translation_placeholders={"entity_kind": label},
+            "This isn't an Elk E27 alarm area. Pick a different one."
+            if platform == Platform.ALARM_CONTROL_PANEL
+            else "This isn't an Elk E27 zone. Pick a different one.",
         )
 
     config_entry = hass.config_entries.async_get_entry(_config_entry_id(entity_entry))
@@ -634,7 +629,7 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
 
     for entity_id in entity_ids:
         entity_entry, runtime_data = _entity_runtime_data(
-            hass, entity_id, Platform.BINARY_SENSOR, "zone"
+            hass, entity_id, Platform.BINARY_SENSOR
         )
         zone_id = _numeric_id_from_unique_id(entity_entry.unique_id, "zone")
         coordinator = runtime_data.coordinator
@@ -673,31 +668,23 @@ def _area_id_from_unique_id(unique_id: str) -> int:
     return _numeric_id_from_unique_id(unique_id, "area")
 
 
-_ENTITY_KIND_LABELS = {"area": "alarm area", "zone": "zone"}
-
-
 def _numeric_id_from_unique_id(unique_id: str, kind: str) -> int:
     """
     Extract the numeric ID from an Elke27 ``<base>:<id>`` unique ID.
 
     The caller has already checked the entity's platform, so the kind
-    (area or zone) is known; ``kind`` only names it in errors.
+    (area or zone) is known; ``kind`` selects the invalid-entity message.
     """
-    label = _ENTITY_KIND_LABELS.get(kind, kind)
+    invalid_key = "entity_invalid_area" if kind == "area" else "entity_invalid_zone"
+    invalid_message = (
+        "This isn't an Elk E27 alarm area. Pick a different one."
+        if kind == "area"
+        else "This isn't an Elk E27 zone. Pick a different one."
+    )
     if ":" not in unique_id:
-        msg = "entity_invalid"
-        raise service_validation_error(
-            msg,
-            f"This isn't an Elk E27 {label}. Pick a different one.",
-            translation_placeholders={"entity_kind": label},
-        )
+        raise service_validation_error(invalid_key, invalid_message)
     id_str = unique_id.rsplit(":", 1)[1]
     try:
         return int(id_str)
     except ValueError as err:
-        msg = "entity_invalid"
-        raise service_validation_error(
-            msg,
-            f"This isn't an Elk E27 {label}. Pick a different one.",
-            translation_placeholders={"entity_kind": label},
-        ) from err
+        raise service_validation_error(invalid_key, invalid_message) from err

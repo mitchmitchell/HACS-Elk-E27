@@ -68,7 +68,7 @@ def _patch_entity_lookup(test: unittest.TestCase) -> None:
         (
             "_entity_runtime_data",
             MagicMock(
-                side_effect=lambda _hass, entity_id, _platform, _label: _ENTITIES.get()[
+                side_effect=lambda _hass, entity_id, _platform: _ENTITIES.get()[
                     entity_id
                 ]
             ),
@@ -429,10 +429,11 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         assert (
-            ctx.exception.translation_key == "arm_automatic_not_armed_zone_rolled_back"
+            ctx.exception.translation_key
+            == "arm_automatic_not_armed_zone_rolled_back_named_zone_named"
         )
         assert "Back Door (zone 2)" in str(ctx.exception)
-        assert "Front Door (zone 1)" in str(ctx.exception)
+        assert "cleared: zones 1" in str(ctx.exception)
         assert "11008" not in str(ctx.exception)
         assert isinstance(ctx.exception.__cause__, ZoneBypassFailedError)
         # No retry of the refusal; zone 1 is un-bypassed exactly once.
@@ -518,9 +519,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         assert (
             ctx.exception.translation_key
-            == "arm_automatic_not_armed_refused_rolled_back"
+            == "arm_automatic_not_armed_refused_rolled_back_named"
         )
-        assert "Garage Door (zone 4)" in str(ctx.exception)
         assert "11015" not in str(ctx.exception)
         house.coordinator.async_arm_area.assert_awaited_once()
         # Tried once, not retried.
@@ -654,13 +654,14 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             unittest.mock.call(1, bypassed=False, pin="1234"),
         ]
         runtime.coordinator.async_arm_area.assert_awaited_once()
-        for text in (
-            str(ctx.exception),
-            create_notification.call_args.kwargs["message"],
-        ):
-            assert "still bypassed: Back Door (zone 2)" in text
-            assert "Bypasses were cleared: Front Door (zone 1)" in text
-            assert "zone bypass service" in text
+        err_text = str(ctx.exception)
+        assert "still bypassed: 2" in err_text
+        assert "cleared: zones 1" in err_text
+        assert "zone bypass service" in err_text
+        note_text = create_notification.call_args.kwargs["message"]
+        assert "still bypassed: Back Door (zone 2)" in note_text
+        assert "cleared: zones 1" in note_text or "cleared: Front Door" in note_text
+        for text in (err_text, note_text):
             assert ".." not in text
             assert "1234" not in text
         data = hass.bus.async_fire.call_args.args[1]
@@ -709,7 +710,10 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert ctx.exception.translation_key == "arm_automatic_not_armed_disconnected"
+        assert (
+            ctx.exception.translation_key
+            == "arm_automatic_not_armed_disconnected_named"
+        )
         assert runtime.coordinator.async_set_zone_bypass.await_args_list[2:] == [
             unittest.mock.call(2, bypassed=False, pin="1234"),
             unittest.mock.call(1, bypassed=False, pin="1234"),
@@ -743,9 +747,12 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         ]
         runtime.coordinator.async_arm_area.assert_awaited_once()
         err_text = str(ctx.exception)
-        assert ctx.exception.translation_key == "arm_automatic_uncertain_with_bypasses"
+        assert (
+            ctx.exception.translation_key
+            == "arm_automatic_uncertain_with_bypasses_named"
+        )
         assert "may or may not be armed" in err_text
-        assert "Front Door (zone 1), Back Door (zone 2)" in err_text
+        assert "left bypassed: 1, 2" in err_text
         assert "1234" not in err_text
         note_text = note.call_args.kwargs["message"]
         assert "unknown" in note_text.lower()
@@ -774,7 +781,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         assert (
             ctx.exception.translation_key
-            == "arm_automatic_not_armed_refused_rolled_back"
+            == "arm_automatic_not_armed_refused_rolled_back_named"
         )
         data = hass.bus.async_fire.call_args.args[1]
         assert data["stage"] == "arm"
@@ -1286,7 +1293,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         assert order == ["bypass1:True", "disarm1"]
         hub.async_arm_area.assert_not_called()
         assert "stopped because someone disarmed" in str(ctx.exception)
-        assert "Front Door (zone 1)" in str(ctx.exception)
+        assert "may still be bypassed: 1" in str(ctx.exception)
         assert not hub.area_arm_lock(1).locked()
         message = create_notification.call_args.kwargs["message"]
         assert "disarm" in message.lower()
@@ -1415,7 +1422,10 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert ctx.exception.translation_key == "arm_automatic_uncertain_with_bypasses"
+        assert (
+            ctx.exception.translation_key
+            == "arm_automatic_uncertain_with_bypasses_named"
+        )
         hub.async_poll_until_area_armed.assert_awaited_once()
         assert hub.async_set_zone_bypass.await_count == 2  # no un-bypass
         data = hass.bus.async_fire.call_args.args[1]

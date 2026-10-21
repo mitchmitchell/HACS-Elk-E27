@@ -292,13 +292,31 @@ def zone_bypass_label(zone: ZoneState) -> str:
     return f"Zone {zone.zone_id}"
 
 
-def area_automatic_label(
+@dataclasses.dataclass(frozen=True)
+class AreaPhrase:
+    """Panel area identity for translated messages (no English assembled here)."""
+
+    named: bool
+    number: str
+    name: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ZonePhrase:
+    """Panel zone identity for translated messages (no English assembled here)."""
+
+    named: bool
+    number: str
+    name: str
+
+
+def area_automatic_phrase(
     area_id: int,
     snapshot: PanelSnapshot | None,
     *,
     entity_name: str | None = None,
-) -> str:
-    """Return a user-facing label for an area, such as 'House (area 1)'."""
+) -> AreaPhrase:
+    """Return area name/number parts for automatic arming translation keys."""
     name = ""
     if snapshot is not None:
         area = snapshot.areas.get(area_id)
@@ -306,9 +324,24 @@ def area_automatic_label(
             name = (area.name or "").strip()
     if not name and entity_name:
         name = entity_name.strip()
+    number = str(area_id)
     if name:
-        return f"{name} (area {area_id})"
-    return f"Area {area_id}"
+        return AreaPhrase(named=True, number=number, name=name)
+    return AreaPhrase(named=False, number=number, name="")
+
+
+def zone_automatic_phrase(zone: ZoneState) -> ZonePhrase:
+    """Return zone name/number parts for automatic arming translation keys."""
+    name = (zone.name or "").strip()
+    number = str(zone.zone_id)
+    if name:
+        return ZonePhrase(named=True, number=number, name=name)
+    return ZonePhrase(named=False, number=number, name="")
+
+
+def zone_number_list(zones: list[ZoneState] | tuple[ZoneState, ...]) -> str:
+    """Return comma-separated zone numbers for translated list placeholders."""
+    return ", ".join(str(zone.zone_id) for zone in zones)
 
 
 def _validated_pin(pin: str) -> str:
