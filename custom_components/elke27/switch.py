@@ -17,7 +17,7 @@ from .entity import (
     raise_if_not_sent,
     unique_base,
 )
-from .errors import pin_required_action_error
+from .errors import PinAction, pin_required_error
 
 if TYPE_CHECKING:
     from elke27_lib import OutputState, PanelSnapshot
@@ -111,7 +111,8 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
             sent = await self.coordinator.async_set_output(self._output_id, state=True)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "control"
+            raise pin_required_error(action) from err
 
     async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the output off if supported by the client."""
@@ -119,7 +120,8 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
             sent = await self.coordinator.async_set_output(self._output_id, state=False)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "control"
+            raise pin_required_error(action) from err
 
     def _log_missing(self) -> None:
         """Log when the output snapshot is missing."""

@@ -39,6 +39,7 @@ if _HAS_DEPS:
 
     from custom_components.elke27 import coordinator as hub_module
     from custom_components.elke27.coordinator import _connection_state
+    from custom_components.elke27.errors import PANEL_ERROR_MESSAGE
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
     from tests.conftest import make_coordinator
 
@@ -192,7 +193,7 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
             await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")
         assert ctx.exception.translation_domain == "elke27"
         assert ctx.exception.translation_key == "code_rejected"
-        assert "rejected the code" in str(ctx.exception)
+        assert "rejected your user code" in str(ctx.exception)
         assert "1234" not in str(ctx.exception)
         assert ctx.exception.__cause__ is err
         assert "11008" in logs.output[0]
@@ -233,7 +234,8 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HomeAssistantError) as ctx:
             await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")
         assert not isinstance(ctx.exception, ServiceValidationError)
-        assert str(ctx.exception) == message
+        assert ctx.exception.translation_key == "panel_error"
+        assert str(ctx.exception) == PANEL_ERROR_MESSAGE
 
     async def test_bypass_pin_required_error_propagates(self) -> None:
         """A PIN-required error from the library is re-raised unchanged."""

@@ -18,7 +18,7 @@ from .entity import (
     raise_if_not_sent,
     unique_base,
 )
-from .errors import pin_required_action_error
+from .errors import PinAction, pin_required_error
 
 if TYPE_CHECKING:
     from elke27_lib import LightState, PanelSnapshot
@@ -137,7 +137,8 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
                 )
                 raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "control"
+            raise pin_required_error(action) from err
 
     async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the light off if supported by the client."""
@@ -147,7 +148,8 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
             )
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "control"
+            raise pin_required_error(action) from err
 
     @property
     def available(self) -> bool:

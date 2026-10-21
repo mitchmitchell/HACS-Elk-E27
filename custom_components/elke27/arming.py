@@ -18,9 +18,9 @@ from elke27_lib.errors import (
 from homeassistant.exceptions import HomeAssistantError
 
 from .errors import (
+    arm_mode_not_supported_error,
     code_all_zero_error,
     code_not_numeric_error,
-    homeassistant_error,
     panel_error_code,
 )
 
@@ -311,5 +311,4 @@ def _library_arm_mode(mode: Any) -> ArmMode:
     # Custom bypass: the entity bypasses open zones first, then arms away.
     if isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS":
         return ArmMode.ARMED_AWAY
-    msg = "arm_mode_not_supported"
-    raise homeassistant_error(msg, "Arm mode is not supported.")
+    raise arm_mode_not_supported_error()

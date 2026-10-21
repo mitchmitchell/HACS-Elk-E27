@@ -22,10 +22,11 @@ from .arming import ZoneBypassFailedError, area_faulted_zones, is_definitive_ref
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import area_device_info, build_unique_id, raise_if_not_sent, unique_base
 from .errors import (
+    PinAction,
     code_all_zero_error,
     code_not_numeric_error,
     code_rejected_error,
-    pin_required_action_error,
+    pin_required_error,
 )
 
 if TYPE_CHECKING:
@@ -169,7 +170,8 @@ class Elke27AreaAlarmControlPanel(
             except ZoneBypassFailedError as err:
                 if not err.pin_required:
                     raise
-                raise pin_required_action_error() from err
+                action: PinAction = "arm"
+                raise pin_required_error(action) from err
             try:
                 await self._async_arm(ArmMode.ARMED_AWAY, code)
             except HomeAssistantError as err:
@@ -187,7 +189,8 @@ class Elke27AreaAlarmControlPanel(
         # and never touches automatic arming.
         code = _normalize_code(code)
         if code is None:
-            raise pin_required_action_error()
+            action: PinAction = "disarm"
+            raise pin_required_error(action)
         # Disarm wins without waiting on the area lock. While the disarm is
         # pending, automatic arming of this area pauses before its next
         # command, so it cannot send an arm (or bypass) that lands after the
@@ -202,7 +205,8 @@ class Elke27AreaAlarmControlPanel(
             try:
                 accepted = await coordinator.async_disarm_area(self._area_id, code)
             except Elke27PinRequiredError as err:
-                raise pin_required_action_error() from err
+                pin_action: PinAction = "disarm"
+                raise pin_required_error(pin_action) from err
             except asyncio.CancelledError:
                 coordinator.cancel_arm_automatic(self._area_id)
                 raise
@@ -223,7 +227,8 @@ class Elke27AreaAlarmControlPanel(
             sent = await self.coordinator.async_arm_area(self._area_id, mode, code)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "arm"
+            raise pin_required_error(action) from err
 
     def _log_missing(self) -> None:
         """Log when the area snapshot is missing."""

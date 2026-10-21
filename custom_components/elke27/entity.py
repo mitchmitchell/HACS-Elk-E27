@@ -14,7 +14,7 @@ from homeassistant.helpers.device_registry import (
 )
 
 from .const import CONF_PANEL_MAC, CONF_PANEL_MAC_FILLED, DOMAIN
-from .errors import NOT_ACCEPTED_MESSAGE, homeassistant_error
+from .errors import NOT_ACCEPTED_MESSAGE, NOT_CONNECTED_MESSAGE, homeassistant_error
 from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
@@ -258,8 +258,6 @@ def panel_display_name(
     """Return the panel name from the coordinator, snapshot, or entry title."""
     return get_panel_field(snapshot, coordinator.panel_name, "name") or entry.title
 
-
-NOT_CONNECTED_MESSAGE = "The panel is not connected; the command was not sent."
 
 NOT_CONNECTED_TRANSLATION_KEY = "not_connected"
 NOT_ACCEPTED_TRANSLATION_KEY = "not_accepted"

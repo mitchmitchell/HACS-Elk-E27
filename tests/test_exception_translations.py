@@ -19,7 +19,7 @@ HELPER_KEY_PATTERN = re.compile(
     r"(?:homeassistant_error|service_validation_error)\(\s*[\"']([a-z_0-9]+)[\"']"
 )
 SETUP_EXCEPTION_PATTERN = re.compile(
-    r"raise\s+(?:ConfigEntryNotReady|ConfigEntryAuthFailed|UpdateFailed|HomeAssistantError)\("
+    r"raise\s+(?:ConfigEntryNotReady|ConfigEntryAuthFailed|UpdateFailed|HomeAssistantError|ConfigEntryError)\("
     r"[^)]*?translation_key\s*=\s*[\"']([a-z_0-9]+)[\"']",
     re.DOTALL,
 )
@@ -36,7 +36,9 @@ def _keys_referenced_in_code() -> set[str]:
         text = path.read_text(encoding="utf-8")
         keys.update(HELPER_KEY_PATTERN.findall(text))
         keys.update(SETUP_EXCEPTION_PATTERN.findall(text))
-    # Fixed keys from entity helpers and error factories not matched above.
+    arm_path = COMPONENT / "arm_automatic_errors.py"
+    if arm_path.exists():
+        keys.update(re.findall(r'key = "([a-z_0-9]+)"', arm_path.read_text()))
     keys.update({"not_connected", "not_accepted"})
     keys.update(
         {
@@ -47,6 +49,8 @@ def _keys_referenced_in_code() -> set[str]:
             "command_connection_lost",
             "panel_error",
             "pin_required",
+            "pin_required_fallback",
+            "arm_mode_not_supported",
         }
     )
     return keys
@@ -96,14 +100,18 @@ def test_no_untranslated_ha_raises_in_custom_components() -> None:
         (
             "homeassistant_error",
             "not_connected",
-            "The panel is not connected; the command was not sent.",
+            "The panel isn't connected. The command wasn't sent.",
         ),
         (
             "homeassistant_error",
             "not_accepted",
-            "The panel did not accept the command.",
+            "The panel didn't accept the command.",
         ),
-        ("service_validation_error", "code_rejected", "The panel rejected the code."),
+        (
+            "service_validation_error",
+            "code_rejected",
+            "The panel rejected your user code.",
+        ),
     ],
 )
 def test_error_helpers_set_translation_metadata(

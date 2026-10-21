@@ -27,7 +27,7 @@ from .entity import (
     raise_if_not_sent,
     unique_base,
 )
-from .errors import homeassistant_error, pin_required_action_error
+from .errors import PinAction, homeassistant_error, pin_required_error
 from .temperature import normalize_temperature
 
 if TYPE_CHECKING:
@@ -219,28 +219,34 @@ class Elke27Thermostat(
         mode = _HVAC_TO_TSTAT_MODE.get(hvac_mode)
         if mode is None:
             msg = "hvac_mode_not_supported"
-            raise homeassistant_error(msg, "HVAC mode is not supported.")
+            raise homeassistant_error(
+                msg, "This thermostat doesn't support that HVAC mode."
+            )
         try:
             sent = await self.coordinator.async_set_tstat_status(
                 self._tstat_id, mode=mode
             )
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "control"
+            raise pin_required_error(action) from err
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set a new fan mode."""
         value = _FAN_TO_TSTAT_MODE.get(fan_mode)
         if value is None:
             msg = "fan_mode_not_supported"
-            raise homeassistant_error(msg, "Fan mode is not supported.")
+            raise homeassistant_error(
+                msg, "This thermostat doesn't support that fan mode."
+            )
         try:
             sent = await self.coordinator.async_set_tstat_status(
                 self._tstat_id, fan_mode=value
             )
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "control"
+            raise pin_required_error(action) from err
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set target temperatures."""
@@ -259,10 +265,7 @@ class Elke27Thermostat(
 
         if heat_setpoint is None and cool_setpoint is None:
             msg = "temperature_required"
-            raise homeassistant_error(
-                msg,
-                "At least one target temperature is required.",
-            )
+            raise homeassistant_error(msg, "Set a target temperature.")
 
         try:
             sent = await self.coordinator.async_set_tstat_status(
@@ -272,7 +275,8 @@ class Elke27Thermostat(
             )
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "control"
+            raise pin_required_error(action) from err
 
     def _log_missing(self) -> None:
         """Log when the thermostat snapshot is missing."""

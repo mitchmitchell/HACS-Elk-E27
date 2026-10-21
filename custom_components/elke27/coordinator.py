@@ -66,9 +66,9 @@ from .const import (
 )
 from .errors import (
     AUTH_ERRORS,
-    CLIENT_NOT_CONNECTED_MESSAGE,
     COMMAND_ERRORS,
     NOT_ACCEPTED_MESSAGE,
+    NOT_CONNECTED_MESSAGE,
     code_rejected_error,
     command_error,
     command_homeassistant_error,
@@ -802,7 +802,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 message=(
                     "The code was rejected and these zones could not be"
                     f" un-bypassed, so they are still bypassed: zones {zone_ids}."
-                    " Clear them with elke27.zone_bypass and bypass: false."
+                    " Clear them with the zone bypass service."
                 ),
                 notification_id=(
                     f"elke27_code_rejected_bypass_{self.config_entry.entry_id}"
@@ -934,8 +934,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Return the connected client or raise."""
         client = self._client
         if client is None:
-            msg = "client_not_connected"
-            raise homeassistant_error(msg, CLIENT_NOT_CONNECTED_MESSAGE)
+            msg = "not_connected"
+            raise homeassistant_error(msg, NOT_CONNECTED_MESSAGE)
         return client
 
     async def async_arm_area(

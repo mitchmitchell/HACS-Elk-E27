@@ -17,7 +17,7 @@ from .entity import (
     raise_if_not_sent,
     unique_base,
 )
-from .errors import pin_required_action_error
+from .errors import PinAction, pin_required_error
 
 if TYPE_CHECKING:
     from elke27_lib import LockState, PanelSnapshot
@@ -118,7 +118,8 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
             sent = await self.coordinator.async_set_lock(self._lock_id, locked=True)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "lock"
+            raise pin_required_error(action) from err
 
     async def async_unlock(self, **_kwargs: Any) -> None:
         """Unlock if supported by the client."""
@@ -126,7 +127,8 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
             sent = await self.coordinator.async_set_lock(self._lock_id, locked=False)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            raise pin_required_action_error() from err
+            action: PinAction = "unlock"
+            raise pin_required_error(action) from err
 
     def _log_missing(self) -> None:
         """Log when the lock snapshot is missing."""
