@@ -33,15 +33,59 @@ NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
 PANEL_ERROR_CODES_REJECTED: frozenset[int] = frozenset({11004, 11008, 11037})
 
 
+# Panel error codes that mean the panel refused the action because of the
+# current condition of the area or zone, mapped to their translation key. Each
+# is a user error, raised like a rejected code.
+PANEL_ERROR_CODES_USER_CONDITION: dict[int, str] = {
+    11015: "not_ready",  # area not ready to arm (a zone is open)
+    11023: "not_bypassable",  # zone can not be bypassed
+    11027: "in_alarm",  # area is in alarm
+    11028: "not_allowed_armed",  # not allowed while the area is armed
+    11038: "code_rejected",  # code is a duress code, not allowed for this action
+}
+
+# Translation keys of the panel refusals that get the same rollback, event and
+# notification handling as a rejected code. not_allowed_armed is left out on
+# purpose: "already armed" means the area may rely on its bypasses, so the
+# arming code keeps them (see arming.is_already_armed_refusal).
+USER_REFUSAL_KEYS: frozenset[str] = frozenset(
+    {"code_rejected", "not_ready", "not_bypassable", "in_alarm"}
+)
+
+
 def is_code_rejected_panel_error(err: BaseException | None) -> bool:
     """Return True when the panel error code means the code was rejected."""
     return panel_error_code(err) in PANEL_ERROR_CODES_REJECTED
+
+
+def user_refusal_key(err: BaseException | None) -> str | None:
+    """Return the translation key when the panel refused as a user error."""
+    code = panel_error_code(err)
+    if code is None:
+        return None
+    if code in PANEL_ERROR_CODES_REJECTED:
+        return "code_rejected"
+    return PANEL_ERROR_CODES_USER_CONDITION.get(code)
 
 
 CODE_REJECTED_MESSAGE = (
     "The panel rejected the code. Check the user code and that it is allowed"
     " for this area."
 )
+
+# Untranslated fallback messages; translations/en.json has the same text.
+USER_REFUSAL_MESSAGES: dict[str, str] = {
+    "code_rejected": CODE_REJECTED_MESSAGE,
+    "not_ready": (
+        "The area is not ready to arm. Close the open zones or bypass them,"
+        " then try again."
+    ),
+    "not_bypassable": "This zone can not be bypassed.",
+    "in_alarm": ("The area is in alarm. Disarm it to clear the alarm, then try again."),
+    "not_allowed_armed": (
+        "This is not allowed while the area is armed. Disarm it, then try again."
+    ),
+}
 
 
 TIMEOUT_MESSAGE = (
@@ -123,35 +167,39 @@ def command_error(err: BaseException) -> HomeAssistantError:
     """
     Return the Home Assistant error to raise for a failed code command.
 
-    A code the panel refused is a user error, so it becomes a translated
-    ServiceValidationError; anything else stays a HomeAssistantError. The
-    message never includes the code.
+    A code the panel refused, or an action refused because of the area or
+    zone condition (not ready, in alarm, ...), is a user error, so it becomes a
+    translated ServiceValidationError; anything else stays a
+    HomeAssistantError. The message never includes the code.
     """
-    if is_code_rejected_panel_error(err):
+    key = user_refusal_key(err)
+    if key is not None:
         return ServiceValidationError(
-            CODE_REJECTED_MESSAGE,
+            USER_REFUSAL_MESSAGES[key],
             translation_domain=DOMAIN,
-            translation_key="code_rejected",
+            translation_key=key,
         )
     return HomeAssistantError(_error_message(err))
 
 
 def code_rejected_error(err: BaseException) -> ServiceValidationError | None:
     """
-    Return the code_rejected error to re-raise unchanged, or None.
+    Return the user-refusal error to re-raise unchanged, or None.
 
-    Walks the cause chain: an existing code_rejected ServiceValidationError is
-    returned as is; a bare panel code rejection gets one built by command_error.
+    A user refusal is a rejected code or a user-condition refusal (not ready,
+    in alarm, ...). Walks the cause chain: an existing user-refusal
+    ServiceValidationError is returned as is; a bare panel refusal gets one
+    built by command_error.
     """
     seen: BaseException | None = err
     while seen is not None:
         if (
             isinstance(seen, ServiceValidationError)
-            and seen.translation_key == "code_rejected"
+            and seen.translation_key in USER_REFUSAL_KEYS
         ):
             return seen
         seen = seen.__cause__
-    if is_code_rejected_panel_error(err):
+    if user_refusal_key(err) in USER_REFUSAL_KEYS:
         rejected = command_error(err)
         rejected.__cause__ = err
         if isinstance(rejected, ServiceValidationError):

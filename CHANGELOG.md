@@ -11,6 +11,13 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
    bypass in a way 0.2.0 did not recognize, Home Assistant returned a server error and
    logged an ERROR. It now shows the same "The panel rejected the code" message, event and
    notification as every other rejected code, and logs nothing at ERROR level.
+2. **Arming an area that is not ready now shows a clear message.** When the panel refused
+   an arm or bypass because the area was not ready (a zone open), was in alarm, was
+   already armed, or the zone can not be bypassed, Home Assistant returned a server error
+   and logged an ERROR. It now shows a plain message saying why and logs nothing at ERROR
+   level. Bypasses made by the same call are undone, except when the area turned out to be
+   armed already, where they are kept as before. A duress code is treated as a rejected
+   code.
 
 ## [Unreleased] - 0.2.0 (draft)
 

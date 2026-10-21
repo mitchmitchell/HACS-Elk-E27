@@ -138,6 +138,18 @@
     "cannot_connect": {
       "message": "Unable to connect to the panel at {host}:{port}."
     },
+    "not_ready": {
+      "message": "The area is not ready to arm. Close the open zones or bypass them, then try again."
+    },
+    "not_bypassable": {
+      "message": "This zone can not be bypassed."
+    },
+    "in_alarm": {
+      "message": "The area is in alarm. Disarm it to clear the alarm, then try again."
+    },
+    "not_allowed_armed": {
+      "message": "This is not allowed while the area is armed. Disarm it, then try again."
+    },
     "code_rejected": {
       "message": "The panel rejected the code. Check the user code and that it is allowed for this area."
     },

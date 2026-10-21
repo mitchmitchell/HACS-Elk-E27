@@ -772,7 +772,9 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert str(ctx.exception).startswith("Area 1 was not armed:")
+        # A not-ready refusal is a user error, raised as is after the rollback.
+        assert isinstance(ctx.exception, ServiceValidationError)
+        assert ctx.exception.translation_key == "not_ready"
         data = hass.bus.async_fire.call_args.args[1]
         assert data["stage"] == "arm"
         assert data["outcome"] == "not_armed"
