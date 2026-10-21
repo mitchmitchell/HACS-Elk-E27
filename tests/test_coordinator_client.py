@@ -358,8 +358,9 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
         client = _client()
         client.async_execute = AsyncMock(return_value=Result.failure(None))
         hub = _hub(client)
-        with self.assertRaisesRegex(HomeAssistantError, "did not accept"):
+        with self.assertRaises(HomeAssistantError) as err:
             await hub.async_set_light(3, state=True)
+        assert err.exception.translation_key == "not_accepted"
         client.async_execute.assert_awaited_once()
         assert hub.background_tasks == []
 

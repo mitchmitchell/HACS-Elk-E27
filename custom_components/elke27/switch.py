@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from elke27_lib.errors import Elke27PinRequiredError
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
@@ -18,6 +17,7 @@ from .entity import (
     raise_if_not_sent,
     unique_base,
 )
+from .errors import pin_required_action_error
 
 if TYPE_CHECKING:
     from elke27_lib import OutputState, PanelSnapshot
@@ -111,8 +111,7 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
             sent = await self.coordinator.async_set_output(self._output_id, state=True)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+            raise pin_required_action_error() from err
 
     async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the output off if supported by the client."""
@@ -120,8 +119,7 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
             sent = await self.coordinator.async_set_output(self._output_id, state=False)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+            raise pin_required_action_error() from err
 
     def _log_missing(self) -> None:
         """Log when the output snapshot is missing."""

@@ -15,10 +15,14 @@ from elke27_lib.errors import (
     Elke27PinRequiredError,
 )
 
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError
 
-from .const import DOMAIN
-from .errors import panel_error_code
+from .errors import (
+    code_all_zero_error,
+    code_not_numeric_error,
+    homeassistant_error,
+    panel_error_code,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -293,13 +297,9 @@ def _validated_pin(pin: str) -> str:
     value = str(pin).strip()
     # ASCII digits only; all-zero detected without int() (no huge-int conversion).
     if not (value.isascii() and value.isdigit()):
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="code_not_numeric"
-        )
+        raise code_not_numeric_error()
     if not value.strip("0"):
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="code_all_zero"
-        )
+        raise code_all_zero_error()
     return value
 
 
@@ -311,5 +311,5 @@ def _library_arm_mode(mode: Any) -> ArmMode:
     # Custom bypass: the entity bypasses open zones first, then arms away.
     if isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS":
         return ArmMode.ARMED_AWAY
-    msg = "Arm mode is not supported."
-    raise HomeAssistantError(msg)
+    msg = "arm_mode_not_supported"
+    raise homeassistant_error(msg, "Arm mode is not supported.")

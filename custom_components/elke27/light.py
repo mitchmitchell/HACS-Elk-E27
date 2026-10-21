@@ -9,7 +9,6 @@ from elke27_lib.errors import Elke27PinRequiredError
 
 from homeassistant.components.light import ATTR_BRIGHTNESS, LightEntity
 from homeassistant.components.light.const import ColorMode
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
@@ -19,6 +18,7 @@ from .entity import (
     raise_if_not_sent,
     unique_base,
 )
+from .errors import pin_required_action_error
 
 if TYPE_CHECKING:
     from elke27_lib import LightState, PanelSnapshot
@@ -137,8 +137,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
                 )
                 raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+            raise pin_required_action_error() from err
 
     async def async_turn_off(self, **_kwargs: Any) -> None:
         """Turn the light off if supported by the client."""
@@ -148,8 +147,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
             )
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+            raise pin_required_action_error() from err
 
     @property
     def available(self) -> bool:

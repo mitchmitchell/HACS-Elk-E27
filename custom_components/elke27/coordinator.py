@@ -66,11 +66,13 @@ from .const import (
 )
 from .errors import (
     AUTH_ERRORS,
+    CLIENT_NOT_CONNECTED_MESSAGE,
     COMMAND_ERRORS,
     NOT_ACCEPTED_MESSAGE,
-    _error_message,
     code_rejected_error,
     command_error,
+    command_homeassistant_error,
+    homeassistant_error,
     is_connection_error,
     is_timeout_error,
     panel_error_code,
@@ -570,7 +572,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Output", output_id, "set", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         return True
 
     async def async_set_light(
@@ -868,7 +870,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except AUTH_ERRORS as err:
             self.start_reauth_once()
             _log_command_failure("Zone", zone_id, "bypass", err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
@@ -890,11 +892,11 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except AUTH_ERRORS as err:
             self.start_reauth_once()
             _LOGGER.warning("Command %s failed: %s", command_key, err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         except COMMAND_ERRORS as err:
             _LOGGER.warning("Command %s failed: %s", command_key, err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         if not result.ok:
             if isinstance(result.error, Elke27PinRequiredError):
                 raise result.error
@@ -904,11 +906,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 else:
                     self._note_command_error(result.error)
                 _LOGGER.warning("Command %s failed: %s", command_key, result.error)
-                raise HomeAssistantError(_error_message(result.error)) from (
-                    result.error
-                )
+                raise command_homeassistant_error(result.error) from result.error
             _LOGGER.warning("Command %s was not accepted by the panel", command_key)
-            raise HomeAssistantError(NOT_ACCEPTED_MESSAGE)
+            msg = "not_accepted"
+            raise homeassistant_error(msg, NOT_ACCEPTED_MESSAGE)
         return True
 
     def _note_command_error(self, err: BaseException) -> None:
@@ -933,8 +934,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Return the connected client or raise."""
         client = self._client
         if client is None:
-            msg = "Client is not connected."
-            raise HomeAssistantError(msg)
+            msg = "client_not_connected"
+            raise homeassistant_error(msg, CLIENT_NOT_CONNECTED_MESSAGE)
         return client
 
     async def async_arm_area(
@@ -970,7 +971,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except AUTH_ERRORS as err:
             self.start_reauth_once()
             _log_command_failure("Area", area_id, "arming", err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
@@ -1028,7 +1029,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except AUTH_ERRORS as err:
             self.start_reauth_once()
             _log_command_failure("Area", area_id, "disarm", err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)

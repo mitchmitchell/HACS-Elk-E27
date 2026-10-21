@@ -15,14 +15,18 @@ from homeassistant.components.alarm_control_panel.const import (
     AlarmControlPanelState,
     CodeFormat,
 )
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .arming import ZoneBypassFailedError, area_faulted_zones, is_definitive_refusal
-from .const import DOMAIN
 from .coordinator import Elke27DataUpdateCoordinator
 from .entity import area_device_info, build_unique_id, raise_if_not_sent, unique_base
-from .errors import code_rejected_error
+from .errors import (
+    code_all_zero_error,
+    code_not_numeric_error,
+    code_rejected_error,
+    pin_required_action_error,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -165,8 +169,7 @@ class Elke27AreaAlarmControlPanel(
             except ZoneBypassFailedError as err:
                 if not err.pin_required:
                     raise
-                msg = "PIN required to perform this action."
-                raise HomeAssistantError(msg) from err
+                raise pin_required_action_error() from err
             try:
                 await self._async_arm(ArmMode.ARMED_AWAY, code)
             except HomeAssistantError as err:
@@ -184,8 +187,7 @@ class Elke27AreaAlarmControlPanel(
         # and never touches automatic arming.
         code = _normalize_code(code)
         if code is None:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg)
+            raise pin_required_action_error()
         # Disarm wins without waiting on the area lock. While the disarm is
         # pending, automatic arming of this area pauses before its next
         # command, so it cannot send an arm (or bypass) that lands after the
@@ -200,8 +202,7 @@ class Elke27AreaAlarmControlPanel(
             try:
                 accepted = await coordinator.async_disarm_area(self._area_id, code)
             except Elke27PinRequiredError as err:
-                msg = "PIN required to perform this action."
-                raise HomeAssistantError(msg) from err
+                raise pin_required_action_error() from err
             except asyncio.CancelledError:
                 coordinator.cancel_arm_automatic(self._area_id)
                 raise
@@ -222,8 +223,7 @@ class Elke27AreaAlarmControlPanel(
             sent = await self.coordinator.async_arm_area(self._area_id, mode, code)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+            raise pin_required_action_error() from err
 
     def _log_missing(self) -> None:
         """Log when the area snapshot is missing."""
@@ -266,13 +266,9 @@ def _normalize_code(code: str | None) -> str | None:
     normalized = code.strip()
     # ASCII digits only: str.isdigit() also accepts e.g. "²" or full-width digits.
     if not (normalized.isascii() and normalized.isdigit()):
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="code_not_numeric"
-        )
+        raise code_not_numeric_error()
     if not normalized.strip("0"):
         # The panel never accepts an all-zero code; elke27 refuses it before
         # sending. Report it as input error (HTTP 400), not a server error (#90).
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="code_all_zero"
-        )
+        raise code_all_zero_error()
     return normalized

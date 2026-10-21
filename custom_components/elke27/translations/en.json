@@ -132,26 +132,101 @@
     }
   },
   "exceptions": {
+    "arm_automatic_cancelled": {
+      "message": "Area {area} automatic arming was cancelled by a disarm. {advice}"
+    },
+    "arm_automatic_multi_failed": {
+      "message": "Automatic arming failed for {failed_count} of {total_count} areas: {details}"
+    },
+    "arm_automatic_not_armed": {
+      "message": "Area {area} was not armed: {detail} {summary}"
+    },
+    "arm_automatic_uncertain": {
+      "message": "Area {area} arm result is unknown: {reason} {advice}"
+    },
+    "arm_mode_not_supported": {
+      "message": "Arm mode is not supported."
+    },
     "auth_failed": {
       "message": "The panel no longer accepts the stored link. Relink the panel."
     },
     "cannot_connect": {
       "message": "Unable to connect to the panel at {host}:{port}."
     },
-    "code_rejected": {
-      "message": "The panel rejected the code. Check the user code and that it is allowed for this area."
-    },
-    "code_not_numeric": {
-      "message": "The code must be numeric."
+    "client_not_connected": {
+      "message": "The panel is not connected."
     },
     "code_all_zero": {
       "message": "The code can't be all zeros."
     },
+    "code_not_numeric": {
+      "message": "The code must be numeric."
+    },
+    "code_rejected": {
+      "message": "The panel rejected the code. Check the user code and that it is allowed for this area."
+    },
+    "command_connection_lost": {
+      "message": "Lost connection to the panel; the command may not have been applied."
+    },
+    "command_timeout": {
+      "message": "The panel did not respond in time; the command may not have been applied."
+    },
+    "config_entry_not_found": {
+      "message": "The panel integration for this entity was not found."
+    },
+    "config_entry_not_loaded": {
+      "message": "The panel integration is not ready yet. Try again in a moment."
+    },
+    "entity_not_configured": {
+      "message": "This entity is not linked to a panel integration entry."
+    },
+    "entity_wrong_type": {
+      "message": "The selected entity is not an Elk E27 {entity_kind}."
+    },
+    "fan_mode_not_supported": {
+      "message": "Fan mode is not supported."
+    },
+    "hvac_mode_not_supported": {
+      "message": "HVAC mode is not supported."
+    },
     "integration_id_invalid": {
       "message": "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
     },
+    "invalid_unique_id_format": {
+      "message": "This entity does not look like an Elk E27 {entity_kind}."
+    },
+    "invalid_unique_id_value": {
+      "message": "This entity has an invalid Elk E27 {entity_kind} identifier."
+    },
+    "no_alarm_panel_target": {
+      "message": "No Elk E27 alarm panel was selected for this action."
+    },
+    "no_zone_target": {
+      "message": "No Elk E27 zone was selected for this action."
+    },
+    "not_accepted": {
+      "message": "The panel did not accept the command."
+    },
+    "not_connected": {
+      "message": "The panel is not connected; the command was not sent."
+    },
+    "panel_error": {
+      "message": "{message}"
+    },
     "panel_not_ready": {
-      "message": "The client did not become ready before timeout."
+      "message": "The panel did not finish starting up in time. Try again in a moment."
+    },
+    "pin_required": {
+      "message": "A user code is required to perform this action."
+    },
+    "temperature_required": {
+      "message": "At least one target temperature is required."
+    },
+    "unsupported_arm_mode": {
+      "message": "That arming mode is not supported."
+    },
+    "zone_bypass_not_acknowledged": {
+      "message": "The bypass was not acknowledged. Check that the panel is connected."
     }
   },
   "selector": {

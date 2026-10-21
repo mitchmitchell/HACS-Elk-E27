@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from elke27_lib.errors import (
     E27Error,
     E27NotReady,
@@ -49,6 +51,12 @@ CONNECTION_MESSAGE = (
 )
 
 
+PIN_REQUIRED_ACTION_MESSAGE = "A user code is required to perform this action."
+
+
+CLIENT_NOT_CONNECTED_MESSAGE = "The panel is not connected."
+
+
 # Every library failure a command can surface: elke27's public errors, its
 # lower-level E27 errors (async_execute returns these), and raw timeouts/OS errors.
 COMMAND_ERRORS: tuple[type[Exception], ...] = (
@@ -65,6 +73,55 @@ AUTH_ERRORS: tuple[type[Exception], ...] = (
     Elke27AuthError,
     Elke27CryptoError,
 )
+
+
+def homeassistant_error(
+    translation_key: str,
+    message: str,
+    /,
+    *,
+    translation_placeholders: dict[str, str] | None = None,
+) -> HomeAssistantError:
+    """Build a translated HomeAssistantError for this integration."""
+    kwargs: dict[str, Any] = {
+        "translation_domain": DOMAIN,
+        "translation_key": translation_key,
+    }
+    if translation_placeholders is not None:
+        kwargs["translation_placeholders"] = translation_placeholders
+    return HomeAssistantError(message, **kwargs)
+
+
+def service_validation_error(
+    translation_key: str,
+    message: str,
+    /,
+    *,
+    translation_placeholders: dict[str, str] | None = None,
+) -> ServiceValidationError:
+    """Build a translated ServiceValidationError for this integration."""
+    kwargs: dict[str, Any] = {
+        "translation_domain": DOMAIN,
+        "translation_key": translation_key,
+    }
+    if translation_placeholders is not None:
+        kwargs["translation_placeholders"] = translation_placeholders
+    return ServiceValidationError(message, **kwargs)
+
+
+def pin_required_action_error() -> HomeAssistantError:
+    """Return the error raised when the panel requires a user code for an action."""
+    return homeassistant_error("pin_required", PIN_REQUIRED_ACTION_MESSAGE)
+
+
+def code_not_numeric_error() -> ServiceValidationError:
+    """Return the error for a non-numeric user code."""
+    return service_validation_error("code_not_numeric", "The code must be numeric.")
+
+
+def code_all_zero_error() -> ServiceValidationError:
+    """Return the error for an all-zero user code."""
+    return service_validation_error("code_all_zero", "The code can't be all zeros.")
 
 
 def panel_error_code(err: BaseException | None) -> int | None:
@@ -114,7 +171,21 @@ def _error_message(err: BaseException) -> str:
     return str(err) or type(err).__name__
 
 
-def command_error(err: BaseException) -> HomeAssistantError:
+def command_homeassistant_error(err: BaseException) -> HomeAssistantError:
+    """Return a translated HomeAssistantError for a failed panel command."""
+    if is_timeout_error(err):
+        return homeassistant_error("command_timeout", TIMEOUT_MESSAGE)
+    if is_connection_error(err):
+        return homeassistant_error("command_connection_lost", CONNECTION_MESSAGE)
+    detail = _error_message(err)
+    return homeassistant_error(
+        "panel_error",
+        detail,
+        translation_placeholders={"message": detail},
+    )
+
+
+def command_error(err: BaseException) -> HomeAssistantError | ServiceValidationError:
     """
     Return the Home Assistant error to raise for a failed code command.
 
@@ -123,12 +194,8 @@ def command_error(err: BaseException) -> HomeAssistantError:
     message never includes the code.
     """
     if panel_error_code(err) == PANEL_ERROR_CODE_REJECTED:
-        return ServiceValidationError(
-            CODE_REJECTED_MESSAGE,
-            translation_domain=DOMAIN,
-            translation_key="code_rejected",
-        )
-    return HomeAssistantError(_error_message(err))
+        return service_validation_error("code_rejected", CODE_REJECTED_MESSAGE)
+    return command_homeassistant_error(err)
 
 
 def code_rejected_error(err: BaseException) -> ServiceValidationError | None:

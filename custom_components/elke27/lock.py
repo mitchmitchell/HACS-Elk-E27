@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from elke27_lib.errors import Elke27PinRequiredError
 
 from homeassistant.components.lock import LockEntity
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
@@ -18,6 +17,7 @@ from .entity import (
     raise_if_not_sent,
     unique_base,
 )
+from .errors import pin_required_action_error
 
 if TYPE_CHECKING:
     from elke27_lib import LockState, PanelSnapshot
@@ -118,8 +118,7 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
             sent = await self.coordinator.async_set_lock(self._lock_id, locked=True)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+            raise pin_required_action_error() from err
 
     async def async_unlock(self, **_kwargs: Any) -> None:
         """Unlock if supported by the client."""
@@ -127,8 +126,7 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
             sent = await self.coordinator.async_set_lock(self._lock_id, locked=False)
             raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
-            msg = "PIN required to perform this action."
-            raise HomeAssistantError(msg) from err
+            raise pin_required_action_error() from err
 
     def _log_missing(self) -> None:
         """Log when the lock snapshot is missing."""

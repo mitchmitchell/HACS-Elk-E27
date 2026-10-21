@@ -15,7 +15,7 @@ from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import callback
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.target import (
     TargetSelection,
@@ -30,7 +30,7 @@ from .arming import (
     zone_bypass_label,
 )
 from .const import DOMAIN
-from .errors import code_rejected_error
+from .errors import code_rejected_error, homeassistant_error, service_validation_error
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -135,8 +135,11 @@ async def _async_handle_alarm_arm_automatic(
 
     entity_ids = _entity_ids_from_service_call(hass, call, Platform.ALARM_CONTROL_PANEL)
     if not entity_ids:
-        msg = "No Elke27 alarm control panel target was provided"
-        raise ServiceValidationError(msg)
+        msg = "no_alarm_panel_target"
+        raise service_validation_error(
+            msg,
+            "No Elk E27 alarm panel was selected for this action.",
+        )
 
     # Each area is handled on its own: a failure in one area is reported and
     # does not stop the others, and areas armed earlier stay armed. Refusals
@@ -162,15 +165,27 @@ async def _async_handle_alarm_arm_automatic(
             f"Automatic arming failed for {len(failures)} of {len(entity_ids)} "
             f"areas: {details}"
         )
-        raise HomeAssistantError(msg) from failures[0]
+        msg_0 = "arm_automatic_multi_failed"
+        raise homeassistant_error(
+            msg_0,
+            msg,
+            translation_placeholders={
+                "failed_count": str(len(failures)),
+                "total_count": str(len(entity_ids)),
+                "details": details,
+            },
+        ) from failures[0]
 
 
 def _config_entry_id(entity_entry: er.RegistryEntry) -> str:
     """Return the config entry id for an entity registry entry."""
     config_entry_id = entity_entry.config_entry_id
     if config_entry_id is None:
-        msg = "Entity is not tied to a config entry"
-        raise ServiceValidationError(msg)
+        msg = "entity_not_configured"
+        raise service_validation_error(
+            msg,
+            "This entity is not linked to a panel integration entry.",
+        )
     return config_entry_id
 
 
@@ -254,11 +269,17 @@ async def _async_arm_automatic_entity(
             config_entry_id=_config_entry_id(entity_entry),
             arm_sent=bool(arm_sent),
         )
-        msg = (
-            f"Area {area_id} automatic arming was cancelled by a disarm."
-            f" {_cancelled_advice(attempted, arm_sent=bool(arm_sent))}"
-        )
-        raise HomeAssistantError(msg) from None
+        advice = _cancelled_advice(attempted, arm_sent=bool(arm_sent))
+        msg = f"Area {area_id} automatic arming was cancelled by a disarm. {advice}"
+        msg_0 = "arm_automatic_cancelled"
+        raise homeassistant_error(
+            msg_0,
+            msg,
+            translation_placeholders={
+                "area": str(area_id),
+                "advice": advice,
+            },
+        ) from None
     finally:
         coordinator.unregister_arm_automatic(area_id, task)
 
@@ -319,10 +340,20 @@ async def _async_arm_automatic_locked(
                 )
             raise rejected
         detail = f"{zone_bypass_label(zone)}: {reason}" if zone is not None else reason
-        msg = f"Area {area_id} was not armed: {_sentence(detail)}"
+        detail_sentence = _sentence(detail)
+        msg = f"Area {area_id} was not armed: {detail_sentence}"
         if summary:
             msg = f"{msg} {summary}"
-        raise HomeAssistantError(msg) from cause
+        msg_0 = "arm_automatic_not_armed"
+        raise homeassistant_error(
+            msg_0,
+            msg,
+            translation_placeholders={
+                "area": str(area_id),
+                "detail": detail_sentence,
+                "summary": summary,
+            },
+        ) from cause
 
     def _uncertain(
         reason: str, bypassed: Sequence[ZoneState], cause: Exception
@@ -339,11 +370,19 @@ async def _async_arm_automatic_locked(
             still_bypassed_zones=bypassed,
             config_entry_id=_config_entry_id(entity_entry),
         )
-        msg = (
-            f"Area {area_id} arm result is unknown: {_sentence(reason)}"
-            f" {_uncertain_advice(bypassed)}"
-        )
-        raise HomeAssistantError(msg) from cause
+        reason_sentence = _sentence(reason)
+        advice = _uncertain_advice(bypassed)
+        msg = f"Area {area_id} arm result is unknown: {reason_sentence} {advice}"
+        msg_0 = "arm_automatic_uncertain"
+        raise homeassistant_error(
+            msg_0,
+            msg,
+            translation_placeholders={
+                "area": str(area_id),
+                "reason": reason_sentence,
+                "advice": advice,
+            },
+        ) from cause
 
     # Read the live client snapshot inside the lock, not the debounced
     # coordinator copy, so an earlier call's bypasses and arming are seen.
@@ -563,16 +602,26 @@ def _entity_runtime_data(
         or entity_entry.platform != DOMAIN
         or entity_entry.domain != platform
     ):
-        msg = f"Entity {entity_id} is not an Elke27 {label}"
-        raise ServiceValidationError(msg)
+        msg = "entity_wrong_type"
+        raise service_validation_error(
+            msg,
+            f"The selected entity is not an Elk E27 {label}.",
+            translation_placeholders={"entity_kind": label},
+        )
 
     config_entry = hass.config_entries.async_get_entry(_config_entry_id(entity_entry))
     if config_entry is None:
-        msg = f"Config entry for {entity_id} was not found"
-        raise ServiceValidationError(msg)
+        msg = "config_entry_not_found"
+        raise service_validation_error(
+            msg,
+            "The panel integration for this entity was not found.",
+        )
     if config_entry.state is not ConfigEntryState.LOADED:
-        msg = f"Config entry for {entity_id} is not loaded"
-        raise ServiceValidationError(msg)
+        msg = "config_entry_not_loaded"
+        raise service_validation_error(
+            msg,
+            "The panel integration is not ready yet. Try again in a moment.",
+        )
 
     return entity_entry, config_entry.runtime_data
 
@@ -584,8 +633,11 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
 
     entity_ids = _entity_ids_from_service_call(hass, call, Platform.BINARY_SENSOR)
     if not entity_ids:
-        msg = "No Elke27 zone target was provided"
-        raise ServiceValidationError(msg)
+        msg = "no_zone_target"
+        raise service_validation_error(
+            msg,
+            "No Elk E27 zone was selected for this action.",
+        )
 
     for entity_id in entity_ids:
         entity_entry, runtime_data = _entity_runtime_data(
@@ -606,8 +658,11 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                 zone_id, bypassed=bypass, pin=code
             )
         if not acknowledged:
-            msg = f"Zone {zone_id} bypass was not acknowledged; is the panel connected?"
-            raise HomeAssistantError(msg)
+            msg = "zone_bypass_not_acknowledged"
+            raise homeassistant_error(
+                msg,
+                "The bypass was not acknowledged. Check that the panel is connected.",
+            )
 
 
 def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:
@@ -616,8 +671,11 @@ def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:
         return ArmMode.ARMED_AWAY
     if mode_name == "home":
         return ArmMode.ARMED_STAY
-    msg = f"Unsupported arming mode: {mode_name}"
-    raise ServiceValidationError(msg)
+    msg = "unsupported_arm_mode"
+    raise service_validation_error(
+        msg,
+        "That arming mode is not supported.",
+    )
 
 
 def _area_id_from_unique_id(unique_id: str) -> int:
@@ -633,11 +691,19 @@ def _numeric_id_from_unique_id(unique_id: str, domain: str) -> int:
     (area or zone) is known; ``domain`` only names it in errors.
     """
     if ":" not in unique_id:
-        msg = f"Entity unique ID is not a recognized Elke27 {domain} identifier"
-        raise ServiceValidationError(msg)
+        msg = "invalid_unique_id_format"
+        raise service_validation_error(
+            msg,
+            f"This entity does not look like an Elk E27 {domain}.",
+            translation_placeholders={"entity_kind": domain},
+        )
     id_str = unique_id.rsplit(":", 1)[1]
     try:
         return int(id_str)
     except ValueError as err:
-        msg = f"Invalid Elke27 {domain} ID in unique ID: {unique_id}"
-        raise ServiceValidationError(msg) from err
+        msg = "invalid_unique_id_value"
+        raise service_validation_error(
+            msg,
+            f"This entity has an invalid Elk E27 {domain} identifier.",
+            translation_placeholders={"entity_kind": domain},
+        ) from err
