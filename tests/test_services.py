@@ -46,7 +46,8 @@ if _HAS_DEPS:
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
-    # What the panel client's writes return with return_result=True (elke27 0.3.14).
+    # What the panel client's writes return with return_result=True
+    # (elke27 0.3.14 and later).
     _WRITE_OK = CommandResult(route="test", status_refresh_ok=True)
 
 

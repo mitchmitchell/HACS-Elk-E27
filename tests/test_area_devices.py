@@ -356,10 +356,8 @@ async def test_cleanup_and_delete_route_through_area_has_device(
     assert calls == [1]
 
 
-def test_area_device_info_uses_via_device_id_when_supported(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """On HA with via_device_id, area devices link by the panel device id."""
+def test_area_device_info_links_by_panel_device_id() -> None:
+    """Area devices link by the panel device id."""
     coordinator = _coordinator(panel_snapshot())
     coordinator.panel_device_id = "panel-device-id"
     info = area_device_info(

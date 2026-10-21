@@ -9,8 +9,12 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 1. **Minimum Home Assistant is now 2026.10.0** (was 2026.1.0). HACS won't offer this
    release on older Home Assistant; update Home Assistant first or stay on 0.2.0.
 2. **Uses `elke27` 0.3.15.**
-3. Area devices link to the panel device by device ID, the form Home Assistant 2026.10
-   expects. Entity IDs and device names don't change.
+3. **Area devices:** new installs link area devices to the panel device by device ID, so
+   entity IDs follow the documented form (`alarm_control_panel.<area>`,
+   `binary_sensor.<area>_<zone>`). Upgrading from 0.2.0 on Home Assistant 2026.10 keeps
+   your existing area devices, device IDs and entity IDs as they are; on those installs
+   area entity IDs keep the panel name prefix 0.2.0 gave them (for example
+   `alarm_control_panel.<panel>_<area>`).
 4. Setup forms and service checks use Home Assistant's current validation library, so
    invalid input shows the usual form error.
 5. Development: CI, lint and type checks run on Python 3.14 against Home Assistant 2026.10.2.

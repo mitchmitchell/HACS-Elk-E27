@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
+    ChildDeviceInfo,
     DeviceInfo,
     format_mac,
 )
@@ -145,19 +146,28 @@ def area_device_info(
     entry: Elke27ConfigEntry,
     area_id: int,
     area: AreaState | None,
-) -> DeviceInfo:
+) -> DeviceInfo | ChildDeviceInfo:
     """
     Build device info for an area device; entity registration creates it.
 
     The panel device is registered once in async_setup_entry and its id kept on
-    the coordinator; the area device links to it with via_device_id. Plain
-    DeviceInfo is used rather than ChildDeviceInfo, because child devices
-    prefix entity IDs with the panel name and would change the documented IDs.
+    the coordinator; the area device links to it with via_device_id. Areas that
+    0.2.0 already registered as child devices keep a ChildDeviceInfo.
     """
     key = entry_identity_key(coordinator, entry)
-    identifiers = {(DOMAIN, area_device_identifier(key, area_id))}
+    identifier = area_device_identifier(key, area_id)
+    identifiers = {(DOMAIN, identifier)}
     name = area_device_name(area_id, area)
     panel_device_id = coordinator.panel_device_id
+    if identifier in coordinator.child_area_identifiers:
+        # Upgrade from 0.2.0: keep its child device, since the same identifiers
+        # can't be registered again as a regular device.
+        return ChildDeviceInfo(
+            identifiers=identifiers, name=name, parent_device_id=panel_device_id
+        )
+    # via_device_id, not ChildDeviceInfo: entity IDs must stay stable
+    # (alarm_control_panel.<area>, binary_sensor.<area>_<zone>). A child device
+    # would prefix every entity ID with the panel name.
     return DeviceInfo(
         identifiers=identifiers,
         name=name,
@@ -170,7 +180,7 @@ def device_info_for_zone(
     coordinator: Elke27DataUpdateCoordinator,
     entry: Elke27ConfigEntry,
     zone: ZoneState,
-) -> DeviceInfo:
+) -> DeviceInfo | ChildDeviceInfo:
     """Return the zone's area device, or the panel device when it has none."""
     snapshot = coordinator.data
     area_id = zone.area_id

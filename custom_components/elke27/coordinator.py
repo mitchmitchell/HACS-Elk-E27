@@ -121,6 +121,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     config_entry: Elke27ConfigEntry
     # Set by async_setup_entry before the platforms load.
     panel_device_id: str
+    # Area device identifiers that 0.2.0 registered as child devices on HA
+    # 2026.10; they stay child devices (set by async_setup_entry).
+    child_area_identifiers: frozenset[str] = frozenset()
 
     def __init__(
         self,
@@ -1039,7 +1042,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         return True
 
     # D4: the three writes call the elke27 public methods with
-    # return_result=True (elke27 0.3.14 CommandResult) and return its
+    # return_result=True (elke27 CommandResult, since 0.3.14) and return its
     # status_refresh_ok. Failures raise the library's public errors.
 
     async def _async_write_arm(
