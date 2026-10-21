@@ -17,7 +17,6 @@ from homeassistant.helpers import (
 from .const import CONF_INTEGRATION_ID, DOMAIN, ISSUE_RECONNECT_FAILED
 from .coordinator import PRIMED_DOMAINS, SETUP_RETRY_ERRORS, Elke27DataUpdateCoordinator  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re-exported
 from .entity import (
-    area_device_identifier,
     area_has_device,
     area_id_from_device_identifier,
     device_info_for_entry,
@@ -88,33 +87,6 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
     return True
 
 
-def _child_area_identifiers(
-    device_registry: dr.DeviceRegistry,
-    coordinator: Elke27DataUpdateCoordinator,
-    entry: Elke27ConfigEntry,
-) -> frozenset[str]:
-    """
-    Return the area identifiers 0.2.0 registered as child devices.
-
-    0.2.0 on HA 2026.10 created area devices as child devices. Registering the
-    same identifiers as a regular device raises DeviceInfoError, so those areas
-    keep their child device: device id, entity IDs and user settings unchanged.
-    """
-    snapshot = coordinator.data
-    if snapshot is None:
-        return frozenset()
-    key = entry_identity_key(coordinator, entry)
-    return frozenset(
-        identifier
-        for area_id in snapshot.areas
-        if device_registry.async_get_child_device_by_identifier(
-            (DOMAIN, identifier := area_device_identifier(key, area_id)),
-            entry.entry_id,
-        )
-        is not None
-    )
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Set up Elke27 from a config entry."""
     # E1: the client sn is the flow-generated integration ID. Entries made
@@ -131,14 +103,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
     entry.runtime_data = Elke27RuntimeData(coordinator=coordinator)
     # E2: register the panel device first so area devices can link to it.
     # Area devices link to it by device id (via_device_id).
-    device_registry = dr.async_get(hass)
-    panel_device = device_registry.async_get_or_create(
+    panel_device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, **device_info_for_entry(coordinator, entry)
     )
     coordinator.panel_device_id = panel_device.id
-    coordinator.child_area_identifiers = _child_area_identifiers(
-        device_registry, coordinator, entry
-    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

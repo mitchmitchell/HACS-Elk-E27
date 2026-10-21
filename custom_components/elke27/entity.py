@@ -159,9 +159,9 @@ def area_device_info(
     identifiers = {(DOMAIN, identifier)}
     name = area_device_name(area_id, area)
     panel_device_id = coordinator.panel_device_id
-    if identifier in coordinator.child_area_identifiers:
-        # Upgrade from 0.2.0: keep its child device, since the same identifiers
-        # can't be registered again as a regular device.
+    if coordinator.is_child_area_device(identifier):
+        # Only areas 0.2.0 already created stay child devices, so their device
+        # and entity IDs are kept; every other area uses via_device_id below.
         return ChildDeviceInfo(
             identifiers=identifiers, name=name, parent_device_id=panel_device_id
         )

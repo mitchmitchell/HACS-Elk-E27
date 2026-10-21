@@ -221,6 +221,7 @@ def _coordinator(snapshot: object) -> MagicMock:
     coordinator = MagicMock()
     coordinator.data = snapshot
     coordinator.panel_name = None
+    coordinator.is_child_area_device.return_value = False
     return coordinator
 
 
