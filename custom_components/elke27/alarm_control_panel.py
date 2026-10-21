@@ -138,7 +138,6 @@ class Elke27AreaAlarmControlPanel(
         """Return if the entity is available."""
         return (
             super().available
-            and self.coordinator.is_ready
             and _get_area(self.coordinator.data, self._area_id) is not None
         )
 

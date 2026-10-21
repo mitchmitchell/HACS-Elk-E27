@@ -1267,8 +1267,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._connection_epoch += 1
             _LOGGER.debug("Panel disconnect event received; scheduling reconnect")
             self._log_unavailable()
-            # Entities already report unavailable (client not ready), but only
-            # a listener update makes HA write that state (#97). Queued before
+            # Entities follow last_update_success, but only a listener update
+            # makes HA write that state (#97). Queued before
             # the reconnect so it runs before the reconnect's own epoch bump.
             self.hass.loop.call_soon_threadsafe(
                 self._push_unavailable, self._connection_epoch
@@ -1310,7 +1310,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if self._unavailable_pushed:
             return
         self._unavailable_pushed = True
-        self._set_snapshot(self.get_snapshot())
+        self._push_connection_unavailable(self.get_snapshot())
 
     @callback
     def _push_ready(self, epoch: int) -> None:
@@ -1425,8 +1425,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             else:
                 self._connection_epoch += 1
                 # Push the snapshot (one listener update per drop, shared with
-                # the link listener): every entity re-reads is_ready and goes
-                # unavailable together, instead of showing stale state.
+                # the link listener): last_update_success goes False so every
+                # entity goes unavailable together, instead of showing stale state.
                 self._push_unavailable(self._connection_epoch)
             return
         if isinstance(event, CsmSnapshotUpdated):
@@ -1477,6 +1477,19 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                     _LOGGER.debug("Domain refresh stopped: %s", err)
                     break
         self._set_snapshot(self.get_snapshot())
+
+    @callback
+    def _push_connection_unavailable(self, snapshot: PanelSnapshot | None) -> None:
+        """
+        Publish snapshot data while marking the coordinator update unsuccessful.
+
+        CoordinatorEntity.available follows last_update_success; a disconnect must
+        not call async_set_updated_data, which would leave entities available.
+        """
+        self._snapshot_seq += 1
+        self.data = snapshot or PanelSnapshot.empty()
+        self.last_update_success = False
+        self.async_update_listeners()
 
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:
         """Update coordinator data and track snapshot version."""

@@ -108,7 +108,6 @@ class Elke27Lock(CoordinatorEntity[Elke27DataUpdateCoordinator], LockEntity):
         """Return if the entity is available."""
         return (
             super().available
-            and self.coordinator.is_ready
             and _get_lock(self.coordinator.data, self._lock_id) is not None
         )
 

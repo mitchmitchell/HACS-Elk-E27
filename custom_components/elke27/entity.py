@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
@@ -96,6 +96,24 @@ def device_info_for_entry(
 AREA_DEVICE_MODEL = "Area"
 
 
+class _ViaDeviceIdDeviceInfo(DeviceInfo, total=False):
+    """DeviceInfo including via_device_id (Home Assistant 2026.8+)."""
+
+    via_device_id: str
+
+
+class _ChildDeviceInfoFactory(Protocol):
+    """Callable shape of device_registry.ChildDeviceInfo when present."""
+
+    def __call__(
+        self,
+        *,
+        identifiers: set[tuple[str, str]],
+        name: str | None,
+        parent_device_id: str | None,
+    ) -> DeviceInfo: ...
+
+
 def area_device_identifier(key: str, area_id: int) -> str:
     """Return the area device identifier, same shape as the area unique_id."""
     return f"{key}:area:{area_id}"
@@ -169,11 +187,12 @@ def area_device_info(
     panel_device_id = coordinator.panel_device_id
     child_info = getattr(dr, "ChildDeviceInfo", None)
     if child_info is not None:
-        return child_info(  # type: ignore[no-any-return]
+        factory = cast("_ChildDeviceInfoFactory", child_info)
+        return factory(
             identifiers=identifiers, name=name, parent_device_id=panel_device_id
         )
     if SUPPORTS_VIA_DEVICE_ID:
-        return DeviceInfo(  # type: ignore[typeddict-unknown-key]
+        return _ViaDeviceIdDeviceInfo(
             identifiers=identifiers,
             name=name,
             model=AREA_DEVICE_MODEL,

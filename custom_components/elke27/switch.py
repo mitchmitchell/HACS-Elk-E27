@@ -101,7 +101,6 @@ class Elke27OutputSwitch(CoordinatorEntity[Elke27DataUpdateCoordinator], SwitchE
         """Return if the entity is available."""
         return (
             super().available
-            and self.coordinator.is_ready
             and _get_output(self.coordinator.data, self._output_id) is not None
         )
 
