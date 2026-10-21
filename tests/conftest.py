@@ -26,6 +26,8 @@ from elke27_lib.client import Elke27Client, Result
 from elke27_lib.events import ConnectionStateChanged
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.syrupy import HomeAssistantSnapshotExtension
+from syrupy.assertion import SnapshotAssertion  # noqa: TC002  # fixture annotation
 
 from custom_components.elke27.const import (
     CONF_INTEGRATION_ID,
@@ -409,3 +411,15 @@ def fast_backoff() -> Iterator[AsyncMock]:
         patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
     ):
         yield sleep_mock
+
+
+@pytest.fixture
+def snapshot(snapshot: SnapshotAssertion) -> SnapshotAssertion:
+    """
+    Pin the HA snapshot extension (snapshots in tests/snapshots/).
+
+    The plugin's own override only wins when pytest registers it after
+    syrupy, and that order depends on how the venv was installed. Without
+    this, syrupy's default extension looks in tests/__snapshots__/.
+    """
+    return snapshot.use_extension(HomeAssistantSnapshotExtension)

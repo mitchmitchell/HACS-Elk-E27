@@ -752,6 +752,22 @@ Host, panel MAC, unique ID and client ID are redacted; link keys are never inclu
 | *The panel requires linking…* | Enter the access code and passphrase again. |
 | *No panels were discovered…* | The panel is online and on the same network segment, and UDP broadcast on port 2362 isn't blocked. Otherwise use **Manual setup**. |
 | *This panel is already configured.* | The panel already has an entry, matched by MAC address, or by the panel's serial number when it reports a real one, or, if neither is reported, by the same host and port. |
+| *Elk E27 upgrade notes can't be read* (Repairs) | See [Upgrade problems shown in Repairs](#upgrade-problems-shown-in-repairs). |
+
+### Upgrade problems shown in Repairs
+
+If the upgrade from 0.1.x can't finish, Elk E27 stops before changing anything it can't
+undo and puts an issue under Settings → System → Repairs. Open it and follow the steps.
+Take a full Home Assistant backup first (Settings → System → Backups) if you haven't.
+
+| Repairs issue | What to do |
+|---|---|
+| **Elk E27 upgrade notes can't be read** | Select **Submit** to rebuild the notes from your current entities and reload. Nothing is restored from a backup and no names or entity IDs change. If a panel item has more than one older entity and the choice depends on which you edited last, a second screen lists the entities it will keep and the ones it will leave unavailable. Submit if that's right; if not, close it and restore your pre-upgrade backup. |
+| **Elk E27 upgrade blocked by leftover entities** | The issue lists every entity in the way (usually left over from a 0.2.0 trial). Select **Submit** to see the confirm screen, which lists exactly what will be deleted. Submitting it deletes only those Elk E27 entities, along with their history link, then retries the upgrade, so take a backup first. If some listed entities belong to another integration entry, the confirm screen names them and says how many it can't delete; remove those by hand under Settings → Devices & services → Entities. If none can be deleted for you, the screen lists them and only retries. To keep them, close the screen, delete or rename them yourself under Settings → Devices & services → Entities, then open the issue again and submit to retry. |
+| **Elk E27 upgrade blocked by a leftover device** | Delete the listed leftover Elk E27 device by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**), then open the issue and select **Submit** to retry. |
+| **Elk E27 upgrade blocked by leftover items** | Both leftover entities and a leftover Elk E27 device are in the way. First delete the leftover device by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**). Then open the issue and select **Submit**: the confirm screen lists exactly which entities will be deleted, and submitting it deletes only those, along with their history link, then retries the upgrade, so take a backup first. |
+| **Elk E27 upgrade interrupted** / **Elk E27 upgrade couldn't save** | Select **Submit** to retry. After an interruption, entities already converted are kept and the upgrade picks up where it stopped; after a failed save, every change was undone and the upgrade starts over. If it keeps failing, restore your pre-upgrade backup and download diagnostics before reporting it. |
+| **Duplicate Elk E27 entities from the older version** | Nothing is blocked; the upgrade kept one entity per panel item. Go to Settings → Devices & services → Entities, search for each listed entity ID, open it, select the gear icon, then **Delete**. Reload Elk E27 afterwards and the issue clears. |
 
 ### Panel error messages
 
@@ -942,10 +958,15 @@ whole °F, so setpoints you set in °C are rounded.
 4. Done. On that first start the integration rewrites its unique IDs and moves the panel
    device to the new identity before any entity loads. It is all or nothing: if anything
    conflicts (for example entities left over from a 0.2.0 trial), nothing is changed, a
-   **Elk E27 upgrade blocked** Repairs issue lists the conflicts, and the entry waits. Delete
-   the listed entities and reload the integration; it then completes. Entities left over as
-   duplicates from very old versions are listed in a Repairs issue and left untouched for you
-   to delete.
+   **Elk E27 upgrade blocked** Repairs issue lists the conflicts, and the entry waits. Open it
+   to delete the listed leftovers (after a confirm screen) and retry; it then completes.
+   Entities left over as duplicates from very old versions are listed in a Repairs issue and
+   left untouched for you to delete. See
+   [Upgrade problems shown in Repairs](#upgrade-problems-shown-in-repairs).
+
+Action targets: `elke27.alarm_arm_automatic` and `elke27.zone_bypass` must target the area
+device (or an alarm panel or zone entity), not the panel device. Since each area is now its own
+device, an automation that targeted the panel device needs to target the area device instead.
 
 What changes: each area the panel reports is now its own device, and its alarm panel and
 zones sit under it, named after the area (for example "Main House Front Door"). Entity IDs
@@ -981,7 +1002,7 @@ Home Assistant installs for you.
 0.2.0 has no in-place upgrade from 0.1.x. **Go from 0.1.x straight to
 [0.2.1](#to-021)**, which upgrades in place with one re-link. If you did install 0.2.0 over
 0.1.x, the entry shows "This entry was created before the client ID existed, or its client ID
-is invalid." Don't delete it: reinstall 0.1.7 (0.2.0 doesn't change the entry) or update to
+is invalid." Don't delete it: reinstall the 0.1.x you had (0.2.0 doesn't change the entry) or update to
 0.2.1 and re-link.
 
 Each area appears as its own device, with its zones under it; the area's alarm panel is

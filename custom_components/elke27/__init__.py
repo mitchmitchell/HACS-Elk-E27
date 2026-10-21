@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import logging
 from typing import TYPE_CHECKING
 
@@ -14,7 +15,12 @@ from homeassistant.helpers import (
     issue_registry as ir,
 )
 
-from .const import CONF_INTEGRATION_ID, DOMAIN, ISSUE_RECONNECT_FAILED
+from .const import (
+    CONF_INTEGRATION_ID,
+    DOMAIN,
+    ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED,
+    ISSUE_RECONNECT_FAILED,
+)
 from .coordinator import PRIMED_DOMAINS, SETUP_RETRY_ERRORS, Elke27DataUpdateCoordinator  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re-exported
 from .entity import (
     area_has_device,
@@ -25,12 +31,16 @@ from .entity import (
 )
 from .identity import is_valid_integration_id
 from .migration import (
+    LegacyMigrationRecordError,
     async_apply_legacy_migration,
+    async_forget_blocked_key,
     async_migrate_legacy_entry,
     async_refresh_duplicates_issue,
     blocked_issue_id,
     duplicates_issue_id,
     legacy_migration_pending,
+    record_issue_id,
+    validate_legacy_migration_record,
 )
 from .models import Elke27ConfigEntry, Elke27RuntimeData
 from .panel_mac import mismatch_issue_id
@@ -49,6 +59,8 @@ from .services import (  # noqa: F401  # re-exported; tests and callers import t
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from homeassistant.core import HomeAssistant, ServiceCall
     from homeassistant.helpers.typing import ConfigType
 
@@ -95,8 +107,46 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
     return True
 
 
+@contextmanager
+def _record_errors_fail_setup(
+    hass: HomeAssistant, entry: Elke27ConfigEntry
+) -> Iterator[None]:
+    """
+    Turn LegacyMigrationRecordError into a Repairs issue and ConfigEntryError.
+
+    The issue offers the rebuild flow (repairs.py). The field name goes to
+    the log only, never a value; the user text names no field.
+    """
+    try:
+        yield
+    except LegacyMigrationRecordError as err:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            record_issue_id(entry.entry_id),
+            is_fixable=True,
+            data={"entry_id": entry.entry_id, "flow": "rebuild"},
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED,
+        )
+        _LOGGER.error(  # noqa: TRY400  # a traceback would carry values
+            "Elke27 upgrade notes unreadable (field %s); see Settings > Repairs",
+            err.field,
+        )
+        # The record stays as stored and the entry stays unloaded until the
+        # Repairs flow rebuilds it: a plain retry can't fix it.
+        raise ConfigEntryError(
+            translation_domain=DOMAIN,
+            translation_key=ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED,
+        ) from None
+    ir.async_delete_issue(hass, DOMAIN, record_issue_id(entry.entry_id))
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Set up Elke27 from a config entry."""
+    # A malformed 0.1.x upgrade record is never run, skipped or marked done.
+    with _record_errors_fail_setup(hass, entry):
+        validate_legacy_migration_record(entry)
     # E1: the client sn is the flow-generated integration ID. A 0.1.x entry
     # (migration pending) has none: the re-link (reauth) draws one and links
     # again. A 0.2.x entry without a valid one can't occur; it stays an error.
@@ -150,6 +200,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> b
 async def async_remove_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> None:
     """Clean up integration state when a config entry is removed."""
     _async_delete_entry_issues(hass, entry)
+    async_forget_blocked_key(hass, entry.entry_id)
 
 
 def _entry_area_ids(
@@ -197,3 +248,4 @@ def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) ->
     ir.async_delete_issue(hass, DOMAIN, mismatch_issue_id(entry.entry_id))
     ir.async_delete_issue(hass, DOMAIN, blocked_issue_id(entry.entry_id))
     ir.async_delete_issue(hass, DOMAIN, duplicates_issue_id(entry.entry_id))
+    ir.async_delete_issue(hass, DOMAIN, record_issue_id(entry.entry_id))

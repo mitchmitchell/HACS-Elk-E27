@@ -53,7 +53,7 @@ from .identity import (
     panel_mac_from_info,
     panel_serial_tier,
 )
-from .migration import legacy_reauth_data_updates
+from .migration import legacy_migration_pending, legacy_reauth_data_updates
 from .panel_mac import (
     async_discover_panel_mac,
     async_reauth_mac_fill,
@@ -484,6 +484,11 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 entry,
                 data_updates=data,
                 options={**entry.options, **options},
+                reason=(
+                    "reauth_successful_upgrade"
+                    if legacy_migration_pending(entry)
+                    else "reauth_successful"
+                ),
             )
 
         unique_id = config_entry_unique_id(panel_info)

@@ -26,7 +26,13 @@ from .const import (
     MANUFACTURER_NUMBER,
 )
 from .entity import area_has_device
-from .migration import LEGACY_UNIQUE_ID_RE, legacy_migration_state
+from .migration import (
+    LEGACY_UNIQUE_ID_RE,
+    LegacyMigrationRecordError,
+    legacy_migration_state,
+    record_field,
+    validate_legacy_migration_record,
+)
 
 # Host, MAC, panel serial (unique_id may be a serial or MAC), integration ID and
 # link keys never leave the box unredacted. Link keys are not emitted at all.
@@ -168,19 +174,40 @@ def migration_diagnostics(entry: Elke27ConfigEntry) -> dict[str, Any] | None:
         return f"{REDACTED}:{match.group('kind')}:{match.group('n')}"
 
     def rows(name: str) -> list[dict[str, Any]]:
+        # Setup does not re-validate a done record, and a done record can
+        # predate the validator: pre-release 0.2.x builds marked records done
+        # behind .get() fallbacks, and storage can be hand-edited. So
+        # type-check here too: a non-list section or non-mapping row degrades
+        # instead of crashing.
+        section = record_field(state, name)
+        if not isinstance(section, list):
+            raise LegacyMigrationRecordError(name, "invalid")
+        row_field = f"{name}[]"
+        for row in section:
+            if not isinstance(row, Mapping):
+                raise LegacyMigrationRecordError(row_field, "invalid")
         return [
             {
                 **{k: v for k, v in row.items() if k != "old_unique_id"},
-                "old_unique_id": redact(str(row.get("old_unique_id", ""))),
+                "old_unique_id": redact(
+                    str(record_field(row, "old_unique_id", f"{name}[]."))
+                ),
             }
-            for row in state.get(name, [])
+            for row in section
         ]
 
-    return {
-        "from": state.get("from"),
-        "state": state.get("state"),
-        "done_at": state.get("done_at"),
-        "plan": rows("plan"),
-        "duplicates": rows("duplicates"),
-        "skipped": rows("skipped"),
-    }
+    try:
+        # Same check setup runs: any malformed field or value (top level,
+        # per row, or an invalid state) yields type + field only.
+        validate_legacy_migration_record(entry)
+        return {
+            "from": record_field(state, "from"),
+            "state": record_field(state, "state"),
+            "done_at": state.get("done_at"),
+            "plan": rows("plan"),
+            "duplicates": rows("duplicates"),
+            "skipped": rows("skipped"),
+        }
+    except LegacyMigrationRecordError as err:
+        # Degrade, never crash: the error type and field name only, no values.
+        return {"error": type(err).__name__, "field": err.field}
