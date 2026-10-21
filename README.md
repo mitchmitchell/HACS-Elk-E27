@@ -327,7 +327,8 @@ doesn't answer discovery: the new address counts as a new panel.
 ### Re-linking (reauthentication)
 
 If the stored link keys are missing or rejected when the integration **loads**, Home Assistant
-shows a **reauthentication** notice. Open it and enter the **access code** and **passphrase**
+shows a **reauthentication** notice in two places: a card under **Settings → Devices & services**
+and an issue under **Settings → System → Repairs**. Open either one and enter the **access code** and **passphrase**
 again (*Relink panel*). The flow checks that you are linking the **same panel** by comparing
 **MAC address or panel serial** (not the integration's client ID). The entry
 reloads with new link keys. Your entities and their IDs stay the same. Re-linking only

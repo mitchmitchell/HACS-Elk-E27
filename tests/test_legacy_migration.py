@@ -54,10 +54,7 @@ from custom_components.elke27.const import (
     ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
     MIGRATION_STATE_PENDING,
 )
-from custom_components.elke27.diagnostics import (
-    async_get_config_entry_diagnostics,
-    migration_diagnostics,
-)
+from custom_components.elke27.diagnostics import migration_diagnostics
 from custom_components.elke27.migration import (
     LegacyMigrationRecordError,
     async_apply_legacy_migration,
@@ -665,10 +662,10 @@ async def test_failure_mid_write_rolls_back_everything(
     assert current.unique_id == _new_uid("area", 1)
 
 
-async def test_failed_undo_stays_pending_and_logs_counts_only(
+async def test_failed_undo_stays_pending_without_error_log(
     hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """If the undo itself fails: pending, blocked issue, ERROR with no identifiers."""
+    """If the undo itself fails: pending, Repairs issue, no extra ERROR log."""
     entry = entry_relinked()
     entry.add_to_hass(hass)
     seed_legacy_registry(
@@ -700,7 +697,9 @@ async def test_failed_undo_stays_pending_and_logs_counts_only(
         for r in caplog.records
         if r.levelno == logging.ERROR and r.name.startswith("custom_components")
     ]
-    assert any("3 of 4 writes not reverted" in m for m in errors)
+    # Repairs reports it; no ERROR of our own (thread 8, as in #111).
+    assert not any("writes not reverted" in m for m in errors)
+    assert not any("partly migrated" in m for m in errors)
     issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
     assert issue is not None
     assert issue.translation_key == ISSUE_LEGACY_MIGRATION_PARTIAL
@@ -1587,6 +1586,7 @@ async def _assert_no_identifiers(
     entry: MockConfigEntry,
     caplog: pytest.LogCaptureFixture,
     forbidden: list[str],
+    hass_client: ClientSessionGenerator,
 ) -> dict[str, str]:
     issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
     assert issue is not None
@@ -1595,7 +1595,7 @@ async def _assert_no_identifiers(
         r.getMessage() for r in caplog.records if r.name.startswith("custom_components")
     )
     diagnostics = json.dumps(
-        await async_get_config_entry_diagnostics(hass, entry), default=str
+        await get_diagnostics_for_config_entry(hass, hass_client, entry), default=str
     )
     for text in (json.dumps(placeholders), logs, diagnostics):
         assert not [f for f in forbidden if f.lower() in text.lower()]
@@ -1609,7 +1609,10 @@ async def _assert_no_identifiers(
 
 
 async def test_entity_conflict_lists_entity_id_only(
-    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant,
+    panel: ClientHarness,
+    caplog: pytest.LogCaptureFixture,
+    hass_client: ClientSessionGenerator,
 ) -> None:
     """A planted new-format unique_id is reported by its entity_id only."""
     entry = entry_017()
@@ -1637,13 +1640,16 @@ async def test_entity_conflict_lists_entity_id_only(
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     placeholders = await _assert_no_identifiers(
-        hass, entry, caplog, _forbidden(_new_uid("zone", 2))
+        hass, entry, caplog, _forbidden(_new_uid("zone", 2)), hass_client
     )
     assert trial.entity_id in placeholders["conflicts"]
 
 
 async def test_device_conflict_is_counted_not_named(
-    hass: HomeAssistant, panel: ClientHarness, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant,
+    panel: ClientHarness,
+    caplog: pytest.LogCaptureFixture,
+    hass_client: ClientSessionGenerator,
 ) -> None:
     """A device owning the panel key is counted; its id and name never shown."""
     entry = entry_relinked()
@@ -1660,7 +1666,7 @@ async def test_device_conflict_is_counted_not_named(
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     placeholders = await _assert_no_identifiers(
-        hass, entry, caplog, _forbidden(device.id, _PLANT_NAME)
+        hass, entry, caplog, _forbidden(device.id, _PLANT_NAME), hass_client
     )
     # Device-only conflict: the _devices variant, a count and nothing empty.
     assert placeholders == {"count": "1"}

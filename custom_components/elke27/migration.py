@@ -543,9 +543,7 @@ def async_refresh_duplicates_issue(hass: HomeAssistant, entry: ConfigEntry) -> N
 class PartialRollbackError(HomeAssistantError):
     """Undo after a failed Phase B write could not revert every write."""
 
-    def __init__(
-        self, failed: int, total: int, entity_ids: list[str] | None = None
-    ) -> None:
+    def __init__(self, failed: int, total: int, entity_ids: list[str]) -> None:
         """Keep counts only in the message; ``entity_ids`` lists rows not undone."""
         super().__init__(
             f"undo incomplete: {failed} of {total} writes not reverted; "
@@ -554,7 +552,7 @@ class PartialRollbackError(HomeAssistantError):
         self.failed = failed
         # Entity IDs of rows whose undo failed; failures with no entity ID
         # (the panel device move) are only counted.
-        self.entity_ids: list[str] = list(entity_ids or [])
+        self.entity_ids = entity_ids
 
 
 @dataclass(slots=True)
@@ -831,10 +829,7 @@ def async_apply_legacy_migration(
             partial = True
             plan.conflicts.extend(err.entity_ids)
             plan.conflicts.extend([None] * (err.failed - len(err.entity_ids)))
-            # Counts only, no identifiers (the error text carries none).
-            _LOGGER.error(  # noqa: TRY400  # a traceback would carry identifiers
-                "Elke27 upgrade: registry partly migrated, %s", err
-            )
+            # No log here: the Repairs issue reports it and HA logs not-ready.
         except (ValueError, HomeAssistantError):
             # Not a conflict: a registry write failed and was fully undone.
             # The error text can carry identifiers: never shown or logged.

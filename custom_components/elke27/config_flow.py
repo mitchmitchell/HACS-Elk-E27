@@ -401,6 +401,11 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             errors["base"] = "cannot_connect"
         except Elke27LinkRequiredError:
             errors["base"] = "link_required"
+        # Kept on purpose: host/port are guarded above (None -> form error) and
+        # come from validated entry data, but the library also raises
+        # Elke27InvalidArgument for an empty access code/passphrase or a
+        # rejected client identity, and no stored 0.1.7 host/port value has been
+        # shown to trigger it. Catching it keeps the form usable (no 500).
         except (Elke27Error, Elke27InvalidArgument) as err:
             # Log the exception type only: its message can carry host, port or
             # panel fields, and none of those belong in the log.
