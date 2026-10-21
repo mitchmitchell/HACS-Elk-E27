@@ -20,9 +20,9 @@ from elke27_lib.errors import (
     Elke27ProtocolError,
     InvalidCredentials,
 )
+import probatio as vol
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-import voluptuous as vol
 
 from custom_components.elke27.config_flow import (
     CONF_ACCESS_CODE,

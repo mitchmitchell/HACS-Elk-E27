@@ -21,7 +21,7 @@ from elke27_lib.errors import (
     Elke27TimeoutError,
     InvalidCredentials,
 )
-import voluptuous as vol
+import probatio as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
@@ -386,11 +386,11 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             snapshot = client.get_snapshot()
             panel_info = asdict(snapshot.panel)
             table_info = asdict(snapshot.table_info)
-        except (InvalidCredentials, Elke27AuthError, Elke27CryptoError):
+        except InvalidCredentials, Elke27AuthError, Elke27CryptoError:
             errors["base"] = "invalid_auth"
-        except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError):
+        except Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError:
             errors["base"] = "cannot_connect"
-        except (OSError, TimeoutError, E27Error):
+        except OSError, TimeoutError, E27Error:
             errors["base"] = "cannot_connect"
         except Elke27LinkRequiredError:
             errors["base"] = "link_required"

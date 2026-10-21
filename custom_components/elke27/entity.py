@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import inspect
 import re
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
     DeviceInfo,
@@ -23,12 +21,6 @@ if TYPE_CHECKING:
 
     from .coordinator import Elke27DataUpdateCoordinator
     from .models import Elke27ConfigEntry
-
-# HA 2026.8+ accepts via_device_id; the pinned HA only has the identifier form.
-SUPPORTS_VIA_DEVICE_ID = (
-    "via_device_id"
-    in inspect.signature(dr.DeviceRegistry.async_get_or_create).parameters
-)
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9 _-]")
 
@@ -158,32 +150,19 @@ def area_device_info(
     Build device info for an area device; entity registration creates it.
 
     The panel device is registered once in async_setup_entry and its id kept on
-    the coordinator. Newer Home Assistant gets a ChildDeviceInfo (the area is a
-    logical part of the panel), else DeviceInfo with via_device_id. The pinned
-    Home Assistant has neither, so it gets the identifier form of via_device
-    (deprecated, removed in HA 2027.8, but the only option there).
+    the coordinator; the area device links to it with via_device_id. Plain
+    DeviceInfo is used rather than ChildDeviceInfo, because child devices
+    prefix entity IDs with the panel name and would change the documented IDs.
     """
     key = entry_identity_key(coordinator, entry)
     identifiers = {(DOMAIN, area_device_identifier(key, area_id))}
     name = area_device_name(area_id, area)
     panel_device_id = coordinator.panel_device_id
-    child_info = getattr(dr, "ChildDeviceInfo", None)
-    if child_info is not None:
-        return child_info(  # type: ignore[no-any-return]
-            identifiers=identifiers, name=name, parent_device_id=panel_device_id
-        )
-    if SUPPORTS_VIA_DEVICE_ID:
-        return DeviceInfo(  # type: ignore[typeddict-unknown-key]
-            identifiers=identifiers,
-            name=name,
-            model=AREA_DEVICE_MODEL,
-            via_device_id=panel_device_id,
-        )
     return DeviceInfo(
         identifiers=identifiers,
         name=name,
         model=AREA_DEVICE_MODEL,
-        via_device=(DOMAIN, key),
+        via_device_id=panel_device_id,
     )
 
 

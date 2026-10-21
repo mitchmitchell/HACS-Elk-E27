@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from elke27_lib import ArmMode, PanelSnapshot, ZoneState
 from elke27_lib.errors import Elke27PinRequiredError
-import voluptuous as vol
+import probatio as vol
 
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntryState

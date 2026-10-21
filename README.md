@@ -192,7 +192,9 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 ## Requirements
 
-- **Home Assistant 2026.1.0 or newer.**
+- **Home Assistant 2026.10.0 or newer.** Starting with 0.2.1 the minimum is 2026.10.0
+  (it was 2026.1.0). On an older Home Assistant, HACS won't offer 0.2.1; update Home
+  Assistant first, or stay on 0.2.0.
 - An **Elk E27** panel on your local network that Home Assistant can reach over TCP. Manual
   setup connects on port **2101**.
   Tested on an E27 with firmware **0.0.6.4** (hardware 0.0.1.4, bootloader 0.0.2.24). Other
@@ -213,6 +215,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | CI: 2026.10.2 (minimum 2026.10.0); hardware: TBD | TBD |
 | 0.2.0 | [0.3.14](https://pypi.org/project/elke27/0.3.14/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.9 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |

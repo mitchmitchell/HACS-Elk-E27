@@ -335,7 +335,6 @@ def test_retry_docstrings_are_pinned_by_tests() -> None:
 GETATTR_LITERAL_CEILING: dict[str, int] = {
     "custom_components/elke27/arming.py": 1,
     "custom_components/elke27/config_flow.py": 26,
-    "custom_components/elke27/entity.py": 1,
     "custom_components/elke27/errors.py": 1,
     "custom_components/elke27/panel_mac.py": 2,
 }
