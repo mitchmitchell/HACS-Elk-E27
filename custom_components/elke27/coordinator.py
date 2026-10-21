@@ -687,7 +687,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             except HomeAssistantError as err:
                 rejected = code_rejected_error(err)
                 if rejected is not None and raise_code_rejected:
-                    # A rejected code is a user error: undo, then re-raise as is.
+                    # A rejected code or user-condition refusal is a user
+                    # error: undo, then re-raise as is.
                     await self.async_raise_code_rejected(
                         rejected, bypassed, pin, gate=gate
                     )
@@ -798,7 +799,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 self.hass,
                 title="Elk E27 zones still bypassed",
                 message=(
-                    "The code was rejected and these zones could not be"
+                    "The panel refused the command and these zones could not be"
                     f" un-bypassed, so they are still bypassed: zones {zone_ids}."
                     " Clear them with elke27.zone_bypass and bypass: false."
                 ),

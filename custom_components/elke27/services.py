@@ -142,6 +142,7 @@ async def _async_handle_alarm_arm_automatic(
     # does not stop the others, and areas armed earlier stay armed. Refusals
     # are never retried; within a failed area, its own bypasses are undone.
     failures: list[HomeAssistantError] = []
+    failed_ids: list[str] = []
     for entity_id in entity_ids:
         try:
             await _async_arm_automatic_entity(
@@ -152,17 +153,31 @@ async def _async_handle_alarm_arm_automatic(
             )
         except HomeAssistantError as err:
             failures.append(err)
-    if len(failures) == 1 or (
-        failures and all(code_rejected_error(err) is err for err in failures)
-    ):
+            failed_ids.append(entity_id)
+    if len(failures) == 1 or _same_user_refusal(failures):
+        # One reason for every failed area: raise it as is.
         raise failures[0]
     if failures:
-        details = "; ".join(str(err) for err in failures)
+        # Different reasons: name each area so no reason is lost. A user
+        # refusal carries no area in its message, so prefix its entity.
+        details = "; ".join(
+            f"{entity_id}: {err}" if code_rejected_error(err) is err else str(err)
+            for entity_id, err in zip(failed_ids, failures, strict=True)
+        )
         msg = (
             f"Automatic arming failed for {len(failures)} of {len(entity_ids)} "
             f"areas: {details}"
         )
         raise HomeAssistantError(msg) from failures[0]
+
+
+def _same_user_refusal(failures: list[HomeAssistantError]) -> bool:
+    """Return True when every failure is the same user refusal (same key)."""
+    keys = {
+        err.translation_key if code_rejected_error(err) is err else None
+        for err in failures
+    }
+    return len(keys) == 1 and None not in keys
 
 
 def _config_entry_id(entity_entry: er.RegistryEntry) -> str:

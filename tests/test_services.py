@@ -620,6 +620,71 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         assert str(ctx.exception).startswith("Automatic arming failed for 2 of 2 areas")
         assert "Area 2 was not armed: nope" in str(ctx.exception)
 
+    def _refusal(self, panel_code: int) -> Any:
+        return integration.code_rejected_error(Elke27PanelError(panel_code, "no"))
+
+    async def _run_two_areas(
+        self, hass: Any, house_code: int, garage_code: int
+    ) -> tuple[Any, Any, Any]:
+        snapshot = _two_area_snapshot()
+        house = _alarm_runtime(snapshot)
+        garage = _alarm_runtime(snapshot)
+        house.coordinator.async_arm_area = AsyncMock(
+            side_effect=self._refusal(house_code)
+        )
+        garage.coordinator.async_arm_area = AsyncMock(
+            side_effect=self._refusal(garage_code)
+        )
+        entities = {
+            "alarm_control_panel.a_house": (_entry("aa:bb:cc:dd:ee:ff:1"), house),
+            "alarm_control_panel.b_garage": (_entry("aa:bb:cc:dd:ee:ff:2"), garage),
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        return ctx.exception, house, garage
+
+    async def test_mixed_user_refusals_raise_combined_error(self) -> None:
+        """Not ready in one area and in alarm in another name both areas."""
+        hass = MagicMock()
+        err, _house, _garage = await self._run_two_areas(hass, 11015, 11027)
+        assert type(err) is HomeAssistantError
+        text = str(err)
+        assert text.startswith("Automatic arming failed for 2 of 2 areas")
+        assert "alarm_control_panel.a_house: The area is not ready" in text
+        assert "alarm_control_panel.b_garage: The area is in alarm" in text
+        assert "1234" not in text
+        # Each area still rolled back and reported on its own.
+        assert hass.bus.async_fire.call_count == 2
+        for call in hass.bus.async_fire.call_args_list:
+            data = call.args[1]
+            assert data["stage"] == "arm"
+            assert data["outcome"] == "not_armed"
+            assert data["rolled_back_zone_ids"] == data["bypassed_zone_ids"][::-1]
+            assert data["still_bypassed_zone_ids"] == []
+
+    async def test_same_user_refusal_in_every_area_is_raised_as_is(self) -> None:
+        """Not ready in every area raises the single not_ready error."""
+        hass = MagicMock()
+        err, _house, _garage = await self._run_two_areas(hass, 11015, 11015)
+        assert isinstance(err, ServiceValidationError)
+        assert err.translation_key == "not_ready"
+        assert hass.bus.async_fire.call_count == 2
+        for call in hass.bus.async_fire.call_args_list:
+            data = call.args[1]
+            assert data["outcome"] == "not_armed"
+            assert data["still_bypassed_zone_ids"] == []
+
+    async def test_rejected_code_and_not_ready_raise_combined_error(self) -> None:
+        """A rejected code in one area and not ready in another are combined."""
+        hass = MagicMock()
+        err, _house, _garage = await self._run_two_areas(hass, 11008, 11015)
+        assert type(err) is HomeAssistantError
+        assert "a_house: The panel rejected the code" in str(err)
+        assert "b_garage: The area is not ready" in str(err)
+
     async def test_rollback_partial_failure_names_still_bypassed(self) -> None:
         """An un-bypass that fails is named, with how to clear it, and not retried."""
         hass = MagicMock()
@@ -772,7 +837,9 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
-        assert str(ctx.exception).startswith("Area 1 was not armed:")
+        # A not-ready refusal is a user error, raised as is after the rollback.
+        assert isinstance(ctx.exception, ServiceValidationError)
+        assert ctx.exception.translation_key == "not_ready"
         data = hass.bus.async_fire.call_args.args[1]
         assert data["stage"] == "arm"
         assert data["outcome"] == "not_armed"
