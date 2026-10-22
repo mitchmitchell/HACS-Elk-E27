@@ -303,6 +303,9 @@
     "cannot_connect": {
       "message": "Unable to connect to the panel at {host}:{port}."
     },
+    "code_rejected": {
+      "message": "The panel rejected the code. Check the user code and that it is allowed for this area."
+    },
     "code_not_numeric": {
       "message": "The code must be numeric."
     },

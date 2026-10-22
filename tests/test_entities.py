@@ -397,7 +397,9 @@ class ZoneEntityTest(unittest.TestCase):
             _bound(_hub(), snapshot), _entry(), 7, zone, definition
         )
         assert entity.name == "Kitchen Window"
-        assert entity.device_class is BinarySensorDeviceClass.WINDOW
+        assert (
+            entity.device_class is BinarySensorDeviceClass.OPENING
+        )  # definition decides, not zone_type
         assert entity.is_on is True
         assert entity.icon == "mdi:window-open"
         assert entity.extra_state_attributes == {
@@ -424,14 +426,14 @@ class ZoneEntityTest(unittest.TestCase):
         assert entity.icon is None
 
     def test_no_zone_definition(self) -> None:
-        """Without a ZoneDefinition, fall back to the zone name and opening class."""
+        """Without a ZoneDefinition, fall back to the zone name and no device class."""
         zone = ZoneState(zone_id=8, name="Hall", open=False)
         snapshot = _snapshot(zones={8: zone})
         entity = Elke27ZoneBinarySensor(
             _bound(_hub(), snapshot), _entry(), 8, zone, None
         )
         assert entity.name == "Hall"
-        assert entity.device_class is BinarySensorDeviceClass.OPENING
+        assert entity.device_class is None
         assert entity.icon is None
         assert entity.is_on is False
 

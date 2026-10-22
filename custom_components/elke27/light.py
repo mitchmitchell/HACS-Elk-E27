@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from elke27_lib.errors import Elke27PinRequiredError
 
-from homeassistant.components.light import ATTR_BRIGHTNESS, LightEntity
-from homeassistant.components.light.const import ColorMode
+from homeassistant.components.light import LightEntity
+from homeassistant.components.light.const import ATTR_BRIGHTNESS, ColorMode
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 

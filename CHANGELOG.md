@@ -31,6 +31,18 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   0.2.x area-style names; entity IDs do not change.
 
 ### Changed
+- **Minimum Home Assistant is now 2026.10.0** (was 2026.1.0). HACS won't offer this
+  release on older Home Assistant; update Home Assistant first or stay on 0.2.0.
+- **Uses `elke27` 0.3.15.**
+- **Area devices:** new installs link area devices to the panel device by device ID, so
+  entity IDs follow the documented form (`alarm_control_panel.<area>`,
+  `binary_sensor.<area>_<zone>`). Upgrading from 0.2.0 on Home Assistant 2026.10 keeps
+  your existing area devices, device IDs and entity IDs as they are; on those installs
+  area entity IDs keep the panel name prefix 0.2.0 gave them (for example
+  `alarm_control_panel.<panel>_<area>`).
+- Setup forms and service checks use Home Assistant's current validation library, so
+  invalid input shows the usual form error.
+- Development: CI, lint and type checks run on Python 3.14 against Home Assistant 2026.10.2.
 - Zone sensors take their device class only from the panel's Zone Definition: `BURG INTERIOR`
   is motion, perimeter and entry/exit are opening, `FIRE` smoke, `CARBON MONOXIDE` carbon
   monoxide, `WATER` moisture, everything else generic. Zones the panel typed as Door/Window

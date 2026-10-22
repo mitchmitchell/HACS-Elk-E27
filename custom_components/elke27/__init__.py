@@ -171,7 +171,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
         )
     async_refresh_duplicates_issue(hass, entry)
     # E2: register the panel device first so area devices can link to it.
-    # Area entities link to it by device id (via_device_id) where HA supports it.
+    # Area devices link to it by device id (via_device_id).
     panel_device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, **device_info_for_entry(coordinator, entry)
     )

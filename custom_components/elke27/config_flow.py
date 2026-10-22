@@ -22,7 +22,7 @@ from elke27_lib.errors import (
     Elke27TimeoutError,
     InvalidCredentials,
 )
-import voluptuous as vol
+import probatio
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
@@ -75,26 +75,26 @@ CONF_SETUP_METHOD = "setup_method"
 SETUP_METHOD_DISCOVER = "discover"
 SETUP_METHOD_MANUAL = "manual"
 
-STEP_MANUAL_DATA_SCHEMA = vol.Schema(
+STEP_MANUAL_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_HOST): cv.string,
-        vol.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
-        vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_HOST): cv.string,
+        probatio.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
     }
 )
 
-STEP_LINK_DATA_SCHEMA = vol.Schema(
+STEP_LINK_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
-        vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
     }
 )
 
 STEP_REAUTH_DATA_SCHEMA = STEP_LINK_DATA_SCHEMA
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
+STEP_USER_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_SETUP_METHOD, default=SETUP_METHOD_DISCOVER): selector(
+        probatio.Required(CONF_SETUP_METHOD, default=SETUP_METHOD_DISCOVER): selector(
             {
                 "select": {
                     "options": [SETUP_METHOD_DISCOVER, SETUP_METHOD_MANUAL],
@@ -293,7 +293,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         fallback = "Rescan for panels"
         return translations.get(key, fallback)
 
-    async def _async_discovery_schema(self) -> vol.Schema:
+    async def _async_discovery_schema(self) -> probatio.Schema:
         """Build the discover-step schema with a translated rescan option."""
         return self._discovery_schema(await self._async_rescan_option_label())
 
@@ -349,7 +349,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         passphrase: str,
         errors: dict[str, str],
         step_id: str,
-        data_schema: vol.Schema,
+        data_schema: probatio.Schema,
         entry: ConfigEntry | None = None,
     ) -> ConfigFlowResult:
         """Link, connect, fetch snapshots, and create/update the entry."""
@@ -393,11 +393,11 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             snapshot = client.get_snapshot()
             panel_info = asdict(snapshot.panel)
             table_info = asdict(snapshot.table_info)
-        except (InvalidCredentials, Elke27AuthError, Elke27CryptoError):
+        except InvalidCredentials, Elke27AuthError, Elke27CryptoError:
             errors["base"] = "invalid_auth"
-        except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError):
+        except Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError:
             errors["base"] = "cannot_connect"
-        except (OSError, TimeoutError, E27Error):
+        except OSError, TimeoutError, E27Error:
             errors["base"] = "cannot_connect"
         except Elke27LinkRequiredError:
             errors["base"] = "link_required"
@@ -514,7 +514,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             result["title"] = title
         return result
 
-    def _discovery_schema(self, rescan_label: str) -> vol.Schema:
+    def _discovery_schema(self, rescan_label: str) -> probatio.Schema:
         options = [
             {
                 "value": str(idx),
@@ -528,9 +528,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             options.insert(0, {"value": CONF_RESCAN, "label": rescan_label})
         else:
             options = [{"value": CONF_RESCAN, "label": rescan_label}]
-        return vol.Schema(
+        return probatio.Schema(
             {
-                vol.Required(CONF_PANEL): selector(
+                probatio.Required(CONF_PANEL): selector(
                     {
                         "select": {
                             "options": options,
@@ -538,10 +538,12 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                         }
                     }
                 ),
-                vol.Required(CONF_ACCESS_CODE): selector(
+                probatio.Required(CONF_ACCESS_CODE): selector(
                     {"text": {"type": "password"}}
                 ),
-                vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
+                probatio.Required(CONF_PASSPHRASE): selector(
+                    {"text": {"type": "password"}}
+                ),
             }
         )
 

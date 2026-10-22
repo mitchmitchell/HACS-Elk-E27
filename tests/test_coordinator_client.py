@@ -21,7 +21,14 @@ _HAS_DEPS = all(
 if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parents[1]))
 
-    from elke27_lib import Elke27Event, EventType, LinkKeys, PanelInfo, PanelSnapshot
+    from elke27_lib import (
+        ArmMode,
+        Elke27Event,
+        EventType,
+        LinkKeys,
+        PanelInfo,
+        PanelSnapshot,
+    )
     from elke27_lib.client import Elke27Client, Result
     from elke27_lib.errors import (
         Elke27AuthError,
@@ -169,8 +176,8 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HomeAssistantError):
             await _hub(client).async_set_zone_bypass(5, bypassed=True, pin="1234")
 
-    async def test_bypass_not_authorized_reason_reaches_user(self) -> None:
-        """A panel 11008 rejection shows the library's reason, not a generic error."""
+    async def test_bypass_rejected_code_is_validation_error(self) -> None:
+        """A panel 11008 code rejection is a translated user error, not a 500."""
         message = "Panel rejected the request: not authorized (error 11008)."
         err = Elke27ProtocolError(message)
         err.panel_error_code = 11008  # type: ignore[attr-defined]
@@ -180,12 +187,53 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
             self.assertLogs(
                 "custom_components.elke27.coordinator", level="WARNING"
             ) as logs,
-            self.assertRaises(HomeAssistantError) as ctx,
+            self.assertRaises(ServiceValidationError) as ctx,
         ):
             await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")
-        assert str(ctx.exception) == message
+        assert ctx.exception.translation_domain == "elke27"
+        assert ctx.exception.translation_key == "code_rejected"
+        assert "rejected the code" in str(ctx.exception)
+        assert "1234" not in str(ctx.exception)
+        assert ctx.exception.__cause__ is err
         assert "11008" in logs.output[0]
-        assert "1234" not in logs.output[0]
+        assert all("1234" not in line for line in logs.output)
+
+    async def test_arm_and_disarm_rejected_code_is_validation_error(self) -> None:
+        """Arm and disarm map a panel 11008 code rejection the same way."""
+        err = Elke27ProtocolError("not authorized (error 11008).")
+        err.panel_error_code = 11008  # type: ignore[attr-defined]
+        client = _client()
+        client.async_arm_area.side_effect = err
+        client.async_disarm_area.side_effect = err
+        hub = _hub(client)
+        for call in (
+            lambda: hub.async_arm_area(1, ArmMode.ARMED_AWAY, "4321"),
+            lambda: hub.async_disarm_area(1, "4321"),
+        ):
+            with (
+                self.assertLogs(
+                    "custom_components.elke27.coordinator", level="WARNING"
+                ) as logs,
+                self.assertRaises(ServiceValidationError) as ctx,
+            ):
+                await call()
+            assert ctx.exception.translation_key == "code_rejected"
+            assert "4321" not in str(ctx.exception)
+            assert all("4321" not in line for line in logs.output)
+        client.async_arm_area.assert_awaited_once()
+        client.async_disarm_area.assert_awaited_once()
+
+    async def test_other_panel_error_stays_ha_error(self) -> None:
+        """A panel refusal other than 11008 keeps the library reason."""
+        message = "Panel rejected the request: area not ready (error 11015)."
+        err = Elke27ProtocolError(message)
+        err.panel_error_code = 11015  # type: ignore[attr-defined]
+        client = _client()
+        client.async_set_zone_bypass.side_effect = err
+        with self.assertRaises(HomeAssistantError) as ctx:
+            await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")
+        assert not isinstance(ctx.exception, ServiceValidationError)
+        assert str(ctx.exception) == message
 
     async def test_bypass_pin_required_error_propagates(self) -> None:
         """A PIN-required error from the library is re-raised unchanged."""

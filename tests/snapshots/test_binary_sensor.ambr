@@ -1,0 +1,875 @@
+# serializer version: 1
+# name: test_zone_device_classes[binary_sensor.house_basement_door-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_basement_door',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Basement Door',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.MOTION: 'motion'>,
+    'original_icon': 'mdi:motion-sensor',
+    'original_name': 'Basement Door',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:5',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_basement_door-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'BURG INTERIOR',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'motion',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Basement Door',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:motion-sensor',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_basement_door',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_co-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_co',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'CO',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.CO: 'carbon_monoxide'>,
+    'original_icon': 'mdi:molecule-co',
+    'original_name': 'CO',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:13',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_co-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'CARBON MONOXIDE',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'carbon_monoxide',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House CO',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:molecule-co',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_co',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_front_door-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_front_door',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Front Door',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.OPENING: 'opening'>,
+    'original_icon': 'mdi:door-closed-lock',
+    'original_name': 'Front Door',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:1',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_front_door-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'BURG EE DELAY',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'opening',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Front Door',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:door-closed-lock',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_front_door',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_front_door_2-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_front_door_2',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Front Door',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.MOISTURE: 'moisture'>,
+    'original_icon': 'mdi:water',
+    'original_name': 'Front Door',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:11',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_front_door_2-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'WATER',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'moisture',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Front Door',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:water',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_front_door_2',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_garage_window-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_garage_window',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Garage Window',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.OPENING: 'opening'>,
+    'original_icon': 'mdi:door-closed-lock',
+    'original_name': 'Garage Window',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:7',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_garage_window-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'BURG EE DELAY',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'opening',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Garage Window',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:door-closed-lock',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_garage_window',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_hall_motion-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_hall_motion',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Hall Motion',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.MOTION: 'motion'>,
+    'original_icon': 'mdi:motion-sensor',
+    'original_name': 'Hall Motion',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:4',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_hall_motion-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'BURG INTERIOR',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'motion',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Hall Motion',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:motion-sensor',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_hall_motion',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_hall_motion_pir-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_hall_motion_pir',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Hall Motion PIR',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.SMOKE: 'smoke'>,
+    'original_icon': 'mdi:fire',
+    'original_name': 'Hall Motion PIR',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:9',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_hall_motion_pir-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'FIRE',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'smoke',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Hall Motion PIR',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:fire',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_hall_motion_pir',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_interior-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_interior',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Interior',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.MOTION: 'motion'>,
+    'original_icon': 'mdi:motion-sensor',
+    'original_name': 'Interior',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:3',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_interior-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'BURG INTERIOR',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'motion',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Interior',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:motion-sensor',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_interior',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_kitchen_window-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_kitchen_window',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Kitchen Window',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.OPENING: 'opening'>,
+    'original_icon': 'mdi:window-closed',
+    'original_name': 'Kitchen Window',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:2',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_kitchen_window-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'BURG PERIM INST',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'opening',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Kitchen Window',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:window-closed',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_kitchen_window',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_lid-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_lid',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Lid',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': 'mdi:shield-off-outline',
+    'original_name': 'Lid',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:12',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_lid-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'BURG BOX TAMPER',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Lid',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:shield-off-outline',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_lid',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_lights-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_lights',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Lights',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': 'mdi:home-automation',
+    'original_name': 'Lights',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:15',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_lights-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'AUTOMATION',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Lights',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:home-automation',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_lights',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_living_room_pir-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_living_room_pir',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Living Room PIR',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': 'mdi:shield-alert',
+    'original_name': 'Living Room PIR',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:10',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_living_room_pir-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'BURG 24HR',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Living Room PIR',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:shield-alert',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_living_room_pir',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_motion-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_motion',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Motion',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.OPENING: 'opening'>,
+    'original_icon': 'mdi:window-closed',
+    'original_name': 'Motion',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:6',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_motion-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'BURG PERIM INST',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'opening',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Motion',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:window-closed',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_motion',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_odd-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_odd',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Odd',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Odd',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:16',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_odd-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'SOMETHING NEW',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Odd',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_odd',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_panic-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_panic',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Panic',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': 'mdi:alert-octagon',
+    'original_name': 'Panic',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:14',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_panic-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'PANIC',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Panic',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:alert-octagon',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_panic',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_smoke-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.house_smoke',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Smoke',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.SMOKE: 'smoke'>,
+    'original_icon': 'mdi:fire',
+    'original_name': 'Smoke',
+    'platform': 'elke27',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'zone',
+    'unique_id': '00:11:22:33:44:55:8',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_zone_device_classes[binary_sensor.house_smoke-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'bypassed': None,
+      'definition': 'FIRE',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'smoke',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Smoke',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:fire',
+      'trouble': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.house_smoke',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---

@@ -125,9 +125,21 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 ### Binary sensors (zones)
 
 - The sensor is **on** when the zone is open/violated.
-- The device class is *motion*, *window* or *door* when the panel's zone type says so.
-  Otherwise it is *opening*. Fire, CO and water zones also show as *opening*, not as
-  smoke, CO or moisture sensors (see [Known issues](#known-issues)).
+- The device class comes only from the zone's definition in the panel, following Elk
+  guidance. The zone's name and wiring don't affect it.
+
+  | Zone definition | Device class |
+  |---|---|
+  | `BURG INTERIOR` | Motion |
+  | `BURG PERIM INST`, `BURG EE DELAY` | Opening |
+  | `FIRE` | Smoke |
+  | `CARBON MONOXIDE` | Carbon monoxide |
+  | `WATER` | Moisture |
+  | Anything else (24-hour, tamper, panic, medical, automation, power supervision, hi/lo temp, unknown) | None (generic) |
+
+- These are only defaults. If a zone is really something else (for example an interior door
+  contact on a `BURG INTERIOR` zone), change it under the entity's settings with **Show as**.
+  Home Assistant keeps your choice across reloads, restarts and upgrades.
 - The icon follows the zone definition (burglary entry/exit, perimeter, interior, 24-hour,
   tamper, fire, CO, panic, medical, automation, power supervision, water, hi/lo temp) and
   changes when the zone opens.
@@ -180,7 +192,9 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 ## Requirements
 
-- **Home Assistant 2026.1.0 or newer.**
+- **Home Assistant 2026.10.0 or newer.** Starting with 0.2.1 the minimum is 2026.10.0
+  (it was 2026.1.0). On an older Home Assistant, HACS won't offer 0.2.1; update Home
+  Assistant first, or stay on 0.2.0.
 - An **Elk E27** panel on your local network that Home Assistant can reach over TCP. Manual
   setup connects on port **2101**.
   Tested on an E27 with firmware **0.0.6.4** (hardware 0.0.1.4, bootloader 0.0.2.24). Other
@@ -201,6 +215,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | CI: 2026.10.2 (minimum 2026.10.0); hardware: TBD | TBD |
 | 0.2.0 | [0.3.14](https://pypi.org/project/elke27/0.3.14/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.9 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
@@ -680,7 +695,6 @@ These are problems that are tracked for a fix.
 - **Stale zone entities:** a zone you delete in the panel, or change to `UNDEFINED`, keeps its
   entity. Delete it yourself in Home Assistant. (`UNDEFINED` zones are only skipped at first
   setup.)
-- **Fire, CO and water zones show as generic openings**, not smoke, CO or moisture sensors.
 - **Address changes:** after the panel's IP address changes, reconnects keep using the old
   address. Use a DHCP reservation. If the integration knows the panel's MAC, run Manual setup
   at the new address to update the entry in place; otherwise delete the old entry first, then add it again (adding without deleting leaves

@@ -23,6 +23,7 @@ import ast
 import configparser
 from pathlib import Path
 import re
+import tokenize
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "custom_components" / "elke27"
@@ -63,11 +64,12 @@ def _test_modules() -> list[Path]:
 _NOQA = re.compile(r"#\s*(ruff:\s*)?noqa\b(?::([^#]*))?", re.IGNORECASE)
 WATCHED = ("SLF001", "BLE001")
 
-# "<file>:<code>" -> lines that silence it. The key ends in ":file" for a
-# file-level ruff noqa header. Codes may be comma- or space-separated, as ruff
-# accepts both, in any case. A bare line-level noqa (no codes) silences every
-# rule, so it counts for each watched code. New tests use the public API and
-# never add to this.
+# "<file>:<code>" -> comments that silence it. The key ends in ":file" for a
+# file-level ruff noqa header. Only real comments count (tokenized, so noqa text in
+# strings and docstrings is ignored). Matching is case-insensitive, codes may be
+# comma- or space-separated, and a bare noqa (no codes, line- or file-level)
+# counts for every watched code. New tests use the public API and never add to
+# this.
 NOQA_CEILING: dict[str, int] = {
     "custom_components/elke27/coordinator.py:BLE001": 4,
     "custom_components/elke27/panel_mac.py:BLE001": 1,
@@ -84,16 +86,24 @@ NOQA_CEILING: dict[str, int] = {
 }
 
 
+def _comments(path: Path) -> list[str]:
+    with path.open("rb") as handle:
+        return [
+            tok.string
+            for tok in tokenize.tokenize(handle.readline)
+            if tok.type == tokenize.COMMENT
+        ]
+
+
 def _noqa_counts() -> dict[str, int]:
     counts: dict[str, int] = {}
     for path in [*_files(SOURCE), *_test_modules()]:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            for match in _NOQA.finditer(line):
+        for comment in _comments(path):
+            for match in _NOQA.finditer(comment):
                 listed = (match.group(2) or "").strip()
                 codes = set(re.split(r"[\s,]+", listed.upper()))
-                bare = not listed and not match.group(1)
                 for code in WATCHED:
-                    if bare or code in codes:
+                    if not listed or code in codes:
                         key = f"{_rel(path)}:{code}" + (
                             ":file" if match.group(1) else ""
                         )
@@ -110,26 +120,8 @@ def test_no_new_noqa_for_private_access_or_broad_except() -> None:
     )
 
 
-def test_tests_reach_no_private_library_members() -> None:
-    """Private access ruff SLF001 cannot see: imports and getattr("_x")."""
-    counts: dict[str, int] = {}
-    for path in _test_modules():
-        for node in ast.walk(_tree(path)):
-            if (
-                isinstance(node, ast.ImportFrom)
-                and (node.module or "").startswith(("elke27_lib", "custom_components"))
-                and any(_is_private(alias.name) for alias in node.names)
-            ) or (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in {"getattr", "setattr", "hasattr", "delattr"}
-                and _is_private(_literal_name(node) or "")
-            ):
-                counts[_rel(path)] = counts.get(_rel(path), 0) + 1
-    assert counts == LEGACY_PRIVATE_IMPORTS
-
-
-# Existing private imports/reflection per test file. May only shrink.
+# Private imports/reflection per test file, counted per private name. May only
+# shrink: lower or drop an entry when you remove one.
 LEGACY_PRIVATE_IMPORTS: dict[str, int] = {
     "tests/test_area_devices.py": 1,
     "tests/test_arming.py": 1,
@@ -137,6 +129,31 @@ LEGACY_PRIVATE_IMPORTS: dict[str, int] = {
     "tests/test_entities.py": 1,
     "tests/test_init.py": 1,
 }
+
+
+def test_tests_reach_no_private_library_members() -> None:
+    """Private access ruff SLF001 cannot see: imports and getattr("_x")."""
+    counts: dict[str, int] = {}
+    for path in _test_modules():
+        for node in ast.walk(_tree(path)):
+            hits = 0
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+                ("elke27_lib", "custom_components")
+            ):
+                hits = sum(1 for alias in node.names if _is_private(alias.name))
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"getattr", "setattr", "hasattr", "delattr"}
+                and _is_private(_literal_name(node) or "")
+            ):
+                hits = 1
+            if hits:
+                counts[_rel(path)] = counts.get(_rel(path), 0) + hits
+    assert counts == LEGACY_PRIVATE_IMPORTS, (
+        "Use the public API instead of private imports/reflection. If you removed "
+        "one, lower LEGACY_PRIVATE_IMPORTS."
+    )
 
 
 # --- helpers imported from other test modules -------------------------------------
@@ -149,15 +166,42 @@ LEGACY_TEST_MODULE_IMPORTS = {
 }
 
 
+_TEST_PACKAGES = {"", "tests"}
+
+
+def _imported_test_modules(path: Path) -> set[str]:
+    """
+    Return every test module imported, in any import form.
+
+    Covers import tests.test_x, import test_x, from tests.test_x import y,
+    from tests import test_x and from . import test_x.
+    """
+    found: set[str] = set()
+    for node in ast.walk(_tree(path)):
+        if isinstance(node, ast.Import):
+            found |= {
+                a.name for a in node.names if a.name.split(".")[-1].startswith("test_")
+            }
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module.split(".")[-1].startswith("test_"):
+                found.add(module)
+            elif node.level or module in _TEST_PACKAGES:
+                prefix = f"{module}." if module else "." * node.level
+                found |= {
+                    f"{prefix}{a.name}"
+                    for a in node.names
+                    if a.name.startswith("test_")
+                }
+    return found
+
+
 def test_no_helper_imports_between_test_modules() -> None:
     """Shared fakes and fixtures live in conftest.py, not in another test module."""
     found = {
-        (_rel(path), node.module)
+        (_rel(path), module)
         for path in _test_modules()
-        for node in ast.walk(_tree(path))
-        if isinstance(node, ast.ImportFrom)
-        and node.module
-        and node.module.split(".")[-1].startswith("test_")
+        for module in _imported_test_modules(path)
     }
     assert found - LEGACY_TEST_MODULE_IMPORTS == set(), (
         "Move shared helpers to conftest.py"
@@ -309,7 +353,6 @@ def test_retry_docstrings_are_pinned_by_tests() -> None:
 GETATTR_LITERAL_CEILING: dict[str, int] = {
     "custom_components/elke27/arming.py": 1,
     "custom_components/elke27/config_flow.py": 26,
-    "custom_components/elke27/entity.py": 1,
     "custom_components/elke27/errors.py": 1,
     "custom_components/elke27/panel_mac.py": 2,
 }

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from elke27_lib import (
     ClientConfig,
@@ -33,13 +33,16 @@ from elke27_lib.events import (
     ZoneStatusUpdated,
 )
 
+from homeassistant.components import persistent_notification
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
+    ServiceValidationError,
 )
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -67,6 +70,8 @@ from .errors import (
     COMMAND_ERRORS,
     NOT_ACCEPTED_MESSAGE,
     _error_message,
+    code_rejected_error,
+    command_error,
     is_connection_error,
     is_timeout_error,
     panel_error_code,
@@ -106,6 +111,9 @@ DEBOUNCED_REFRESH_ERRORS: tuple[type[Exception], ...] = (
     *COMMAND_ERRORS,
     HomeAssistantError,
 )
+
+
+_ROLLBACK_ERRORS: tuple[type[Exception], ...] = (HomeAssistantError, *COMMAND_ERRORS)
 
 
 class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
@@ -225,6 +233,22 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             translation_domain=DOMAIN,
             translation_key="cannot_connect",
             translation_placeholders={"host": self._host, "port": str(self._port)},
+        )
+
+    def is_child_area_device(self, identifier: str) -> bool:
+        """
+        Return True when 0.2.0 registered this area device as a child device.
+
+        0.2.0 on HA 2026.10 created area devices as child devices, and the same
+        identifiers can't be registered again as a regular device. Checked from
+        the registry each time, so areas the panel reports after setup get the
+        right layout too.
+        """
+        return (
+            dr.async_get(self.hass).async_get_child_device_by_identifier(
+                (DOMAIN, identifier), self.config_entry.entry_id
+            )
+            is not None
         )
 
     async def async_shutdown_client(self) -> None:
@@ -648,9 +672,13 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         *,
         attempted: list[ZoneState] | None = None,
         gate: Callable[[], Awaitable[None]] | None = None,
+        raise_code_rejected: bool = True,
     ) -> list[ZoneState]:
         """
         Bypass open, non-bypassed zones assigned to the given area.
+
+        With ``raise_code_rejected`` False, a rejected code is raised as a
+        ZoneBypassFailedError (caused by the refusal) for the caller to report.
 
         Return the zones that were bypassed. Stop at the first failure without
         retrying it (a refusal is reported, never retried); ZoneBypassFailedError
@@ -674,6 +702,12 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                     zone, PIN_REQUIRED_REASON, bypassed, pin_required=True
                 ) from err
             except HomeAssistantError as err:
+                rejected = code_rejected_error(err)
+                if rejected is not None and raise_code_rejected:
+                    # A rejected code is a user error: undo, then re-raise as is.
+                    await self.async_raise_code_rejected(
+                        rejected, bypassed, pin, gate=gate
+                    )
                 raise ZoneBypassFailedError(zone, str(err), bypassed) from err
             if not acknowledged:
                 raise ZoneBypassFailedError(
@@ -749,6 +783,48 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Return True when the task was cancelled by cancel_arm_automatic."""
         return task is not None and task in self._disarm_cancelled
 
+    async def async_raise_code_rejected(
+        self,
+        rejected: ServiceValidationError,
+        bypassed: Sequence[ZoneState],
+        pin: str | None,
+        *,
+        gate: Callable[[], Awaitable[None]] | None = None,
+    ) -> NoReturn:
+        """
+        Roll back ``bypassed``, then re-raise the code_rejected error unchanged.
+
+        A failed rollback never replaces the refusal: the zones still bypassed
+        are logged by zone number only and ``rejected`` is raised regardless.
+        """
+        still_bypassed: list[ZoneState] = []
+        if bypassed:
+            try:
+                _rolled_back, still_bypassed = await self.async_rollback_bypasses(
+                    tuple(bypassed), pin, gate=gate
+                )
+            except _ROLLBACK_ERRORS:  # never hide the refusal behind these
+                still_bypassed = list(bypassed)
+        if still_bypassed:
+            zone_ids = ", ".join(str(zone.zone_id) for zone in still_bypassed)
+            _LOGGER.warning(
+                "Code rejected; zones still bypassed after rollback: %s", zone_ids
+            )
+            # Tell the user, not only the log: zone numbers only, never the code.
+            persistent_notification.async_create(
+                self.hass,
+                title="Elk E27 zones still bypassed",
+                message=(
+                    "The code was rejected and these zones could not be"
+                    f" un-bypassed, so they are still bypassed: zones {zone_ids}."
+                    " Clear them with elke27.zone_bypass and bypass: false."
+                ),
+                notification_id=(
+                    f"elke27_code_rejected_bypass_{self.config_entry.entry_id}"
+                ),
+            )
+        raise rejected
+
     async def async_rollback_bypasses(
         self,
         zones: list[ZoneState] | tuple[ZoneState, ...],
@@ -813,7 +889,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_error(err) from err
         await self._async_after_write(
             "bypass", refresh_ok=refresh_ok, zone_id=zone_id, epoch=epoch
         )
@@ -915,7 +991,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_error(err) from err
         await self._async_after_write(
             "arm", refresh_ok=refresh_ok, area_id=area_id, epoch=epoch
         )
@@ -973,14 +1049,14 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_error(err) from err
         await self._async_after_write(
             "disarm", refresh_ok=refresh_ok, area_id=area_id, epoch=epoch
         )
         return True
 
     # D4: the three writes call the elke27 public methods with
-    # return_result=True (elke27 0.3.14 CommandResult) and return its
+    # return_result=True (elke27 CommandResult, since 0.3.14) and return its
     # status_refresh_ok. Failures raise the library's public errors.
 
     async def _async_write_arm(
