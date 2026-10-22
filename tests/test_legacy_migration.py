@@ -68,9 +68,6 @@ from custom_components.elke27.migration import (
     record_issue_id,
     validate_legacy_migration_record,
 )
-from homeassistant.components.repairs.issue_handler import (
-    async_process_repairs_platforms,
-)
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
@@ -271,6 +268,10 @@ def seed_legacy_registry(
             config_entry=entry,
             device_id=device.id,
             suggested_object_id=object_id,
+            # 0.1.x entities carry a name of their own; HA 2026.10 only lets an
+            # entity with its own name hold its own area.
+            has_entity_name=True,
+            original_name=object_id.removeprefix("elk_").replace("_", " ").title(),
         )
         updates: dict[str, Any] = {}
         if "area" in settings:
@@ -423,7 +424,9 @@ async def test_upgrade_from_017_in_place_with_one_relink(
     # Zones and the alarm panel moved to the per-area device; switch and
     # sensors stayed on the panel.
     ent_reg = er.async_get(hass)
-    area_device = dev_reg.async_get_device(identifiers={(DOMAIN, f"{KEY}:area:1")})
+    area_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{KEY}:area:1"), entry.entry_id
+    )
     assert area_device is not None
     zone = ent_reg.async_get(legacy["zone:1"])
     siren = ent_reg.async_get(legacy["output:1"])
@@ -1207,7 +1210,9 @@ async def test_relink_while_pending_keys_on_discovery_mac(
     assert entry.data[CONF_PANEL_MAC] == RAW_MAC
     assert entry.data[CONF_PANEL_MAC_FILLED] is False
     assert entry.state is ConfigEntryState.LOADED
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, KEY)})
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, KEY), entry.entry_id
+    )
     assert device is not None
 
 
@@ -1854,7 +1859,6 @@ _STRINGS_DIR = Path(__file__).parent.parent / "custom_components/elke27"
 
 async def _flow_manager(hass: HomeAssistant) -> Any:
     assert await async_setup_component(hass, "repairs", {})
-    await async_process_repairs_platforms(hass)
     return hass.data["repairs"]["flow_manager"]
 
 
@@ -2352,3 +2356,111 @@ def test_plain_retry_text_matches_blocking_kind() -> None:
     assert "→ Devices (" in retry("legacy_migration_blocked_mixed")
     assert "→ Entities" in retry("legacy_migration_blocked_mixed")
     assert "→ Entities" in retry("legacy_migration_blocked")
+
+
+# 0.1.7 entity IDs through the migration, and 0.2.0 child area devices (#120).
+
+
+async def test_017_entity_ids_stay_stable_through_migration_and_reload(
+    hass: HomeAssistant, panel: ClientHarness, flow_client: Any
+) -> None:
+    """Every 0.1.7 entity ID survives the upgrade and a later reload unchanged."""
+    entry = entry_017()
+    entry.add_to_hass(hass)
+    legacy = seed_legacy_registry(
+        hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
+    )
+    ent_reg = er.async_get(hass)
+    ids_before = {
+        entity_id: ent_reg.async_get(entity_id).id  # type: ignore[union-attr]
+        for entity_id in legacy.values()
+    }
+
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    await relink(hass, entry)
+    assert entry.state is ConfigEntryState.LOADED
+
+    for _ in range(2):  # straight after the upgrade, then after a reload
+        regs = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+        by_id = {reg.id: reg.entity_id for reg in regs}
+        for entity_id, registry_id in ids_before.items():
+            assert by_id.get(registry_id) == entity_id
+        assert not [reg.entity_id for reg in regs if reg.entity_id.endswith("_2")]
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.state is ConfigEntryState.LOADED
+
+    # 0.1.7 had no area devices, so the new one links by device id, not as a
+    # child device.
+    dev_reg = dr.async_get(hass)
+    identifier = (DOMAIN, f"{KEY}:area:1")
+    area_device = dev_reg.async_get_device_by_identifier(identifier, entry.entry_id)
+    assert area_device is not None
+    assert area_device.via_device_id is not None
+    assert (
+        dev_reg.async_get_child_device_by_identifier(identifier, entry.entry_id) is None
+    )
+
+
+async def test_020_child_area_device_kept_through_version_bump(
+    hass: HomeAssistant, panel: ClientHarness
+) -> None:
+    """A 0.2.0 entry with child area devices only gets the version bump."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Panel",
+        version=1,
+        unique_id=KEY,
+        data={
+            CONF_HOST: HOST,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS.to_json(),
+            CONF_INTEGRATION_ID: INTEGRATION_ID,
+            CONF_PANEL_MAC: RAW_MAC,
+        },
+    )
+    entry.add_to_hass(hass)
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+    panel_device = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, KEY)}, name="Test Panel"
+    )
+    child = dev_reg.async_get_or_create_child(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"{KEY}:area:1")},
+        name="Main House",
+        parent_device_id=panel_device.id,
+    )
+    seeded = {
+        ent_reg.async_get_or_create(
+            domain,
+            DOMAIN,
+            unique_id,
+            suggested_object_id=object_id,
+            config_entry=entry,
+            device_id=child.id,
+        ).entity_id
+        for domain, unique_id, object_id in (
+            ("alarm_control_panel", f"{KEY}:1", "test_panel_main_house"),
+            ("binary_sensor", f"{KEY}:1", "test_panel_main_house_zone_1"),
+        )
+    }
+    data_before = dict(entry.data)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.version == 2
+    assert entry.state is ConfigEntryState.LOADED
+    assert dict(entry.data) == data_before
+    assert reauth_flows(hass, entry) == []
+    kept = dev_reg.async_get_child_device_by_identifier(
+        (DOMAIN, f"{KEY}:area:1"), entry.entry_id
+    )
+    assert kept is not None
+    assert kept.id == child.id
+    for entity_id in seeded:
+        reg = ent_reg.async_get(entity_id)
+        assert reg is not None
+        assert reg.device_id == child.id

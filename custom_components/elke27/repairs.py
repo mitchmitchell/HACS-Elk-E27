@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-import voluptuous as vol
+import probatio
 
-from homeassistant.components.repairs import RepairsFlow
+from homeassistant.components.repairs import RepairsFlow, RepairsFlowResult
 from homeassistant.helpers import entity_registry as er, issue_registry as ir
 
 from .const import DOMAIN
@@ -19,7 +19,6 @@ from .migration import (
 )
 
 if TYPE_CHECKING:
-    from homeassistant import data_entry_flow
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
@@ -40,7 +39,7 @@ class _EntryFlow(RepairsFlow):
     def _entry(self) -> ConfigEntry | None:
         return self.hass.config_entries.async_get_entry(self._entry_id)
 
-    def _finish(self) -> data_entry_flow.FlowResult:
+    def _finish(self) -> RepairsFlowResult:
         ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
         if self._entry() is not None:
             self.hass.config_entries.async_schedule_reload(self._entry_id)
@@ -53,17 +52,17 @@ class RetryFlow(_EntryFlow):
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,  # noqa: ARG002  # issue data
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Start at the confirm step (init receives the issue data)."""
         return await self.async_step_confirm()
 
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Confirm, then reload; the upgrade picks up where it stopped."""
         if user_input is not None:
             return self._finish()
-        return self.async_show_form(step_id="confirm", data_schema=vol.Schema({}))
+        return self.async_show_form(step_id="confirm", data_schema=probatio.Schema({}))
 
 
 class RecordRebuildFlow(_EntryFlow):
@@ -72,13 +71,13 @@ class RecordRebuildFlow(_EntryFlow):
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,  # noqa: ARG002  # issue data
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Start at the confirm step (init receives the issue data)."""
         return await self.async_step_confirm()
 
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Confirm the rebuild; ask again if a duplicate's keeper is unclear."""
         entry = self._entry()
         if entry is None:
@@ -87,11 +86,11 @@ class RecordRebuildFlow(_EntryFlow):
             if ambiguous_keepers(self.hass, entry):
                 return await self.async_step_keepers()
             return self._rebuild(entry)
-        return self.async_show_form(step_id="confirm", data_schema=vol.Schema({}))
+        return self.async_show_form(step_id="confirm", data_schema=probatio.Schema({}))
 
     async def async_step_keepers(
         self, user_input: dict[str, Any] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Show which entity of each duplicate set is kept and which is left."""
         entry = self._entry()
         if entry is None:
@@ -101,14 +100,14 @@ class RecordRebuildFlow(_EntryFlow):
             return self._rebuild(entry)
         return self.async_show_form(
             step_id="keepers",
-            data_schema=vol.Schema({}),
+            data_schema=probatio.Schema({}),
             description_placeholders={
                 "keep": _bullets(c.keep for c in choices),
                 "leave": _bullets(e for c in choices for e in c.leave),
             },
         )
 
-    def _rebuild(self, entry: ConfigEntry) -> data_entry_flow.FlowResult:
+    def _rebuild(self, entry: ConfigEntry) -> RepairsFlowResult:
         async_rebuild_legacy_record(self.hass, entry)
         return self._finish()
 
@@ -121,7 +120,7 @@ class BlockedUpgradeFlow(_EntryFlow):
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,  # noqa: ARG002  # issue data
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Route to the confirm step, or to a plain retry if nothing is ours."""
         entry = self._entry()
         if entry is None:
@@ -133,7 +132,7 @@ class BlockedUpgradeFlow(_EntryFlow):
 
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """List every entity to delete; submitting this step is the confirm."""
         entry = self._entry()
         if entry is None:
@@ -157,19 +156,19 @@ class BlockedUpgradeFlow(_EntryFlow):
             placeholders["kept"] = _bullets(reg.entity_id for reg in others)
         return self.async_show_form(
             step_id="confirm_partial" if others else "confirm",
-            data_schema=vol.Schema({}),
+            data_schema=probatio.Schema({}),
             description_placeholders=placeholders,
         )
 
     async def async_step_confirm_partial(
         self, user_input: dict[str, Any] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Confirm step that also lists leftovers to remove by hand."""
         return await self.async_step_confirm(user_input)
 
     async def async_step_retry(
         self, user_input: dict[str, Any] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Nothing this flow may delete: confirm, then retry only."""
         if user_input is not None:
             return self._finish()
@@ -178,17 +177,17 @@ class BlockedUpgradeFlow(_EntryFlow):
         if split is not None and split[1]:
             return self.async_show_form(
                 step_id="retry_manual",
-                data_schema=vol.Schema({}),
+                data_schema=probatio.Schema({}),
                 description_placeholders={
                     "count": str(len(split[1])),
                     "entities": _bullets(reg.entity_id for reg in split[1]),
                 },
             )
-        return self.async_show_form(step_id="retry", data_schema=vol.Schema({}))
+        return self.async_show_form(step_id="retry", data_schema=probatio.Schema({}))
 
     async def async_step_retry_manual(
         self, user_input: dict[str, Any] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Retry step that lists leftovers this flow can't delete."""
         return await self.async_step_retry(user_input)
 

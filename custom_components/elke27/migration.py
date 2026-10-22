@@ -206,7 +206,7 @@ def validate_legacy_migration_record(entry: ConfigEntry) -> None:
     for row in record["plan"]:
         try:
             n = int(row["n"])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise LegacyMigrationRecordError("plan[].n", "invalid") from None  # noqa: EM101  # field name
         if new_unique_id("key", row["kind"], n) is None:
             raise LegacyMigrationRecordError("plan[].kind", "unmappable")  # noqa: EM101  # field name
@@ -618,8 +618,10 @@ def _plan_device(
         return None
     device = devices[0]
     target = (DOMAIN, key)
-    owner = dr.async_get(hass).async_get_device(identifiers={target})
-    if owner is not None and owner.id != device.id:
+    # HA 2026.10: identifiers are only unique per config entry, so check every
+    # device that holds the panel key, not just the first one.
+    owners = dr.async_get(hass).async_get_devices(identifiers={target})
+    if any(owner.id != device.id for owner in owners):
         plan.conflicts.append(None)  # the panel key is owned by another device
         return device.area_id
     if {ident for ident in device.identifiers if ident[0] == DOMAIN} != {target}:
@@ -788,7 +790,7 @@ def _async_write(hass: HomeAssistant, plan: _Plan) -> None:
                     change.old_unique_id,
                     pin=False,
                 )
-            except (ValueError, HomeAssistantError):
+            except ValueError, HomeAssistantError:
                 failed += 1
                 not_undone.append(change.entity_id)
         if device_moved and plan.device_id is not None:
@@ -796,7 +798,7 @@ def _async_write(hass: HomeAssistant, plan: _Plan) -> None:
                 dev_reg.async_update_device(
                     plan.device_id, new_identifiers=plan.old_identifiers
                 )
-            except (ValueError, HomeAssistantError):
+            except ValueError, HomeAssistantError:
                 failed += 1
         if failed:
             raise PartialRollbackError(
@@ -830,7 +832,7 @@ def async_apply_legacy_migration(
             plan.conflicts.extend(err.entity_ids)
             plan.conflicts.extend([None] * (err.failed - len(err.entity_ids)))
             # No log here: the Repairs issue reports it and HA logs not-ready.
-        except (ValueError, HomeAssistantError):
+        except ValueError, HomeAssistantError:
             # Not a conflict: a registry write failed and was fully undone.
             # The error text can carry identifiers: never shown or logged.
             write_failed = True
