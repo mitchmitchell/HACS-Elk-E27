@@ -3,25 +3,26 @@
     "abort": {
       "already_configured": "This panel is already configured.",
       "missing_context": "Panel details are missing. Restart the flow.",
-      "reauth_successful": "Linking was updated successfully.",
-      "wrong_panel": "The credentials linked a different panel than the one configured for this entry."
+      "reauth_successful": "Panel relinked.",
+      "wrong_panel": "The credentials linked a different panel than the one configured for this entry.",
+      "reauth_successful_upgrade": "Panel relinked. The upgrade will finish when Elk E27 reloads."
     },
     "error": {
       "cannot_connect": "Unable to connect to the panel. Confirm the host is reachable and the panel is online.",
       "invalid_auth": "Unable to authenticate with the panel. Check the access code, passphrase, and network connectivity.",
       "link_required": "The panel requires linking. Enter the access code and passphrase again.",
       "no_panels_found": "No panels were discovered. Confirm the panel is online, then try again or set it up manually.",
-      "unknown": "Unexpected error"
+      "unknown": "Something went wrong linking the panel. Check the access code and passphrase and try again. If it keeps failing, check the logs."
     },
     "step": {
       "discover": {
         "data": {
-          "access_code": "Access code (used for linking, NOT a PIN)",
+          "access_code": "Access code (for linking, not your PIN)",
           "panel": "Panel",
           "passphrase": "Passphrase"
         },
         "data_description": {
-          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "access_code": "The access code you set for linking the panel.",
           "panel": "Select the panel to add.",
           "passphrase": "The passphrase used during linking."
         },
@@ -30,11 +31,11 @@
       },
       "link": {
         "data": {
-          "access_code": "Access code (used for linking, NOT a PIN)",
+          "access_code": "Access code (for linking, not your PIN)",
           "passphrase": "Passphrase"
         },
         "data_description": {
-          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "access_code": "The access code you set for linking the panel.",
           "passphrase": "The passphrase used during linking."
         },
         "description": "Enter the access code and passphrase to link the panel.",
@@ -42,12 +43,12 @@
       },
       "manual": {
         "data": {
-          "access_code": "Access code (used for linking, NOT a PIN)",
+          "access_code": "Access code (for linking, not your PIN)",
           "host": "Host",
           "passphrase": "Passphrase"
         },
         "data_description": {
-          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "access_code": "The access code you set for linking the panel.",
           "host": "The panel host name or IP address.",
           "passphrase": "The passphrase used during linking."
         },
@@ -56,11 +57,11 @@
       },
       "reauth_confirm": {
         "data": {
-          "access_code": "Access code (used for linking, NOT a PIN)",
+          "access_code": "Access code (for linking, not your PIN)",
           "passphrase": "Passphrase"
         },
         "data_description": {
-          "access_code": "The panel access code used during linking. It is not a PIN.",
+          "access_code": "The access code you set for linking the panel.",
           "passphrase": "The passphrase used during linking."
         },
         "description": "Enter the access code and passphrase to relink the panel. After an upgrade from 0.1.x this one relink finishes the upgrade: entity IDs, areas, icons and history are kept.",
@@ -131,12 +132,168 @@
       "description": "The panel at {host} reports MAC {discovered}, but this entry was set up for the panel with MAC {stored}. The existing identity was kept. If you replaced the panel, delete this entry and add the new panel; otherwise check the address of this entry."
     },
     "legacy_migration_blocked": {
-      "title": "Elk E27 upgrade blocked",
-      "description": "The upgrade of {title} from 0.1.x could not finish because these new-format entities or devices already exist: {conflicts}. Nothing was changed and the entry will not load until this is fixed. Delete the conflicting entities (for example left over from a 0.2.0 trial) under Settings → Devices & services → Entities, then reload the integration."
+      "title": "Elk E27 upgrade blocked by leftover entities",
+      "description": "Elk E27 couldn't finish upgrading from the older version (0.1). {count, plural, one {# leftover entity already uses} other {# leftover entities already use}} the new names:{conflicts}\n\nNothing was changed. Select **Submit** to continue. The next screen shows which of them Elk E27 can delete for you and which you need to remove by hand, then retries the upgrade.",
+      "fix_flow": {
+        "step": {
+          "retry": {
+            "title": "Retry the Elk E27 upgrade",
+            "description": "Remove the leftover entities that block the upgrade of this Elk E27 entry by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
+          },
+          "confirm": {
+            "title": "Delete leftover entities",
+            "description": "{count, plural, one {This entity is} other {These # entities are}} left over from an earlier version (for example a 0.2.0 trial) and {count, plural, one {blocks} other {block}} the upgrade:{entities}\n\nSelect **Submit** to delete {count, plural, one {it} other {them}} and retry the upgrade. This removes {count, plural, one {that entity and its} other {those entities and their}} history link, so take a backup first. To keep {count, plural, one {it} other {them}}, close this and delete or rename {count, plural, one {it} other {them}} yourself under Settings → Devices & services → Entities."
+          },
+          "confirm_partial": {
+            "title": "Delete leftover entities",
+            "description": "{count, plural, one {This entity is} other {These # entities are}} left over from an earlier version (for example a 0.2.0 trial) and {count, plural, one {blocks} other {block}} the upgrade:{entities}\n\n{kept_count, plural, one {# more listed entity isn't} other {# more listed entities aren't}} owned by this Elk E27 entry, so this can't delete {kept_count, plural, one {it} other {them}}. Remove {kept_count, plural, one {it} other {them}} by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides {kept_count, plural, one {it} other {them}}, delete or disable that entry under Settings → Devices & services:{kept}\n\nSelect **Submit** to delete {count, plural, one {it} other {them}} and retry the upgrade. This removes {count, plural, one {that entity and its} other {those entities and their}} history link, so take a backup first. To keep {count, plural, one {it} other {them}}, close this and delete or rename {count, plural, one {it} other {them}} yourself under Settings → Devices & services → Entities."
+          },
+          "retry_manual": {
+            "title": "Remove leftover entities by hand",
+            "description": "{count, plural, one {This leftover entity isn't} other {These # leftover entities aren't}} owned by this Elk E27 entry, so this can't delete {count, plural, one {it} other {them}}:{entities}\n\nRemove {count, plural, one {it} other {them}} by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides {count, plural, one {it} other {them}}, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
+          }
+        },
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        }
+      }
     },
     "legacy_duplicates": {
-      "title": "Duplicate Elk E27 entities from 0.1.x",
-      "description": "While upgrading {title}, these older duplicate entities were left unchanged because another entity with the same panel number was kept: {entities}. They stay unavailable. Delete them under Settings → Devices & services → Entities."
+      "title": "Duplicate Elk E27 entities from the older version",
+      "description": "The upgrade kept one entity for each panel item. These older duplicates were left and stay unavailable:{entities}\n\nTo remove them: go to Settings → Devices & services → Entities, search for each entity ID above, open it, select the gear icon, then select **Delete**. Then reload Elk E27 (Settings → Devices & services → Elk E27 → ⋮ → **Reload**) and this notice clears."
+    },
+    "legacy_migration_partial": {
+      "title": "Elk E27 upgrade interrupted",
+      "description": "The Elk E27 upgrade hit an error, and {count, plural, one {# change couldn't} other {# changes couldn't}} be undone. Affected entities:{conflicts}\n\nSelect **Submit** to retry and finish the upgrade. If you made a backup before upgrading, you can restore it.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Finish the Elk E27 upgrade",
+            "description": "Select **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept."
+          }
+        },
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        }
+      }
+    },
+    "legacy_migration_blocked_devices": {
+      "title": "Elk E27 upgrade blocked by a leftover device",
+      "description": "Elk E27 couldn't finish upgrading from the older version (0.1): {count, plural, one {# leftover Elk E27 device is} other {# leftover Elk E27 devices are}} in the way. Nothing was changed. Delete the leftover {count, plural, one {device} other {devices}} under Settings → Devices & services → Devices, then select **Submit** to retry.",
+      "fix_flow": {
+        "step": {
+          "retry": {
+            "title": "Retry the Elk E27 upgrade",
+            "description": "Delete the leftover Elk E27 device or devices that block the upgrade of this Elk E27 entry by hand under Settings → Devices & services → Devices (open each one, ⋮ → **Delete**). Then select **Submit** to retry the upgrade."
+          },
+          "confirm": {
+            "title": "Delete leftover entities",
+            "description": "{count, plural, one {This entity is} other {These # entities are}} left over from an earlier version (for example a 0.2.0 trial) and {count, plural, one {blocks} other {block}} the upgrade:{entities}\n\nSelect **Submit** to delete {count, plural, one {it} other {them}} and retry the upgrade. This removes {count, plural, one {that entity and its} other {those entities and their}} history link, so take a backup first. To keep {count, plural, one {it} other {them}}, close this and delete or rename {count, plural, one {it} other {them}} yourself under Settings → Devices & services → Entities."
+          },
+          "confirm_partial": {
+            "title": "Delete leftover entities",
+            "description": "{count, plural, one {This entity is} other {These # entities are}} left over from an earlier version (for example a 0.2.0 trial) and {count, plural, one {blocks} other {block}} the upgrade:{entities}\n\n{kept_count, plural, one {# more listed entity isn't} other {# more listed entities aren't}} owned by this Elk E27 entry, so this can't delete {kept_count, plural, one {it} other {them}}. Remove {kept_count, plural, one {it} other {them}} by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides {kept_count, plural, one {it} other {them}}, delete or disable that entry under Settings → Devices & services:{kept}\n\nSelect **Submit** to delete {count, plural, one {it} other {them}} and retry the upgrade. This removes {count, plural, one {that entity and its} other {those entities and their}} history link, so take a backup first. To keep {count, plural, one {it} other {them}}, close this and delete or rename {count, plural, one {it} other {them}} yourself under Settings → Devices & services → Entities."
+          },
+          "retry_manual": {
+            "title": "Remove leftover entities by hand",
+            "description": "{count, plural, one {This leftover entity isn't} other {These # leftover entities aren't}} owned by this Elk E27 entry, so this can't delete {count, plural, one {it} other {them}}:{entities}\n\nRemove {count, plural, one {it} other {them}} by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides {count, plural, one {it} other {them}}, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
+          }
+        },
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        }
+      }
+    },
+    "legacy_migration_blocked_mixed": {
+      "title": "Elk E27 upgrade blocked by leftover items",
+      "description": "Elk E27 couldn't finish upgrading from the older version (0.1). {count, plural, one {# leftover item is} other {# leftover items are}} in the way, {other, plural, one {# of them a device} other {# of them devices}}. Leftover entities:{conflicts}\n\nNothing was changed. Delete the leftover {other, plural, one {device} other {devices}} under Settings → Devices & services → Devices, then select **Submit** to continue. The next screen shows which of them Elk E27 can delete for you and which you need to remove by hand, then retries the upgrade.",
+      "fix_flow": {
+        "step": {
+          "retry": {
+            "title": "Retry the Elk E27 upgrade",
+            "description": "Delete any leftover Elk E27 device that blocks the upgrade of this Elk E27 entry by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**). Remove any remaining leftover entities by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
+          },
+          "confirm": {
+            "title": "Delete leftover entities",
+            "description": "{count, plural, one {This entity is} other {These # entities are}} left over from an earlier version (for example a 0.2.0 trial) and {count, plural, one {blocks} other {block}} the upgrade:{entities}\n\nSelect **Submit** to delete {count, plural, one {it} other {them}} and retry the upgrade. This removes {count, plural, one {that entity and its} other {those entities and their}} history link, so take a backup first. To keep {count, plural, one {it} other {them}}, close this and delete or rename {count, plural, one {it} other {them}} yourself under Settings → Devices & services → Entities."
+          },
+          "confirm_partial": {
+            "title": "Delete leftover entities",
+            "description": "{count, plural, one {This entity is} other {These # entities are}} left over from an earlier version (for example a 0.2.0 trial) and {count, plural, one {blocks} other {block}} the upgrade:{entities}\n\n{kept_count, plural, one {# more listed entity isn't} other {# more listed entities aren't}} owned by this Elk E27 entry, so this can't delete {kept_count, plural, one {it} other {them}}. Remove {kept_count, plural, one {it} other {them}} by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides {kept_count, plural, one {it} other {them}}, delete or disable that entry under Settings → Devices & services:{kept}\n\nSelect **Submit** to delete {count, plural, one {it} other {them}} and retry the upgrade. This removes {count, plural, one {that entity and its} other {those entities and their}} history link, so take a backup first. To keep {count, plural, one {it} other {them}}, close this and delete or rename {count, plural, one {it} other {them}} yourself under Settings → Devices & services → Entities."
+          },
+          "retry_manual": {
+            "title": "Remove leftover entities by hand",
+            "description": "{count, plural, one {This leftover entity isn't} other {These # leftover entities aren't}} owned by this Elk E27 entry, so this can't delete {count, plural, one {it} other {them}}:{entities}\n\nRemove {count, plural, one {it} other {them}} by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides {count, plural, one {it} other {them}}, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
+          }
+        },
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        }
+      }
+    },
+    "legacy_migration_partial_devices": {
+      "title": "Elk E27 upgrade interrupted",
+      "description": "The Elk E27 upgrade hit an error, and {count, plural, one {# device change couldn't} other {# device changes couldn't}} be undone. Select **Submit** to retry and finish the upgrade. If you made a backup before upgrading, you can restore it.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Finish the Elk E27 upgrade",
+            "description": "Select **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept."
+          }
+        },
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        }
+      }
+    },
+    "legacy_migration_partial_mixed": {
+      "title": "Elk E27 upgrade interrupted",
+      "description": "The Elk E27 upgrade hit an error, and {count, plural, one {# change couldn't} other {# changes couldn't}} be undone, {other, plural, one {# of them is} other {# of them are}} on the device. Affected entities:{conflicts}\n\nSelect **Submit** to retry and finish the upgrade. If you made a backup before upgrading, you can restore it.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Finish the Elk E27 upgrade",
+            "description": "Select **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept."
+          }
+        },
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        }
+      }
+    },
+    "legacy_migration_write_failed": {
+      "title": "Elk E27 upgrade couldn't save",
+      "description": "Elk E27 couldn't save the upgrade, so it undid every change. Your entities are as they were. Select **Submit** to retry. If you made a backup before upgrading, you can restore it.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Finish the Elk E27 upgrade",
+            "description": "Select **Submit** to reload Elk E27 and run the upgrade again. Nothing was changed by the failed attempt, so it starts from the beginning."
+          }
+        },
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        }
+      }
+    },
+    "legacy_migration_record_malformed": {
+      "title": "Elk E27 upgrade notes can't be read",
+      "description": "Elk E27 couldn't read the notes it saved when you upgraded from the older version (0.1), so it stopped before changing anything. Select **Submit** to rebuild the notes from your current entities and finish the upgrade. Your entity names and history are kept.",
+      "fix_flow": {
+        "step": {
+          "keepers": {
+            "title": "Confirm which entities to keep",
+            "description": "Some panel items have more than one older entity, and the choice rests on which was changed last. The upgrade will keep:{keep}\n\nand leave these unavailable:{leave}\n\nSelect **Submit** to continue. If this is wrong, close this and restore a backup from before the upgrade, if you made one."
+          },
+          "confirm": {
+            "title": "Rebuild the upgrade notes",
+            "description": "Rebuild the upgrade notes from your current entities and reload Elk E27?"
+          }
+        },
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        }
+      }
     }
   },
   "exceptions": {
@@ -159,10 +316,19 @@
       "message": "The client did not become ready before timeout."
     },
     "legacy_relink_required": {
-      "message": "This entry was upgraded from 0.1.x. Relink the panel (enter the access code and passphrase) to finish the upgrade; entity IDs are kept."
+      "message": "Elk E27 was upgraded from the older version (0.1). Relink the panel (enter the access code and passphrase) to finish; your entities are kept."
     },
     "legacy_migration_blocked": {
-      "message": "The upgrade from 0.1.x is blocked by {count} conflict(s); see Repairs. Nothing was changed."
+      "message": "The upgrade is blocked by leftover entities. Open Settings → Repairs to fix it."
+    },
+    "legacy_migration_partial": {
+      "message": "The upgrade was interrupted. Open Settings → Repairs to finish it."
+    },
+    "legacy_migration_record_malformed": {
+      "message": "Elk E27 couldn't read its upgrade notes. Open Settings → Repairs to fix it."
+    },
+    "legacy_migration_write_failed": {
+      "message": "The upgrade couldn't save, and nothing was changed. Open Settings → Repairs to retry."
     }
   },
   "selector": {

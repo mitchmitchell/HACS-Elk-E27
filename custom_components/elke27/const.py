@@ -23,6 +23,11 @@ MIGRATION_STATE_PENDING = "pending"
 MIGRATION_STATE_DONE = "done"
 ISSUE_LEGACY_MIGRATION_BLOCKED = "legacy_migration_blocked"
 ISSUE_LEGACY_DUPLICATES = "legacy_duplicates"
+# Same issue id as blocked; different text when an undo could not revert every write.
+ISSUE_LEGACY_MIGRATION_PARTIAL = "legacy_migration_partial"
+# Same issue id as blocked; a registry write failed and every write was undone.
+ISSUE_LEGACY_MIGRATION_WRITE_FAILED = "legacy_migration_write_failed"
+ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED = "legacy_migration_record_malformed"
 DISCOVER_HOST_TIMEOUT = 3.0
 ISSUE_PANEL_MAC_MISMATCH = "panel_mac_mismatch"
 
