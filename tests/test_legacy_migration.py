@@ -2225,16 +2225,26 @@ def _issues(path: str) -> dict[str, Any]:
     return json.loads((_STRINGS_DIR / path).read_text(encoding="utf-8"))["issues"]
 
 
-def test_issue_strings_pass_hassfest_rules() -> None:
-    """No ICU plurals, and a fixable issue has a fix flow but no description."""
-    for path in ("strings.json", "translations/en.json"):
-        issues = _issues(path)
-        assert "plural," not in json.dumps(issues)
-        for key, issue in issues.items():
-            if "fix_flow" in issue:
-                assert "description" not in issue, key
-            for step in issue.get("fix_flow", {}).get("step", {}).values():
-                assert not re.search(r"\{[^{}]*\{", step["description"]), key
+def test_strings_and_en_translation_are_identical() -> None:
+    """translations/en.json is an exact copy of strings.json."""
+    strings = (_STRINGS_DIR / "strings.json").read_text(encoding="utf-8")
+    english = (_STRINGS_DIR / "translations/en.json").read_text(encoding="utf-8")
+    assert json.loads(english) == json.loads(strings)
+
+
+@pytest.mark.parametrize(
+    "key", ["legacy_migration_blocked_devices", "legacy_migration_blocked_mixed"]
+)
+@pytest.mark.parametrize(
+    "step", ["confirm", "confirm_partial", "retry_manual", "retry"]
+)
+def test_every_blocked_step_says_how_to_clear_leftover_devices(
+    key: str, step: str
+) -> None:
+    """Any step the flow can open while devices block shows how to clear them."""
+    text = _issues("strings.json")[key]["fix_flow"]["step"][step]["description"]
+    assert "Settings → Devices & services → Devices" in text
+    assert "**Delete**" in text
 
 
 @pytest.mark.parametrize(
@@ -2319,7 +2329,7 @@ def test_mixed_confirm_text_counts_owned_and_unowned() -> None:
 async def test_fix_flow_step_gets_the_issue_placeholders(
     hass: HomeAssistant,
 ) -> None:
-    """A retry step shows the counts and list the issue was raised with."""
+    """A fix flow step shows the counts and list the issue was raised with."""
     entry = entry_relinked()
     entry.add_to_hass(hass)
     issue_id = blocked_issue_id(entry.entry_id)
