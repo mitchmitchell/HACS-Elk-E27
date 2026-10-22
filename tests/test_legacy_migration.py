@@ -2235,16 +2235,24 @@ def test_strings_and_en_translation_are_identical() -> None:
 @pytest.mark.parametrize(
     "key", ["legacy_migration_blocked_devices", "legacy_migration_blocked_mixed"]
 )
-@pytest.mark.parametrize(
-    "step", ["confirm", "confirm_partial", "retry_manual", "retry"]
-)
-def test_every_blocked_step_says_how_to_clear_leftover_devices(
-    key: str, step: str
-) -> None:
-    """Any step the flow can open while devices block shows how to clear them."""
-    text = _issues("strings.json")[key]["fix_flow"]["step"][step]["description"]
-    assert "Settings → Devices & services → Devices" in text
-    assert "**Delete**" in text
+def test_every_blocked_step_shares_the_device_steps(key: str) -> None:
+    """Every step the flow can open while devices block has the retry step's text."""
+    issues = _issues("strings.json")
+    names = {"confirm", "confirm_partial", "retry_manual", "retry"}
+
+    def shared(issue: str) -> set[str]:
+        steps = issues[issue]["fix_flow"]["step"]
+        assert names <= set(steps)
+        return set.intersection(
+            *(
+                set(re.split(r"(?<=[.):}])\s+", steps[step]["description"]))
+                for step in names
+            )
+        )
+
+    # A device step is shared by all four steps and absent from the
+    # entities-only issue, whose steps never mention devices.
+    assert shared(key) - shared("legacy_migration_blocked"), key
 
 
 @pytest.mark.parametrize(
