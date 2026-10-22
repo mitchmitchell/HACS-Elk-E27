@@ -1844,8 +1844,11 @@ def test_issue_variant_never_leaves_a_placeholder_empty(
             Path(__file__).parent.parent / "custom_components/elke27/strings.json"
         ).read_text(encoding="utf-8")
     )
-    text = strings["issues"][key]["description"]
-    used = set(re.findall(r"(?<!one )(?<!other ){(\w+)[,}]", text))
+    # Fixable issues carry no description (hassfest): the fix flow's first
+    # step shows the issue's placeholders.
+    step = "confirm" if base == ISSUE_LEGACY_MIGRATION_PARTIAL else "retry"
+    text = strings["issues"][key]["fix_flow"]["step"][step]["description"]
+    used = set(re.findall(r"{(\w+)}", text))
     assert used == set(placeholders)
     for value in placeholders.values():
         assert value
@@ -2213,87 +2216,94 @@ def test_duplicates_issue_gives_the_exact_manual_step() -> None:
         assert "**Reload**" in text
 
 
-def _render_icu(text: str, values: dict[str, str]) -> str:
-    """Render the ICU plural and plain placeholders used in strings.json."""
-    plural = re.compile(r"\{(\w+), plural, one \{([^{}]*)\} other \{([^{}]*)\}\}")
-
-    def _plural(match: re.Match[str]) -> str:
-        count = int(values[match[1]])
-        return (match[2] if count == 1 else match[3]).replace("#", str(count))
-
-    text = plural.sub(_plural, text)
+def _render(text: str, values: dict[str, str]) -> str:
+    """Render the plain placeholders used in strings.json."""
     return re.sub(r"\{(\w+)\}", lambda m: values[m[1]], text)
 
 
+def _issues(path: str) -> dict[str, Any]:
+    return json.loads((_STRINGS_DIR / path).read_text(encoding="utf-8"))["issues"]
+
+
+def test_issue_strings_pass_hassfest_rules() -> None:
+    """No ICU plurals, and a fixable issue has a fix flow but no description."""
+    for path in ("strings.json", "translations/en.json"):
+        issues = _issues(path)
+        assert "plural," not in json.dumps(issues)
+        for key, issue in issues.items():
+            if "fix_flow" in issue:
+                assert "description" not in issue, key
+            for step in issue.get("fix_flow", {}).get("step", {}).values():
+                assert not re.search(r"\{[^{}]*\{", step["description"]), key
+
+
 @pytest.mark.parametrize(
-    ("key", "values", "singular", "plural"),
+    ("key", "step", "values", "shown"),
     [
         (
             "legacy_migration_blocked",
-            {"conflicts": "\n- switch.a"},
-            "1 leftover entity already uses",
-            "2 leftover entities already use",
+            "retry",
+            {"count": "2", "conflicts": "\n- switch.a\n- switch.b"},
+            ["(2):", "- switch.a", "- switch.b"],
         ),
         (
             "legacy_migration_blocked_devices",
-            {},
-            "1 leftover Elk E27 device is",
-            "2 leftover Elk E27 devices are",
+            "retry",
+            {"count": "3"},
+            ["devices in the way: 3."],
         ),
         (
             "legacy_migration_blocked_mixed",
-            {"conflicts": "\n- switch.a", "other": "1"},
-            "1 leftover item is",
-            "2 leftover items are",
+            "retry",
+            {"count": "3", "other": "1", "conflicts": "\n- switch.a"},
+            ["in the way: 3, of which devices: 1.", "- switch.a"],
         ),
         (
             "legacy_migration_partial",
-            {"conflicts": "\n- switch.a"},
-            "1 change couldn't",
-            "2 changes couldn't",
+            "confirm",
+            {"count": "2", "conflicts": "\n- switch.a"},
+            ["not undone: 2.", "- switch.a"],
         ),
         (
             "legacy_migration_partial_devices",
-            {},
-            "1 device change couldn't",
-            "2 device changes couldn't",
+            "confirm",
+            {"count": "2"},
+            ["Device changes not undone: 2."],
+        ),
+        (
+            "legacy_migration_partial_mixed",
+            "confirm",
+            {"count": "3", "other": "1", "conflicts": "\n- switch.a"},
+            ["not undone: 3, of which on the device: 1.", "- switch.a"],
         ),
     ],
 )
-def test_issue_counts_use_singular_and_plural(
-    key: str, values: dict[str, str], singular: str, plural: str
+def test_first_fix_step_shows_issue_counts_and_lists(
+    key: str, step: str, values: dict[str, str], shown: list[str]
 ) -> None:
-    """Every counted notice reads correctly for one and for many."""
+    """The counts and entity lists the issue had still reach the user."""
     for path in ("strings.json", "translations/en.json"):
-        text = json.loads((_STRINGS_DIR / path).read_text(encoding="utf-8"))["issues"][
-            key
-        ]["description"]
-        one = _render_icu(text, {**values, "count": "1"})
-        many = _render_icu(text, {**values, "count": "2"})
-        assert singular in one
-        assert plural not in one
-        assert plural in many
-        assert "entities already uses" not in many
-        assert "{" not in one
-        assert "{" not in many
+        text = _issues(path)[key]["fix_flow"]["step"][step]["description"]
+        rendered = _render(text, values)
+        for part in shown:
+            assert part in rendered
+        assert "{" not in rendered
 
 
 def test_blocked_notice_matches_what_the_flow_does() -> None:
-    """The notice no longer promises a delete the next screen may not offer."""
-    data = json.loads((_STRINGS_DIR / "strings.json").read_text(encoding="utf-8"))
+    """The retry text says what to remove by hand, not a delete it can't do."""
+    issues = _issues("strings.json")
     for key in ("legacy_migration_blocked", "legacy_migration_blocked_mixed"):
-        text = data["issues"][key]["description"]
+        text = issues[key]["fix_flow"]["step"]["retry"]["description"]
         assert "review and delete them" not in text
-        assert "remove by hand" in text
+        assert "by hand" in text
 
 
 def test_mixed_confirm_text_counts_owned_and_unowned() -> None:
-    """The confirm text says how many listed entities stay and lists them."""
-    data = json.loads((_STRINGS_DIR / "strings.json").read_text(encoding="utf-8"))
-    step = data["issues"]["legacy_migration_blocked"]["fix_flow"]["step"]
-    text = step["confirm_partial"]["description"]
-    one = _render_icu(
-        text,
+    """The confirm text counts and lists the deletable and the other entities."""
+    step = _issues("strings.json")["legacy_migration_blocked"]["fix_flow"]["step"]
+    text = _render(
+        step["confirm_partial"]["description"],
         {
             "count": "25",
             "entities": "\n- switch.owned",
@@ -2301,22 +2311,36 @@ def test_mixed_confirm_text_counts_owned_and_unowned() -> None:
             "kept": "\n- switch.orphan",
         },
     )
-    assert "These 25 entities are left over" in one
-    assert "1 more listed entity isn't owned by this Elk E27 entry" in one
-    assert "Remove it by hand" in one
-    assert "- switch.orphan" in one
-    many = _render_icu(
-        text,
-        {
-            "count": "1",
-            "entities": "\n- switch.owned",
-            "kept_count": "2",
-            "kept": "\n- switch.o1\n- switch.o2",
-        },
+    assert "Leftover entities this can delete (25):\n- switch.owned" in text
+    assert "can't delete them (1):\n- switch.orphan" in text
+    assert "Remove those by hand" in text
+
+
+async def test_fix_flow_step_gets_the_issue_placeholders(
+    hass: HomeAssistant,
+) -> None:
+    """A retry step shows the counts and list the issue was raised with."""
+    entry = entry_relinked()
+    entry.add_to_hass(hass)
+    issue_id = blocked_issue_id(entry.entry_id)
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=True,
+        data={"entry_id": entry.entry_id, "flow": "retry"},
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="legacy_migration_partial",
+        translation_placeholders={"count": "2", "conflicts": "\n- switch.a"},
     )
-    assert "This entity is left over" in many
-    assert "2 more listed entities aren't owned" in many
-    assert "Remove them by hand" in many
+    manager = await _flow_manager(hass)
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        result = await manager.async_init(DOMAIN, data={"issue_id": issue_id})
+    assert result["step_id"] == "confirm"
+    assert result["description_placeholders"] == {
+        "count": "2",
+        "conflicts": "\n- switch.a",
+    }
 
 
 async def test_blocked_flow_with_only_unowned_lists_them_and_retries(
@@ -2372,9 +2396,10 @@ async def test_017_entity_ids_stay_stable_through_migration_and_reload(
     )
     ent_reg = er.async_get(hass)
     ids_before = {
-        entity_id: ent_reg.async_get(entity_id).id  # type: ignore[union-attr]
-        for entity_id in legacy.values()
+        reg.entity_id: reg.id
+        for reg in er.async_entries_for_config_entry(ent_reg, entry.entry_id)
     }
+    assert set(ids_before) == set(legacy.values())
 
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()

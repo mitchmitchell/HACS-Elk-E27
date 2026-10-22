@@ -39,6 +39,31 @@ class _EntryFlow(RepairsFlow):
     def _entry(self) -> ConfigEntry | None:
         return self.hass.config_entries.async_get_entry(self._entry_id)
 
+    def _issue_placeholders(self) -> dict[str, str]:
+        """
+        Return the issue's placeholders (counts and entity lists).
+
+        A fixable issue has no description of its own (hassfest), so its fix
+        flow's steps show the counts and lists the issue was raised with.
+        """
+        issue = ir.async_get(self.hass).async_get_issue(DOMAIN, self._issue_id)
+        if issue is None or not issue.translation_placeholders:
+            return {}
+        return dict(issue.translation_placeholders)
+
+    def _show(
+        self, step_id: str, placeholders: dict[str, str] | None = None
+    ) -> RepairsFlowResult:
+        """Show a step with the issue's placeholders plus the step's own."""
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=probatio.Schema({}),
+            description_placeholders={
+                **self._issue_placeholders(),
+                **(placeholders or {}),
+            },
+        )
+
     def _finish(self) -> RepairsFlowResult:
         ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
         if self._entry() is not None:
@@ -62,7 +87,7 @@ class RetryFlow(_EntryFlow):
         """Confirm, then reload; the upgrade picks up where it stopped."""
         if user_input is not None:
             return self._finish()
-        return self.async_show_form(step_id="confirm", data_schema=probatio.Schema({}))
+        return self._show("confirm")
 
 
 class RecordRebuildFlow(_EntryFlow):
@@ -86,7 +111,7 @@ class RecordRebuildFlow(_EntryFlow):
             if ambiguous_keepers(self.hass, entry):
                 return await self.async_step_keepers()
             return self._rebuild(entry)
-        return self.async_show_form(step_id="confirm", data_schema=probatio.Schema({}))
+        return self._show("confirm")
 
     async def async_step_keepers(
         self, user_input: dict[str, Any] | None = None
@@ -98,10 +123,9 @@ class RecordRebuildFlow(_EntryFlow):
         choices = ambiguous_keepers(self.hass, entry)
         if user_input is not None:
             return self._rebuild(entry)
-        return self.async_show_form(
-            step_id="keepers",
-            data_schema=probatio.Schema({}),
-            description_placeholders={
+        return self._show(
+            "keepers",
+            {
                 "keep": _bullets(c.keep for c in choices),
                 "leave": _bullets(e for c in choices for e in c.leave),
             },
@@ -154,11 +178,7 @@ class BlockedUpgradeFlow(_EntryFlow):
             # Listed in the notice but not ours: say so, so the counts agree.
             placeholders["kept_count"] = str(len(others))
             placeholders["kept"] = _bullets(reg.entity_id for reg in others)
-        return self.async_show_form(
-            step_id="confirm_partial" if others else "confirm",
-            data_schema=probatio.Schema({}),
-            description_placeholders=placeholders,
-        )
+        return self._show("confirm_partial" if others else "confirm", placeholders)
 
     async def async_step_confirm_partial(
         self, user_input: dict[str, Any] | None = None
@@ -175,15 +195,14 @@ class BlockedUpgradeFlow(_EntryFlow):
         entry = self._entry()
         split = split_blocking_entities(self.hass, entry) if entry else None
         if split is not None and split[1]:
-            return self.async_show_form(
-                step_id="retry_manual",
-                data_schema=probatio.Schema({}),
-                description_placeholders={
+            return self._show(
+                "retry_manual",
+                {
                     "count": str(len(split[1])),
                     "entities": _bullets(reg.entity_id for reg in split[1]),
                 },
             )
-        return self.async_show_form(step_id="retry", data_schema=probatio.Schema({}))
+        return self._show("retry")
 
     async def async_step_retry_manual(
         self, user_input: dict[str, Any] | None = None
