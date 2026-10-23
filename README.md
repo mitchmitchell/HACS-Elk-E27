@@ -680,7 +680,7 @@ These are by design or limits of the panel.
   - HVAC *action* (heating/cooling/off) is inferred from the selected mode. It does not
     show whether the equipment is actually running.
   - Only Auto and On fan modes are supported.
-- **Garage doors:** garage door (barrier) support is a planned future feature.
+- **Garage doors:** planned for 0.2.1; see [Garage doors](#garage-doors).
 - **Setup**
   - Manual setup always uses port 2101.
   - There is no options or reconfigure flow (see
@@ -738,6 +738,37 @@ A failed `elke27.alarm_arm_automatic` also creates a persistent notification and
 to retry (see [the example](#retry-automatic-arming-after-a-failure)).
 
 ---
+
+## Garage doors
+
+Planned for Elk E27 Alarm Engine Integration 0.2.1. It requires elke27 0.3.15, which Home Assistant installs for you. This is an added feature: updating from 0.2.0 needs no delete and re-add, and your existing entities don't change.
+
+Each garage door set up on your panel appears in Home Assistant as a garage door cover on the panel device. It uses the name set on the panel, or "Garage door <number>" if the panel has none.
+
+**Supported**
+- Open the door.
+- Close the door.
+- See whether the door is open or closed.
+
+**Not supported**
+- Stop: you can't stop the door partway.
+- Position: you can't set or see how far open it is.
+- "Opening" and "Closing" states: the integration doesn't guess that a door is moving.
+- A door the panel reports as stopped, or in any other state than open or closed, shows as **unknown**.
+
+**Before you start**
+- The user code the integration signs in with must belong to a panel user with automation permission. Without it, the panel refuses open and close commands and Home Assistant shows: "The panel refused the garage door command; the configured Elk user may lack automation authority".
+
+**Things to know**
+- Closing from Home Assistant works the same as pressing your opener's remote. There is no extra warning and no setting to turn off remote closing, so check that the doorway is clear before you close it from an automation or while away.
+- Each command is sent once. If the integration can't tell whether the panel received it, you see "Garage door command may or may not have reached the panel; check the door before retrying", and the integration reads the door's status once; it never resends the command.
+- After each command the integration reads the door's status once.
+- If the panel is disconnected, the cover shows as unavailable and commands aren't queued ("Not connected to the panel; the garage door command was not sent.").
+- Tamper and low-battery sensors appear only for doors whose hardware reports them (TBD: not in #68 yet).
+
+**TBD**
+- Whether door changes show up right away or only after a refresh.
+- Hardware confirmation of the error messages and of status after open/close (Tester).
 
 ## Troubleshooting
 
@@ -928,8 +959,8 @@ single command or a refused request is not retried. See [Retries and errors](#re
 **Can I bypass a zone?** Yes, one or more, with [`elke27.zone_bypass`](#elke27zone_bypass).
 Disarming an armed area clears bypasses.
 
-**Can I control a garage door?** Not yet. Garage door (barrier) support is a planned future
-feature.
+**Can I control a garage door?** Planned for 0.2.1 (open, close and open/closed state); see
+[Garage doors](#garage-doors).
 
 **Does it support Celsius?** For display, yes: Home Assistant converts. The panel works in
 whole °F, so setpoints you set in °C are rounded.

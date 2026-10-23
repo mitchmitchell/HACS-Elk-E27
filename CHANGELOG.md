@@ -30,6 +30,15 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 - The 0.2.0 "delete and re-add" advice is replaced by the above. Displayed names follow the
   0.2.x area-style names; entity IDs do not change.
 
+### Added
+- **Garage doors (#68):** each garage door set up on the panel appears as a garage door
+  cover on the panel device, named from the panel or "Garage door <number>". Open, close and
+  open/closed state only (no stop, position or opening/closing states). Each command is sent
+  once and never retried; if the outcome is unknown the integration reads the door's status
+  once and asks you to check the door. A panel refusal says the configured user may lack
+  automation authority. Link or sign-in errors on a garage command start the re-link flow.
+  See [Garage doors](README.md#garage-doors).
+
 ### Changed
 - **Minimum Home Assistant is now 2026.10.0** (was 2026.1.0). HACS won't offer this
   release on older Home Assistant; update Home Assistant first or stay on 0.2.0.

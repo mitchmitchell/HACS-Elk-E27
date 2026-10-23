@@ -1,0 +1,125 @@
+"""Garage door covers for Elke27 barriers (open/close only)."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+from homeassistant.components.cover import (
+    CoverDeviceClass,
+    CoverEntity,
+    CoverEntityFeature,
+)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .coordinator import Elke27DataUpdateCoordinator
+from .entity import build_unique_id, device_info_for_entry, unique_base
+
+if TYPE_CHECKING:
+    from elke27_lib import BarrierState, PanelSnapshot
+
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+
+    from .models import Elke27ConfigEntry
+
+_LOGGER = logging.getLogger(__name__)
+
+# One command at a time: a physical actuator, and the panel serialises anyway.
+PARALLEL_UPDATES = 1
+
+
+def barrier_is_closed(barrier: BarrierState) -> bool | None:
+    """
+    Map a barrier to HA is_closed: True, False, or None when unknown.
+
+    Uses only the library's normalised is_open (None for STOPPED or unknown).
+    """
+    return None if barrier.is_open is None else not barrier.is_open
+
+
+async def async_setup_entry(
+    _hass: HomeAssistant,
+    entry: Elke27ConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Set up Elke27 garage door covers from a config entry."""
+    coordinator = entry.runtime_data.coordinator
+    known_ids: set[int] = set()
+
+    def _async_add_barriers() -> None:
+        barriers = coordinator.data.barriers
+        entities: list[Elke27BarrierCover] = []
+        for barrier_id, barrier in barriers.items():
+            if barrier_id in known_ids:
+                continue
+            known_ids.add(barrier_id)
+            entities.append(Elke27BarrierCover(coordinator, entry, barrier_id, barrier))
+        if entities:
+            async_add_entities(entities)
+
+    _async_add_barriers()
+    entry.async_on_unload(coordinator.async_add_listener(_async_add_barriers))
+
+
+class Elke27BarrierCover(CoordinatorEntity[Elke27DataUpdateCoordinator], CoverEntity):
+    """A garage door (barrier). No stop, no position, no travel states."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "garage_door"
+    _attr_device_class = CoverDeviceClass.GARAGE
+    _attr_supported_features = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE
+    _attr_is_opening = False
+    _attr_is_closing = False
+
+    def __init__(
+        self,
+        coordinator: Elke27DataUpdateCoordinator,
+        entry: Elke27ConfigEntry,
+        barrier_id: int,
+        barrier: BarrierState,
+    ) -> None:
+        """Initialize the cover."""
+        super().__init__(coordinator)
+        self._barrier_id = barrier_id
+        if barrier.name:
+            self._attr_name = barrier.name
+        else:
+            # Translated "Garage door {barrier_id}" (translation_key garage_door).
+            self._attr_translation_placeholders = {"barrier_id": str(barrier_id)}
+        # <key>:<N> (decision 16). Future tamper/low-battery binary sensors for a
+        # barrier share binary_sensor with zones, so they must use <key>:<N>:<kind>.
+        self._attr_unique_id = build_unique_id(
+            unique_base(coordinator, entry), barrier_id
+        )
+        self._attr_device_info = device_info_for_entry(coordinator, entry)
+
+    def _barrier(self) -> BarrierState | None:
+        return _get_barrier(self.coordinator.data, self._barrier_id)
+
+    @property
+    def available(self) -> bool:
+        """Return if the entity is available."""
+        return (
+            super().available
+            and self.coordinator.is_ready
+            and self._barrier() is not None
+        )
+
+    @property
+    def is_closed(self) -> bool | None:
+        """Return True when closed, False when open, None when unknown."""
+        barrier = self._barrier()
+        return None if barrier is None else barrier_is_closed(barrier)
+
+    async def async_open_cover(self, **_kwargs: Any) -> None:
+        """Open the door (sent once, never retried)."""
+        await self.coordinator.async_set_barrier(self._barrier_id, open_=True)
+
+    async def async_close_cover(self, **_kwargs: Any) -> None:
+        """Close the door (sent once, never retried)."""
+        await self.coordinator.async_set_barrier(self._barrier_id, open_=False)
+
+
+def _get_barrier(snapshot: PanelSnapshot, barrier_id: int) -> BarrierState | None:
+    return snapshot.barriers.get(barrier_id)
