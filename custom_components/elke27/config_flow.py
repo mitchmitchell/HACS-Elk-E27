@@ -17,11 +17,12 @@ from elke27_lib.errors import (
     Elke27CryptoError,
     Elke27DisconnectedError,
     Elke27Error,
+    Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27TimeoutError,
     InvalidCredentials,
 )
-import voluptuous as vol
+import probatio
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
@@ -52,6 +53,7 @@ from .identity import (
     panel_mac_from_info,
     panel_serial_tier,
 )
+from .migration import legacy_migration_pending, legacy_reauth_data_updates
 from .panel_mac import (
     async_discover_panel_mac,
     async_reauth_mac_fill,
@@ -73,26 +75,26 @@ CONF_SETUP_METHOD = "setup_method"
 SETUP_METHOD_DISCOVER = "discover"
 SETUP_METHOD_MANUAL = "manual"
 
-STEP_MANUAL_DATA_SCHEMA = vol.Schema(
+STEP_MANUAL_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_HOST): cv.string,
-        vol.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
-        vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_HOST): cv.string,
+        probatio.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
     }
 )
 
-STEP_LINK_DATA_SCHEMA = vol.Schema(
+STEP_LINK_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
-        vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
     }
 )
 
 STEP_REAUTH_DATA_SCHEMA = STEP_LINK_DATA_SCHEMA
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
+STEP_USER_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_SETUP_METHOD, default=SETUP_METHOD_DISCOVER): selector(
+        probatio.Required(CONF_SETUP_METHOD, default=SETUP_METHOD_DISCOVER): selector(
             {
                 "select": {
                     "options": [SETUP_METHOD_DISCOVER, SETUP_METHOD_MANUAL],
@@ -145,7 +147,9 @@ def _async_try_backfill_config_entry_unique_id(
 class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Elke27."""
 
-    VERSION = 1
+    # 2: 0.2.x identity; 0.1.x (VERSION 1) entries are migrated in place, and an
+    # older release refuses to load a VERSION 2 entry instead of mis-reading it.
+    VERSION = 2
     MINOR_VERSION = 1
 
     def __init__(self) -> None:
@@ -289,7 +293,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         fallback = "Rescan for panels"
         return translations.get(key, fallback)
 
-    async def _async_discovery_schema(self) -> vol.Schema:
+    async def _async_discovery_schema(self) -> probatio.Schema:
         """Build the discover-step schema with a translated rescan option."""
         return self._discovery_schema(await self._async_rescan_option_label())
 
@@ -345,13 +349,16 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         passphrase: str,
         errors: dict[str, str],
         step_id: str,
-        data_schema: vol.Schema,
+        data_schema: probatio.Schema,
         entry: ConfigEntry | None = None,
     ) -> ConfigFlowResult:
         """Link, connect, fetch snapshots, and create/update the entry."""
         host = self._selected_host
         port = self._selected_port
         if host is None or port is None:
+            _LOGGER.warning(
+                "Elke27 link (%s) not started: entry has no host/port", step_id
+            )
             errors["base"] = "unknown"
             return self.async_show_form(
                 step_id=step_id,
@@ -386,15 +393,23 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             snapshot = client.get_snapshot()
             panel_info = asdict(snapshot.panel)
             table_info = asdict(snapshot.table_info)
-        except (InvalidCredentials, Elke27AuthError, Elke27CryptoError):
+        except InvalidCredentials, Elke27AuthError, Elke27CryptoError:
             errors["base"] = "invalid_auth"
-        except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError):
+        except Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError:
             errors["base"] = "cannot_connect"
-        except (OSError, TimeoutError, E27Error):
+        except OSError, TimeoutError, E27Error:
             errors["base"] = "cannot_connect"
         except Elke27LinkRequiredError:
             errors["base"] = "link_required"
-        except Elke27Error:
+        # Kept on purpose: host/port are guarded above (None -> form error) and
+        # come from validated entry data, but the library also raises
+        # Elke27InvalidArgument for an empty access code/passphrase or a
+        # rejected client identity, and no stored 0.1.7 host/port value has been
+        # shown to trigger it. Catching it keeps the form usable (no 500).
+        except (Elke27Error, Elke27InvalidArgument) as err:
+            # Log the exception type only: its message can carry host, port or
+            # panel fields, and none of those belong in the log.
+            _LOGGER.warning("Elke27 link (%s) failed: %s", step_id, type(err).__name__)
             errors["base"] = "unknown"
         finally:
             with contextlib.suppress(OSError, TimeoutError, E27Error, Elke27Error):
@@ -446,6 +461,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 mac_fill = async_reauth_mac_fill(self.hass, entry, panel_mac)
                 mac_refused = not mac_fill
                 data.update(mac_fill)
+            data.update(legacy_reauth_data_updates(entry, data, stored_mac))
             panel_unique_id = config_entry_unique_id(panel_info)
             if entry.unique_id is None:
                 if (
@@ -473,6 +489,11 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 entry,
                 data_updates=data,
                 options={**entry.options, **options},
+                reason=(
+                    "reauth_successful_upgrade"
+                    if legacy_migration_pending(entry)
+                    else "reauth_successful"
+                ),
             )
 
         unique_id = config_entry_unique_id(panel_info)
@@ -493,7 +514,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             result["title"] = title
         return result
 
-    def _discovery_schema(self, rescan_label: str) -> vol.Schema:
+    def _discovery_schema(self, rescan_label: str) -> probatio.Schema:
         options = [
             {
                 "value": str(idx),
@@ -507,9 +528,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             options.insert(0, {"value": CONF_RESCAN, "label": rescan_label})
         else:
             options = [{"value": CONF_RESCAN, "label": rescan_label}]
-        return vol.Schema(
+        return probatio.Schema(
             {
-                vol.Required(CONF_PANEL): selector(
+                probatio.Required(CONF_PANEL): selector(
                     {
                         "select": {
                             "options": options,
@@ -517,10 +538,12 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                         }
                     }
                 ),
-                vol.Required(CONF_ACCESS_CODE): selector(
+                probatio.Required(CONF_ACCESS_CODE): selector(
                     {"text": {"type": "password"}}
                 ),
-                vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
+                probatio.Required(CONF_PASSPHRASE): selector(
+                    {"text": {"type": "password"}}
+                ),
             }
         )
 

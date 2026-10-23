@@ -289,11 +289,16 @@ def zone_bypass_label(zone: ZoneState) -> str:
 
 
 def _validated_pin(pin: str) -> str:
-    """Return the user code as a digit string, or raise if it is not numeric."""
+    """Return the user code as a digit string; raise if not numeric or all zeros."""
     value = str(pin).strip()
-    if not value.isdigit():
+    # ASCII digits only; all-zero detected without int() (no huge-int conversion).
+    if not (value.isascii() and value.isdigit()):
         raise ServiceValidationError(
             translation_domain=DOMAIN, translation_key="code_not_numeric"
+        )
+    if not value.strip("0"):
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="code_all_zero"
         )
     return value
 
@@ -302,7 +307,7 @@ def _library_arm_mode(mode: Any) -> ArmMode:
     """Map an integration arm request to the elke27 arm mode."""
     # The E27 has Away and Stay arming only; it has no Night mode.
     if mode in (ArmMode.ARMED_STAY, ArmMode.ARMED_AWAY):
-        return mode
+        return ArmMode(mode)
     # Custom bypass: the entity bypasses open zones first, then arms away.
     if isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS":
         return ArmMode.ARMED_AWAY

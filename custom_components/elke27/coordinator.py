@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from elke27_lib import (
     ClientConfig,
@@ -33,13 +33,16 @@ from elke27_lib.events import (
     ZoneStatusUpdated,
 )
 
+from homeassistant.components import persistent_notification
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
+    ServiceValidationError,
 )
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -67,8 +70,11 @@ from .errors import (
     COMMAND_ERRORS,
     NOT_ACCEPTED_MESSAGE,
     _error_message,
+    code_rejected_error,
+    command_error,
     is_connection_error,
     is_timeout_error,
+    panel_error_code,
 )
 from .identity import build_client_identity
 from .panel_mac import async_verify_panel_mac
@@ -109,6 +115,9 @@ DEBOUNCED_REFRESH_ERRORS: tuple[type[Exception], ...] = (
 )
 
 
+_ROLLBACK_ERRORS: tuple[type[Exception], ...] = (HomeAssistantError, *COMMAND_ERRORS)
+
+
 class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
     """Own the Elke27 client: connection, subscriptions, commands and updates."""
 
@@ -133,12 +142,12 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         )
         self._host: str = entry.data[CONF_HOST]
         self._port: int = entry.data[CONF_PORT]
-        self._link_keys_json: str = entry.data[CONF_LINK_KEYS_JSON]
-        self._integration_id: str = entry.data.get(CONF_INTEGRATION_ID) or ""
+        self._link_keys_json: dict[str, str] = entry.data[CONF_LINK_KEYS_JSON]
+        self._integration_id: str = entry.data[CONF_INTEGRATION_ID]
         self._panel_name = _panel_name_from_entry(entry.data.get(CONF_PANEL))
         self._client: Elke27Client | None = None
         # Device id of the panel device, set in async_setup_entry (E2 via link).
-        self._connection_unsubscribe: Callable[[], None] | None = None
+        self._connection_unsubscribe: Callable[[], object] | None = None
         self._connect_lock = asyncio.Lock()
         self._area_arm_locks: dict[int, asyncio.Lock] = {}
         self._arm_automatic_tasks: dict[int, set[asyncio.Task[Any]]] = {}
@@ -147,8 +156,11 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._disarm_clear: dict[int, asyncio.Event] = {}
         self._stopping = False
         self._unavailable_logged = False
+        # True once this drop has pushed the unavailable state to entities;
+        # cleared on the next successful connect (#97).
+        self._unavailable_pushed = False
         self._typed_callbacks: dict[
-            Callable[[Any], None], Callable[[], None] | None
+            Callable[[Any], None], Callable[[], object] | None
         ] = {}
         self._debounce_seconds = debounce_seconds
         self._pending_domains: set[str] = set()
@@ -169,6 +181,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         # Bumped on every disconnect. A fallback read that started before a
         # disconnect read the old session, so its result is discarded.
         self._connection_epoch = 0
+        # Bumped on every snapshot push. A fallback read that saw a push while
+        # it ran is re-read once, so it never overwrites newer state.
+        self._snapshot_seq = 0
         self._fallback_refresh_count = 0
         self._last_fallback_at: datetime | None = None
         # D5 soak counter (Architect default, pending Mitch's OK): automatic
@@ -222,6 +237,22 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             translation_placeholders={"host": self._host, "port": str(self._port)},
         )
 
+    def is_child_area_device(self, identifier: str) -> bool:
+        """
+        Return True when 0.2.0 registered this area device as a child device.
+
+        0.2.0 on HA 2026.10 created area devices as child devices, and the same
+        identifiers can't be registered again as a regular device. Checked from
+        the registry each time, so areas the panel reports after setup get the
+        right layout too.
+        """
+        return (
+            dr.async_get(self.hass).async_get_child_device_by_identifier(
+                (DOMAIN, identifier), self.config_entry.entry_id
+            )
+            is not None
+        )
+
     async def async_shutdown_client(self) -> None:
         """
         Stop updates and disconnect the client (entry unload or failed setup).
@@ -230,6 +261,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         supervisor (awaited), clear its Repairs issue, then disconnect under
         the connect lock so a running connect cannot race the teardown.
         """
+        # Set first, so no callback starts new work while tasks are awaited.
+        self._stopping = True
         if self._unsubscribe_stale_timer is not None:
             self._unsubscribe_stale_timer()
             self._unsubscribe_stale_timer = None
@@ -254,7 +287,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._refresh_task = None
         self._stale_task = None
         self._fallback_tasks.clear()
-        self._stopping = True
         await self._reconnect.async_stop()
         self._reconnect.clear_issue()
         async with self._connect_lock:
@@ -375,6 +407,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 )
                 self._resubscribe_typed_callbacks()
                 self._schedule_panel_mac_check()
+                self._unavailable_pushed = False
                 if self._unavailable_logged:
                     _LOGGER.info("Panel connection restored")
                     self._unavailable_logged = False
@@ -402,6 +435,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._connection_unsubscribe = None
         client = self._client
         self._client = None
+        # Any fallback read in flight belongs to the old session.
+        self._connection_epoch += 1
         if client is not None:
             await self._async_disconnect_client(client)
         self._clear_typed_subscriptions()
@@ -515,8 +550,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
 
     def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], bool]:
         """Subscribe to client events."""
-        # Temporary until elke27_lib ships py.typed (untyped client API).
-        return cast("Callable[[], bool]", self._require_client().subscribe(listener))
+        return self._require_client().subscribe(listener)
 
     def subscribe_typed(self, listener: Callable[[Any], None]) -> Callable[[], None]:
         """Subscribe to typed client events."""
@@ -541,8 +575,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         client = self._client
         if client is None:
             return False
-        # Temporary until elke27_lib ships py.typed (untyped client API).
-        return cast("bool", client.unsubscribe_typed(listener))
+        return client.unsubscribe_typed(listener)
 
     async def async_set_output(self, output_id: int, *, state: bool) -> bool:
         """Turn an output on or off."""
@@ -606,7 +639,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if not state:
             level = 0
         elif level is None:
-            level = 99
+            level = 100
         ok = await self._async_execute(
             "light_set_status",
             light_id=light_id,
@@ -615,9 +648,12 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         )
         if ok:
             # The set_status ack may not carry the new state (Z-Wave devices
-            # report it later), so ask the panel for the light's status now and
-            # once more after a short delay.
-            await self._async_refresh_light(light_id)
+            # report it later). After a turn-on, re-read only after a short
+            # delay: an immediate light_get_status can return level 0 before the
+            # panel has applied the change, which HA shows as a brief false "off"
+            # (#89). A turn-off has no such transient, so read it back now too.
+            if not state:
+                await self._async_refresh_light(light_id)
             self._create_background_task(
                 self._async_refresh_light_later(light_id),
                 f"elke27 light {light_id} status refresh",
@@ -678,9 +714,13 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         *,
         attempted: list[ZoneState] | None = None,
         gate: Callable[[], Awaitable[None]] | None = None,
+        raise_code_rejected: bool = True,
     ) -> list[ZoneState]:
         """
         Bypass open, non-bypassed zones assigned to the given area.
+
+        With ``raise_code_rejected`` False, a rejected code is raised as a
+        ZoneBypassFailedError (caused by the refusal) for the caller to report.
 
         Return the zones that were bypassed. Stop at the first failure without
         retrying it (a refusal is reported, never retried); ZoneBypassFailedError
@@ -704,6 +744,12 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                     zone, PIN_REQUIRED_REASON, bypassed, pin_required=True
                 ) from err
             except HomeAssistantError as err:
+                rejected = code_rejected_error(err)
+                if rejected is not None and raise_code_rejected:
+                    # A rejected code is a user error: undo, then re-raise as is.
+                    await self.async_raise_code_rejected(
+                        rejected, bypassed, pin, gate=gate
+                    )
                 raise ZoneBypassFailedError(zone, str(err), bypassed) from err
             if not acknowledged:
                 raise ZoneBypassFailedError(
@@ -779,6 +825,48 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Return True when the task was cancelled by cancel_arm_automatic."""
         return task is not None and task in self._disarm_cancelled
 
+    async def async_raise_code_rejected(
+        self,
+        rejected: ServiceValidationError,
+        bypassed: Sequence[ZoneState],
+        pin: str | None,
+        *,
+        gate: Callable[[], Awaitable[None]] | None = None,
+    ) -> NoReturn:
+        """
+        Roll back ``bypassed``, then re-raise the code_rejected error unchanged.
+
+        A failed rollback never replaces the refusal: the zones still bypassed
+        are logged by zone number only and ``rejected`` is raised regardless.
+        """
+        still_bypassed: list[ZoneState] = []
+        if bypassed:
+            try:
+                _rolled_back, still_bypassed = await self.async_rollback_bypasses(
+                    tuple(bypassed), pin, gate=gate
+                )
+            except _ROLLBACK_ERRORS:  # never hide the refusal behind these
+                still_bypassed = list(bypassed)
+        if still_bypassed:
+            zone_ids = ", ".join(str(zone.zone_id) for zone in still_bypassed)
+            _LOGGER.warning(
+                "Code rejected; zones still bypassed after rollback: %s", zone_ids
+            )
+            # Tell the user, not only the log: zone numbers only, never the code.
+            persistent_notification.async_create(
+                self.hass,
+                title="Elk E27 zones still bypassed",
+                message=(
+                    "The code was rejected and these zones could not be"
+                    f" un-bypassed, so they are still bypassed: zones {zone_ids}."
+                    " Clear them with elke27.zone_bypass and bypass: false."
+                ),
+                notification_id=(
+                    f"elke27_code_rejected_bypass_{self.config_entry.entry_id}"
+                ),
+            )
+        raise rejected
+
     async def async_rollback_bypasses(
         self,
         zones: list[ZoneState] | tuple[ZoneState, ...],
@@ -829,6 +917,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             zone_id,
             bypassed,
         )
+        epoch = self._connection_epoch
         try:
             refresh_ok = await self._async_write_zone_bypass(
                 client, zone_id, bypassed=bypassed, pin=pin_value
@@ -842,8 +931,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
-        await self._async_after_write("bypass", refresh_ok=refresh_ok, zone_id=zone_id)
+            raise command_error(err) from err
+        await self._async_after_write(
+            "bypass", refresh_ok=refresh_ok, zone_id=zone_id, epoch=epoch
+        )
         return True
 
     async def _async_execute(self, command_key: str, **params: Any) -> bool:
@@ -886,17 +977,14 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         Asks elke27 to probe the panel now, so a dead link is detected within
         the keepalive timeout instead of at the next scheduled keepalive. When
         the probe fails the library disconnects and the reconnect loop starts.
-        Older elke27 versions without request_link_check() fall back to their
-        own keepalive.
         """
         if not is_timeout_error(err):
             return
         client = self._client
-        check = getattr(client, "request_link_check", None)
-        if check is None:
+        if client is None:
             return
         try:
-            check()
+            client.request_link_check()
         except COMMAND_ERRORS as check_err:
             _LOGGER.debug("Link check request failed: %s", check_err)
 
@@ -926,6 +1014,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             raise Elke27PinRequiredError(msg)
         pin_value = _validated_pin(pin)
         arm_mode = _library_arm_mode(mode)
+        epoch = self._connection_epoch
         try:
             refresh_ok = await self._async_write_arm(
                 client,
@@ -944,8 +1033,10 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
-        await self._async_after_write("arm", refresh_ok=refresh_ok, area_id=area_id)
+            raise command_error(err) from err
+        await self._async_after_write(
+            "arm", refresh_ok=refresh_ok, area_id=area_id, epoch=epoch
+        )
         return True
 
     def _resubscribe_typed_callbacks(self) -> None:
@@ -982,6 +1073,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             msg = "PIN required to disarm areas."
             raise Elke27PinRequiredError(msg)
         pin_value = _validated_pin(pin)
+        epoch = self._connection_epoch
         try:
             refresh_ok = await self._async_write_disarm(
                 client,
@@ -999,12 +1091,14 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
-        await self._async_after_write("disarm", refresh_ok=refresh_ok, area_id=area_id)
+            raise command_error(err) from err
+        await self._async_after_write(
+            "disarm", refresh_ok=refresh_ok, area_id=area_id, epoch=epoch
+        )
         return True
 
     # D4: the three writes call the elke27 public methods with
-    # return_result=True (elke27 0.3.14 CommandResult) and return its
+    # return_result=True (elke27 CommandResult, since 0.3.14) and return its
     # status_refresh_ok. Failures raise the library's public errors.
 
     async def _async_write_arm(
@@ -1060,6 +1154,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         refresh_ok: bool | None,
         area_id: int | None = None,
         zone_id: int | None = None,
+        epoch: int,
     ) -> None:
         """
         Push post-command state; fall back to one status read if needed (D4).
@@ -1088,45 +1183,36 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             zone_id,
             self._fallback_refresh_count,
         )
-        epoch = self._connection_epoch
-        snapshot = await self._async_fallback_read(area_id=area_id, zone_id=zone_id)
-        if epoch != self._connection_epoch:
-            _LOGGER.debug(
-                "Discarding pre-disconnect fallback read (%s area=%s zone=%s)",
-                kind,
-                area_id,
-                zone_id,
-            )
-            return
-        self._set_snapshot(snapshot or self.get_snapshot())
+        await self._async_fallback_read(
+            kind, area_id=area_id, zone_id=zone_id, epoch=epoch
+        )
 
     async def _async_fallback_read(
-        self, *, area_id: int | None, zone_id: int | None
-    ) -> PanelSnapshot | None:
+        self, kind: str, *, area_id: int | None, zone_id: int | None, epoch: int
+    ) -> None:
         """
         Run one fallback read that starts after this command's write.
 
         The read task is created now, after the write, and then waits for the
         fallback lock and any Q5 refresh in flight, so it never reuses an older
         read and never overlaps another fallback read or Q5. The lock is held
-        by the task itself, so a cancelled caller cannot release it early.
+        by the task itself, so a cancelled caller cannot release it early, and
+        the task publishes under the lock, so the next read starts after it.
         """
         task = self._create_background_task(
-            self._async_locked_fallback_status(area_id=area_id, zone_id=zone_id),
+            self._async_locked_fallback_status(
+                kind, area_id=area_id, zone_id=zone_id, epoch=epoch
+            ),
             f"{DOMAIN} post-command fallback read",
         )
         self._fallback_tasks.add(task)
         task.add_done_callback(self._fallback_tasks.discard)
-        try:
-            return await asyncio.shield(task)
-        except COMMAND_ERRORS as err:
-            _LOGGER.debug("Post-command fallback read failed: %s", err)
-            return None
+        await asyncio.shield(task)
 
     async def _async_locked_fallback_status(
-        self, *, area_id: int | None, zone_id: int | None
-    ) -> PanelSnapshot | None:
-        """Wait for the fallback lock and any refresh in flight, then read once."""
+        self, kind: str, *, area_id: int | None, zone_id: int | None, epoch: int
+    ) -> None:
+        """Wait for the lock and any refresh in flight, read, then publish."""
         async with self._fallback_lock:
             # Never overlap the Q5 stale refresh or the post-reconnect refresh.
             running = [
@@ -1136,7 +1222,47 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             ]
             if running:
                 await asyncio.wait(running)
-            return await self._async_fallback_status(area_id=area_id, zone_id=zone_id)
+            # Taken just before the read: a push while it runs (a panel event,
+            # a later command or the reconnect refresh) means the reply may be
+            # older than what was pushed, so read once more.
+            seq = self._snapshot_seq
+            ok, snapshot = await self._async_try_fallback_status(area_id, zone_id)
+            if (
+                ok
+                and seq != self._snapshot_seq
+                and epoch == self._connection_epoch
+                and self._client is not None
+            ):
+                _LOGGER.debug("Snapshot pushed during fallback read; reading again")
+                # The first read is older than the push: never publish it,
+                # even when the re-read fails.
+                seq = self._snapshot_seq
+                _ok, snapshot = await self._async_try_fallback_status(area_id, zone_id)
+                if seq != self._snapshot_seq:
+                    # Pushed again during the re-read: the live snapshot is
+                    # newer than either read.
+                    snapshot = None
+            if epoch != self._connection_epoch or self._client is None:
+                _LOGGER.debug(
+                    "Discarding pre-disconnect fallback read (%s area=%s zone=%s)",
+                    kind,
+                    area_id,
+                    zone_id,
+                )
+                return
+            self._set_snapshot(snapshot or self.get_snapshot())
+
+    async def _async_try_fallback_status(
+        self, area_id: int | None, zone_id: int | None
+    ) -> tuple[bool, PanelSnapshot | None]:
+        """Read once; a library error is logged and returns (False, None)."""
+        try:
+            return True, await self._async_fallback_status(
+                area_id=area_id, zone_id=zone_id
+            )
+        except COMMAND_ERRORS as err:
+            _LOGGER.debug("Post-command fallback read failed: %s", err)
+            return False, None
 
     async def _async_fallback_status(
         self, *, area_id: int | None, zone_id: int | None
@@ -1200,9 +1326,72 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._connection_epoch += 1
             _LOGGER.debug("Panel disconnect event received; scheduling reconnect")
             self._log_unavailable()
+            # Entities already report unavailable (client not ready), but only
+            # a listener update makes HA write that state (#97). Queued before
+            # the reconnect so it runs before the reconnect's own epoch bump.
+            self.hass.loop.call_soon_threadsafe(
+                self._push_unavailable, self._connection_epoch
+            )
             self.hass.loop.call_soon_threadsafe(self._reconnect.start)
         elif connected is True:
-            self.hass.loop.call_soon_threadsafe(self._reconnect.cancel)
+            self.hass.loop.call_soon_threadsafe(
+                self._on_raw_ready, self._connection_epoch
+            )
+
+    @callback
+    def _on_raw_ready(self, epoch: int) -> None:
+        """
+        Cancel the reconnect and end the drop, only for a current READY.
+
+        A READY queued behind a drop runs after the supervisor's start, which
+        tears the old client down at once (new epoch, client not ready). That
+        READY is stale: cancelling then would stop the only reconnect and leave
+        the panel down (Bugbot, #98). The supervisor finishes the recovery.
+        """
+        if epoch != self._connection_epoch or not self.is_ready:
+            return
+        self._reconnect.cancel()
+        self._push_ready(epoch)
+
+    @callback
+    def _push_unavailable(self, epoch: int) -> None:
+        """
+        Push the snapshot once per drop so entities write 'unavailable' (#97).
+
+        A disconnect arrives on two paths (the link listener and the typed
+        ConnectionStateChanged); together they give one listener update. A
+        push from an older epoch (a newer disconnect or a reconnect came
+        since), or one that runs while the client is ready again, is dropped
+        without touching the per-drop flag, so the next real drop still pushes.
+        """
+        if epoch != self._connection_epoch or self.is_ready:
+            return
+        if self._unavailable_pushed:
+            return
+        self._unavailable_pushed = True
+        self._set_snapshot(self.get_snapshot())
+
+    @callback
+    def _push_ready(self, epoch: int) -> None:
+        """
+        End this drop when the client recovers on its own (raw READY, #97).
+
+        Does what a supervisor reconnect does: logs "Panel connection
+        restored" once (so the next drop warns again), clears the per-drop
+        flag, pushes the snapshot so entities come back, and refreshes the
+        CSM for anything missed while the link was down. A READY queued before
+        a newer disconnect (epoch moved on), or one that runs while the client
+        is not ready, is stale and does nothing.
+        """
+        if epoch != self._connection_epoch or not self.is_ready:
+            return
+        if not (self._unavailable_pushed or self._unavailable_logged):
+            return
+        if self._unavailable_logged:
+            _LOGGER.info("Panel connection restored")
+            self._unavailable_logged = False
+        self._unavailable_pushed = False
+        self._handle_reconnected()
 
     @callback
     def _schedule_panel_mac_check(self) -> None:
@@ -1216,7 +1405,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Log the panel as unavailable once."""
         if self._unavailable_logged:
             return
-        _LOGGER.info("Panel connection lost")
+        _LOGGER.warning("Panel connection lost")
         self._unavailable_logged = True
 
     def start_reauth_once(self) -> None:
@@ -1290,13 +1479,14 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             )
         if isinstance(event, ConnectionStateChanged):
             if event.connected:
+                self._unavailable_pushed = False
                 self._schedule_refresh_after_connect()
             else:
                 self._connection_epoch += 1
-                # Push the snapshot (one listener update): every entity
-                # re-reads is_ready and goes unavailable together, instead of
-                # showing stale state until the next panel event.
-                self._set_snapshot(self.get_snapshot())
+                # Push the snapshot (one listener update per drop, shared with
+                # the link listener): every entity re-reads is_ready and goes
+                # unavailable together, instead of showing stale state.
+                self._push_unavailable(self._connection_epoch)
             return
         if isinstance(event, CsmSnapshotUpdated):
             self._set_snapshot(self.get_snapshot())
@@ -1349,6 +1539,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
 
     def _set_snapshot(self, snapshot: PanelSnapshot | None) -> None:
         """Update coordinator data and track snapshot version."""
+        self._snapshot_seq += 1
         self.async_set_updated_data(snapshot or PanelSnapshot.empty())
 
 
@@ -1381,7 +1572,7 @@ def _log_command_failure(
     kind: str, target_id: int, action: str, err: Exception
 ) -> None:
     """Log a rejected arm/disarm/bypass, with the panel error code when known."""
-    panel_code = getattr(err, "panel_error_code", None)
+    panel_code = panel_error_code(err)
     if panel_code is not None:
         _LOGGER.warning(
             "%s %s %s failed: %s (panel error %s)",

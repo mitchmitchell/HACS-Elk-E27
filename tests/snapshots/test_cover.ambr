@@ -1,8 +1,9 @@
 # serializer version: 1
 # name: test_covers_after_first_refresh[cover.test_panel_garage-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -20,6 +21,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Garage',
     'options': dict({
     }),
     'original_device_class': <CoverDeviceClass.GARAGE: 'garage'>,
@@ -37,9 +39,10 @@
 # name: test_covers_after_first_refresh[cover.test_panel_garage-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'garage',
-      'friendly_name': 'Test Panel Garage',
-      'supported_features': <CoverEntityFeature: 3>,
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'garage',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Panel Garage',
+      <CoverEntityStateAttribute.IS_CLOSED: 'is_closed'>: True,
+      <EntityStateAttribute.SUPPORTED_FEATURES: 'supported_features'>: <CoverEntityFeature: 3>,
     }),
     'context': <ANY>,
     'entity_id': 'cover.test_panel_garage',
@@ -51,8 +54,9 @@
 # ---
 # name: test_covers_after_first_refresh[cover.test_panel_garage_door_2-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -70,6 +74,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Garage door 2',
     'options': dict({
     }),
     'original_device_class': <CoverDeviceClass.GARAGE: 'garage'>,
@@ -87,9 +92,10 @@
 # name: test_covers_after_first_refresh[cover.test_panel_garage_door_2-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'garage',
-      'friendly_name': 'Test Panel Garage door 2',
-      'supported_features': <CoverEntityFeature: 3>,
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'garage',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Panel Garage door 2',
+      <CoverEntityStateAttribute.IS_CLOSED: 'is_closed'>: False,
+      <EntityStateAttribute.SUPPORTED_FEATURES: 'supported_features'>: <CoverEntityFeature: 3>,
     }),
     'context': <ANY>,
     'entity_id': 'cover.test_panel_garage_door_2',
@@ -101,8 +107,9 @@
 # ---
 # name: test_covers_after_first_refresh[cover.test_panel_shop-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -120,6 +127,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Shop',
     'options': dict({
     }),
     'original_device_class': <CoverDeviceClass.GARAGE: 'garage'>,
@@ -137,9 +145,10 @@
 # name: test_covers_after_first_refresh[cover.test_panel_shop-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'garage',
-      'friendly_name': 'Test Panel Shop',
-      'supported_features': <CoverEntityFeature: 3>,
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'garage',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Panel Shop',
+      <CoverEntityStateAttribute.IS_CLOSED: 'is_closed'>: None,
+      <EntityStateAttribute.SUPPORTED_FEATURES: 'supported_features'>: <CoverEntityFeature: 3>,
     }),
     'context': <ANY>,
     'entity_id': 'cover.test_panel_shop',

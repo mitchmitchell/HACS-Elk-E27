@@ -34,8 +34,9 @@ class _Harness:
         self.entry = MagicMock()
         self.entry.entry_id = "entry1"
         self.entry.title = "Panel"
-        self.entry.async_create_background_task.side_effect = (
-            lambda hass_, coro, name: hass_.async_create_background_task(coro, name)
+        bg_task = self.entry.async_create_background_task
+        bg_task.side_effect = lambda hass_, coro, name: (
+            hass_.async_create_background_task(coro, name)
         )
         self.supervisor = ReconnectSupervisor(
             hass,
@@ -105,7 +106,7 @@ async def test_start_while_stopping_does_nothing(hass: HomeAssistant) -> None:
 
 
 async def test_backoff_bounds_and_cap(hass: HomeAssistant, ir_mock: MagicMock) -> None:
-    """Base delay is min(300, 2**n), jitter scales it, the cap is 300 * 1.2."""
+    """Base delay is min(60, 2**n), jitter scales it, the cap is 60 * 1.2 (#79)."""
     h = _Harness(hass, [])
     # Ten transport failures, then success.
     h.connect.side_effect = [Elke27ConnectionError("down")] * 10 + [None]
@@ -113,10 +114,37 @@ async def test_backoff_bounds_and_cap(hass: HomeAssistant, ir_mock: MagicMock) -
         await _run(h)
     uniform.assert_called_with(0.8, 1.2)
     delays = [c.args[0] for c in ir_mock.sleep.await_args_list]
-    expected = [min(300, 2**n) * 1.2 for n in range(1, 11)]
+    expected = [min(60, 2**n) * 1.2 for n in range(1, 11)]
     assert delays == pytest.approx(expected)
-    assert max(delays) == pytest.approx(300 * 1.2)
+    assert max(delays) == pytest.approx(60 * 1.2)
     assert h.supervisor.attempts == 0
+
+
+@pytest.mark.parametrize("jitter", [0.8, 1.2])
+async def test_long_outage_stays_at_cap(
+    hass: HomeAssistant, ir_mock: MagicMock, jitter: float
+) -> None:
+    """A ~20 min outage stays at the cap: 48-72 s per retry, never rising (#79)."""
+    h = _Harness(hass, [Elke27ConnectionError("down")] * 20)
+    with patch(f"{MODULE}.random.uniform", return_value=jitter):
+        await _run(h)
+    delays = [c.args[0] for c in ir_mock.sleep.await_args_list]
+    assert delays == pytest.approx([min(60, 2**n) * jitter for n in range(1, 21)])
+    assert delays[-15:] == pytest.approx([60 * jitter] * 15)
+
+
+async def test_next_outage_restarts_at_base_delay(
+    hass: HomeAssistant, ir_mock: MagicMock
+) -> None:
+    """After a successful reconnect, the next outage starts again at 2 s (#79)."""
+    h = _Harness(hass, [Elke27ConnectionError("down")] * 3 + [None])
+    await _run(h)
+    assert [c.args[0] for c in ir_mock.sleep.await_args_list] == [2, 4, 8]
+    ir_mock.sleep.reset_mock()
+    h.errors = [Elke27ConnectionError("down"), None]
+    h.stopping = False
+    await _run(h)
+    assert [c.args[0] for c in ir_mock.sleep.await_args_list] == [2]
 
 
 async def test_non_transport_issue_on_third_failure(

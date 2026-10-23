@@ -1,16 +1,14 @@
-# ruff: noqa: S101, SLF001, TC001, ARG001, TC003
+# ruff: noqa: S101, SLF001, TC001, ARG001
 """Tests for Elke27 setup and unload."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
 import dataclasses
-from datetime import UTC, datetime
 import logging
 from unittest.mock import AsyncMock, patch
 
-from elke27_lib import ArmMode, Elke27Event, EventType
+from elke27_lib import ArmMode
 from elke27_lib.errors import (
     E27Error,
     E27Timeout,
@@ -50,7 +48,13 @@ from tests.conftest import (
     PANEL_SERIAL_2,
     PORT,
     ClientHarness,
+    FakeClient,
+    Setup,
+    command_result,
+    disconnect_link,
     panel_snapshot,
+    script_connect,
+    setup_entry,
 )
 
 
@@ -123,7 +127,7 @@ async def test_two_macless_entries_have_separate_devices_and_entity_ids(
     device_registry = dr.async_get(hass)
     elke27_devices = [
         device
-        for device in device_registry.devices.values()
+        for device in device_registry.devices
         if device.identifiers
         and any(identifier[0] == DOMAIN for identifier in device.identifiers)
         and device.via_device_id is None
@@ -132,7 +136,7 @@ async def test_two_macless_entries_have_separate_devices_and_entity_ids(
     # E2: each panel also has one area device linked to it.
     assert {
         device.via_device_id
-        for device in device_registry.devices.values()
+        for device in device_registry.devices
         if device.via_device_id is not None
     } == {device.id for device in elke27_devices}
     device_keys = {next(iter(device.identifiers))[1] for device in elke27_devices}
@@ -211,7 +215,7 @@ async def test_two_panels_without_mac_or_serial_use_entry_id_identity(
     device_registry = dr.async_get(hass)
     elke27_devices = [
         device
-        for device in device_registry.devices.values()
+        for device in device_registry.devices
         if device.identifiers
         and any(identifier[0] == DOMAIN for identifier in device.identifiers)
         and device.via_device_id is None
@@ -220,7 +224,7 @@ async def test_two_panels_without_mac_or_serial_use_entry_id_identity(
     # E2: each panel also has one area device linked to it.
     assert {
         device.via_device_id
-        for device in device_registry.devices.values()
+        for device in device_registry.devices
         if device.via_device_id is not None
     } == {device.id for device in elke27_devices}
     device_keys = {next(iter(device.identifiers))[1] for device in elke27_devices}
@@ -261,6 +265,8 @@ async def test_setup_and_unload(
     mock_client.client.async_disconnect.assert_awaited_once()
 
 
+# The failed unload leaves the coordinator running, stale-check timer included.
+@pytest.mark.parametrize("expected_lingering_timers", [True])
 async def test_unload_platform_failure_keeps_client(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
@@ -466,75 +472,9 @@ async def test_command_auth_error_starts_reauth_once(
     assert len(_reauth_flows(hass)) == 1
 
 
-_real_sleep = asyncio.sleep
-
-
-async def _setup(hass: HomeAssistant, entry: MockConfigEntry) -> None:
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-
-def _script_connect(
-    mock_client: ClientHarness, outcomes: list[Exception | None]
-) -> list[str]:
-    """
-    Script the reconnect attempts after setup: raise each error, None succeeds.
-
-    Once the script is used up, a further attempt waits forever, like a panel
-    that stays unreachable, so the loop never spins. Returns a list that
-    records "blocked" (and "cancelled" if unload cancels that wait).
-    """
-    script = list(outcomes)
-    marks: list[str] = []
-
-    async def _connect(*_args: object, **_kwargs: object) -> None:
-        if script:
-            outcome = script.pop(0)
-            if outcome is not None:
-                raise outcome
-            return
-        marks.append("blocked")
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            marks.append("cancelled")
-            raise
-
-    mock_client.client.async_connect.side_effect = _connect
-    mock_client.client.wait_ready.return_value = True
-    return marks
-
-
-async def _disconnect(mock_client: ClientHarness) -> None:
-    """Send the panel-disconnected event the hub subscribed to, and let it run."""
-    listener = mock_client.client.subscribe.call_args.args[0]
-    listener(
-        Elke27Event(
-            event_type=EventType.DISCONNECTED,
-            data={},
-            seq=1,
-            timestamp=datetime.now(UTC),
-        )
-    )
-    for _ in range(50):
-        await _real_sleep(0)
-
-
 def _backoff_delays(sleep_mock: AsyncMock) -> list[float]:
     """Backoff sleeps only (the patch is global; ignore other zero sleeps)."""
     return [c.args[0] for c in sleep_mock.await_args_list if c.args and c.args[0]]
-
-
-@pytest.fixture
-def fast_backoff() -> Iterator[AsyncMock]:
-    """Skip the backoff sleeps (no jitter); return the sleep mock."""
-    sleep_mock = AsyncMock()
-    with (
-        patch("custom_components.elke27.reconnect.asyncio.sleep", sleep_mock),
-        patch("custom_components.elke27.reconnect.random.uniform", return_value=1.0),
-    ):
-        yield sleep_mock
 
 
 async def test_reconnect_auth_failure_starts_reauth(
@@ -544,10 +484,10 @@ async def test_reconnect_auth_failure_starts_reauth(
     fast_backoff: AsyncMock,
 ) -> None:
     """If the panel rejects the link while reconnecting, reauth starts."""
-    await _setup(hass, mock_config_entry)
+    await setup_entry(hass, mock_config_entry)
     connects_before = mock_client.client.async_connect.await_count
-    _script_connect(mock_client, [Elke27LinkRequiredError("relink")])
-    await _disconnect(mock_client)
+    script_connect(mock_client, [Elke27LinkRequiredError("relink")])
+    await disconnect_link(mock_client)
     await hass.async_block_till_done()
     assert mock_client.client.async_connect.await_count == connects_before + 1
     assert _backoff_delays(fast_backoff) == []
@@ -562,14 +502,14 @@ async def test_reconnect_auth_failure_clears_repair_issue(
     fast_backoff: AsyncMock,
 ) -> None:
     """Auth refusal during reconnect clears a reconnect repair issue."""
-    await _setup(hass, mock_config_entry)
+    await setup_entry(hass, mock_config_entry)
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
-    _script_connect(
+    script_connect(
         mock_client,
         [Elke27ProtocolError("p")] * RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD
         + [Elke27LinkRequiredError("relink")],
     )
-    await _disconnect(mock_client)
+    await disconnect_link(mock_client)
     await hass.async_block_till_done()
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
     assert len(_reauth_flows(hass)) == 1
@@ -579,8 +519,8 @@ async def test_reconnect_backoff_jitter_scales_base_delay(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
     """Reconnect sleep applies jitter between 0.8x and 1.2x of the base backoff."""
-    await _setup(hass, mock_config_entry)
-    _script_connect(
+    await setup_entry(hass, mock_config_entry)
+    script_connect(
         mock_client,
         [Elke27ConnectionError("down"), Elke27ConnectionError("still down"), None],
     )
@@ -592,7 +532,7 @@ async def test_reconnect_backoff_jitter_scales_base_delay(
             side_effect=[0.8, 1.2],
         ) as uniform_mock,
     ):
-        await _disconnect(mock_client)
+        await disconnect_link(mock_client)
     uniform_mock.assert_any_call(0.8, 1.2)
     assert _backoff_delays(sleep_mock) == pytest.approx([2 * 0.8, 4 * 1.2])
 
@@ -604,12 +544,12 @@ async def test_reconnect_transport_failure_retries_with_backoff(
     fast_backoff: AsyncMock,
 ) -> None:
     """Transport failures retry with exponential backoff until connect succeeds."""
-    await _setup(hass, mock_config_entry)
+    await setup_entry(hass, mock_config_entry)
     connects_before = mock_client.client.async_connect.await_count
-    _script_connect(
+    script_connect(
         mock_client, [Elke27ConnectionError("down"), Elke27TimeoutError("slow"), None]
     )
-    await _disconnect(mock_client)
+    await disconnect_link(mock_client)
     assert mock_client.client.async_connect.await_count == connects_before + 3
     assert _backoff_delays(fast_backoff) == [2, 4]
 
@@ -621,10 +561,10 @@ async def test_reconnect_protocol_error_retries(
     fast_backoff: AsyncMock,
 ) -> None:
     """Protocol errors keep retrying with backoff and never start reauth."""
-    await _setup(hass, mock_config_entry)
+    await setup_entry(hass, mock_config_entry)
     connects_before = mock_client.client.async_connect.await_count
-    _script_connect(mock_client, [Elke27ProtocolError("protocol"), None])
-    await _disconnect(mock_client)
+    script_connect(mock_client, [Elke27ProtocolError("protocol"), None])
+    await disconnect_link(mock_client)
     await hass.async_block_till_done()
     assert mock_client.client.async_connect.await_count == connects_before + 2
     assert _backoff_delays(fast_backoff) == [2]
@@ -640,9 +580,9 @@ async def test_reconnect_streak_counts_through_transport_error(
     fast_backoff: AsyncMock,
 ) -> None:
     """Transport between protocol errors does not reset the non-transport streak."""
-    await _setup(hass, mock_config_entry)
+    await setup_entry(hass, mock_config_entry)
     caplog.set_level(logging.DEBUG, logger=HUB_LOGGER)
-    _script_connect(
+    script_connect(
         mock_client,
         [
             Elke27ProtocolError("one"),
@@ -651,7 +591,7 @@ async def test_reconnect_streak_counts_through_transport_error(
             Elke27ProtocolError("three"),
         ],
     )
-    await _disconnect(mock_client)
+    await disconnect_link(mock_client)
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
     failure_logs = _reconnect_failure_log_records(caplog)
@@ -669,12 +609,12 @@ async def test_reconnect_non_transport_logs_warning_once_then_debug(
     fast_backoff: AsyncMock,
 ) -> None:
     """The first failure in a non-transport streak warns; later ones are debug."""
-    await _setup(hass, mock_config_entry)
+    await setup_entry(hass, mock_config_entry)
     caplog.set_level(logging.DEBUG, logger=HUB_LOGGER)
-    _script_connect(
+    script_connect(
         mock_client, [Elke27ProtocolError("first"), Elke27ProtocolError("second"), None]
     )
-    await _disconnect(mock_client)
+    await disconnect_link(mock_client)
     failure_logs = _reconnect_failure_log_records(caplog)
     warnings = [record for record in failure_logs if record.levelno == logging.WARNING]
     debug_logs = [record for record in failure_logs if record.levelno == logging.DEBUG]
@@ -690,10 +630,10 @@ async def test_reconnect_raw_error_logs_traceback_once(
     fast_backoff: AsyncMock,
 ) -> None:
     """A raw (non-elke27) library error has a traceback only on the first failure."""
-    await _setup(hass, mock_config_entry)
+    await setup_entry(hass, mock_config_entry)
     caplog.set_level(logging.DEBUG, logger=HUB_LOGGER)
-    _script_connect(mock_client, [E27Error("boom"), E27Error("again"), None])
-    await _disconnect(mock_client)
+    script_connect(mock_client, [E27Error("boom"), E27Error("again"), None])
+    await disconnect_link(mock_client)
     failure_logs = _reconnect_failure_log_records(caplog)
     warnings = [record for record in failure_logs if record.levelno == logging.WARNING]
     debug_logs = [record for record in failure_logs if record.levelno == logging.DEBUG]
@@ -711,12 +651,12 @@ async def test_remove_entry_clears_reconnect_repair_issue(
     fast_backoff: AsyncMock,
 ) -> None:
     """Removing an entry clears reconnect repair state even if unload failed."""
-    await _setup(hass, mock_config_entry)
-    _script_connect(
+    await setup_entry(hass, mock_config_entry)
+    script_connect(
         mock_client,
         [Elke27ProtocolError("p")] * RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
     )
-    await _disconnect(mock_client)
+    await disconnect_link(mock_client)
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
 
@@ -741,9 +681,9 @@ async def test_reconnect_repair_issue_after_non_transport_threshold(
     failures: int,
 ) -> None:
     """Two non-transport failures raise no issue; the third does."""
-    await _setup(hass, mock_config_entry)
-    _script_connect(mock_client, [Elke27ProtocolError("protocol")] * failures)
-    await _disconnect(mock_client)
+    await setup_entry(hass, mock_config_entry)
+    script_connect(mock_client, [Elke27ProtocolError("protocol")] * failures)
+    await disconnect_link(mock_client)
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     issue = issue_registry.async_get_issue(DOMAIN, issue_id)
     assert (issue is not None) is (failures >= RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD)
@@ -757,14 +697,14 @@ async def test_reconnect_transport_failures_never_raise_issue(
     issue_registry: ir.IssueRegistry,
     fast_backoff: AsyncMock,
 ) -> None:
-    """Ten transport failures in a row raise no Repairs issue; backoff caps at 300 s."""
-    await _setup(hass, mock_config_entry)
-    _script_connect(mock_client, [Elke27ConnectionError("down")] * 10)
-    await _disconnect(mock_client)
+    """Ten transport failures in a row raise no Repairs issue; backoff caps at 60 s."""
+    await setup_entry(hass, mock_config_entry)
+    script_connect(mock_client, [Elke27ConnectionError("down")] * 10)
+    await disconnect_link(mock_client)
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
     delays = _backoff_delays(fast_backoff)
-    assert delays == [min(300, 2**n) for n in range(1, 11)]
+    assert delays == [min(60, 2**n) for n in range(1, 11)]
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
@@ -776,10 +716,10 @@ async def test_reconnect_repair_issue_cleared_on_success(
     fast_backoff: AsyncMock,
 ) -> None:
     """A successful reconnect clears the repair issue."""
-    await _setup(hass, mock_config_entry)
-    _script_connect(mock_client, [Elke27ProtocolError("protocol")] * 3 + [None])
+    await setup_entry(hass, mock_config_entry)
+    script_connect(mock_client, [Elke27ProtocolError("protocol")] * 3 + [None])
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
-    await _disconnect(mock_client)
+    await disconnect_link(mock_client)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
     assert len(_reauth_flows(hass)) == 0
 
@@ -792,12 +732,12 @@ async def test_reconnect_repair_issue_cleared_on_unload(
     fast_backoff: AsyncMock,
 ) -> None:
     """Unload removes the reconnect repair issue."""
-    await _setup(hass, mock_config_entry)
-    _script_connect(
+    await setup_entry(hass, mock_config_entry)
+    script_connect(
         mock_client,
         [Elke27ProtocolError("p")] * RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
     )
-    await _disconnect(mock_client)
+    await disconnect_link(mock_client)
     issue_id = _reconnect_issue_id(mock_config_entry.entry_id)
     assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
 
@@ -844,6 +784,72 @@ async def test_reconnect_listener_removed_on_unload(
     assert hub.reconnect.task is None or hub.reconnect.task.done()
 
 
+def _connection_lost(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        r
+        for r in caplog.records
+        if r.getMessage() == "Panel connection lost"
+        and r.name == "custom_components.elke27.coordinator"
+    ]
+
+
+@pytest.mark.parametrize("retries", [2, 6])
+async def test_link_drop_logs_warning_once(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    fast_backoff: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+    retries: int,
+) -> None:
+    """A link drop is logged once at WARNING, however many retries fail (#80, #83)."""
+    await setup_entry(hass, mock_config_entry)
+    script_connect(mock_client, [Elke27ConnectionError("down")] * retries)
+    await disconnect_link(mock_client)
+    await disconnect_link(mock_client)
+    assert [r.levelno for r in _connection_lost(caplog)] == [logging.WARNING]
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
+async def test_second_link_drop_logs_second_warning_and_restore_is_info(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    fast_backoff: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Drop, reconnect, drop again: two WARNINGs and one INFO "restored" (#83)."""
+    caplog.set_level(logging.DEBUG)
+    await setup_entry(hass, mock_config_entry)
+    script_connect(mock_client, [Elke27ConnectionError("down"), None])
+    await disconnect_link(mock_client)
+    restored = [
+        r for r in caplog.records if r.getMessage() == "Panel connection restored"
+    ]
+    assert [r.levelno for r in restored] == [logging.INFO]
+    script_connect(mock_client, [])
+    await disconnect_link(mock_client)
+    levels = [r.levelno for r in _connection_lost(caplog)]
+    assert levels == [logging.WARNING, logging.WARNING]
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
+async def test_link_drop_warning_visible_at_default_level(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    fast_backoff: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """At HA's default WARNING level the drop is still recorded (#83)."""
+    caplog.set_level(logging.WARNING)
+    await setup_entry(hass, mock_config_entry)
+    script_connect(mock_client, [])
+    await disconnect_link(mock_client)
+    assert len(_connection_lost(caplog)) == 1
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
 async def test_unload_does_not_log_connection_lost(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -863,9 +869,9 @@ async def test_reconnect_task_cancelled_on_unload(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
     """The reconnect loop is an entry task, so unload cancels it."""
-    await _setup(hass, mock_config_entry)
-    marks = _script_connect(mock_client, [])
-    await _disconnect(mock_client)
+    await setup_entry(hass, mock_config_entry)
+    marks = script_connect(mock_client, [])
+    await disconnect_link(mock_client)
     assert marks == ["blocked"]
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
@@ -877,10 +883,10 @@ async def test_second_disconnect_starts_no_second_loop(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:
     """A disconnect while a reconnect is already running starts no second loop."""
-    await _setup(hass, mock_config_entry)
-    marks = _script_connect(mock_client, [])
-    await _disconnect(mock_client)
-    await _disconnect(mock_client)
+    await setup_entry(hass, mock_config_entry)
+    marks = script_connect(mock_client, [])
+    await disconnect_link(mock_client)
+    await disconnect_link(mock_client)
     assert marks == ["blocked"]
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
@@ -895,3 +901,50 @@ def test_non_numeric_alarm_code_is_validation_error(code: str) -> None:
 def test_numeric_alarm_code_is_stripped() -> None:
     """Surrounding whitespace is removed from a numeric code."""
     assert _normalize_code(" 1234 ") == "1234"
+
+
+ALARM = "alarm_control_panel.house"
+
+
+async def _disarm(hass: HomeAssistant, code: str) -> None:
+    await hass.services.async_call(
+        "alarm_control_panel",
+        "alarm_disarm",
+        {"entity_id": ALARM, "code": code},
+        blocking=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "key"),
+    [
+        ("0", "code_all_zero"),
+        ("0000", "code_all_zero"),
+        (" 000000 ", "code_all_zero"),
+        ("0" * 5000, "code_all_zero"),
+        ("\u00b2", "code_not_numeric"),
+        ("\uff11\uff12\uff13\uff14", "code_not_numeric"),
+    ],
+)
+async def test_disarm_service_refuses_invalid_code_before_sending(
+    hass: HomeAssistant, setup: Setup, code: str, key: str
+) -> None:
+    """An all-zero or non-ASCII code is a 400 validation error, never sent (#90)."""
+    client = FakeClient(command_result(refresh=True))
+    await setup(client)
+    with pytest.raises(ServiceValidationError) as err:
+        await _disarm(hass, code)
+    assert err.value.translation_key == key
+    assert client.keys({"disarm"}) == []
+
+
+async def test_disarm_service_sends_code_with_zeros_but_not_all_zero(
+    hass: HomeAssistant, setup: Setup
+) -> None:
+    """Leading or embedded zeros alone are not refused: "1000" reaches the client."""
+    client = FakeClient(command_result(refresh=True))
+    await setup(client)
+    await _disarm(hass, "1000")
+    assert [(key, params.get("pin")) for key, params in client.calls] == [
+        ("disarm", "1000")
+    ]

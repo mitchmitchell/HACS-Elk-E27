@@ -46,7 +46,8 @@ if _HAS_DEPS:
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
-    # What the panel client's writes return with return_result=True (elke27 0.3.14).
+    # What the panel client's writes return with return_result=True
+    # (elke27 0.3.14 and later).
     _WRITE_OK = CommandResult(route="test", status_refresh_ok=True)
 
 
@@ -286,12 +287,28 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
 
     def test_schema_requires_code(self) -> None:
         """The code is required."""
-        with self.assertRaises(integration.vol.Invalid):
+        with self.assertRaises(integration.probatio.Invalid):
             integration.SERVICE_ZONE_BYPASS_SCHEMA({"entity_id": ["binary_sensor.x"]})
+
+    def test_schema_rejects_all_zero_code(self) -> None:
+        """An all-zero code is refused by the schema (400), never sent (#90)."""
+        for code in ("0", "0000"):
+            with self.assertRaises(integration.probatio.Invalid):
+                integration.SERVICE_ZONE_BYPASS_SCHEMA(
+                    {"entity_id": ["binary_sensor.x"], "code": code}
+                )
+
+    def test_schema_rejects_non_ascii_and_huge_zero_codes(self) -> None:
+        """Non-ASCII digits and a 5,000-zero code are refused cleanly (#94 review)."""
+        for code in ["\u00b2", "\uff11\uff12\uff13\uff14", "0" * 5000]:
+            with self.assertRaises(integration.probatio.Invalid):
+                integration.SERVICE_ZONE_BYPASS_SCHEMA(
+                    {"entity_id": ["binary_sensor.x"], "code": code}
+                )
 
     def test_schema_rejects_non_numeric_code(self) -> None:
         """The code must be numeric."""
-        with self.assertRaises(integration.vol.Invalid):
+        with self.assertRaises(integration.probatio.Invalid):
             integration.SERVICE_ZONE_BYPASS_SCHEMA(
                 {"entity_id": ["binary_sensor.x"], "code": "12ab"}
             )
@@ -557,6 +574,52 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         assert "Area 1 was not armed: busy" in str(ctx.exception)
         assert "Area 2 was not armed: nope" in str(ctx.exception)
         assert hass.bus.async_fire.call_count == 2
+
+    def _rejected(self) -> Any:
+        return integration.code_rejected_error(Elke27PanelError(11008, "denied"))
+
+    async def test_every_area_rejected_raises_code_rejected(self) -> None:
+        """The same rejected code in every area is raised as code_rejected."""
+        hass = MagicMock()
+        snapshot = _two_area_snapshot()
+        house = _alarm_runtime(snapshot)
+        garage = _alarm_runtime(snapshot)
+        house.coordinator.async_arm_area = AsyncMock(side_effect=self._rejected())
+        garage.coordinator.async_arm_area = AsyncMock(side_effect=self._rejected())
+        entities = {
+            "alarm_control_panel.a_house": (_entry("aa:bb:cc:dd:ee:ff:1"), house),
+            "alarm_control_panel.b_garage": (_entry("aa:bb:cc:dd:ee:ff:2"), garage),
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(ServiceValidationError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert ctx.exception.translation_key == "code_rejected"
+        assert hass.bus.async_fire.call_count == 2
+
+    async def test_mixed_area_failures_raise_combined_error(self) -> None:
+        """A rejected code in one area and another failure give the combined error."""
+        hass = MagicMock()
+        snapshot = _two_area_snapshot()
+        house = _alarm_runtime(snapshot)
+        garage = _alarm_runtime(snapshot)
+        house.coordinator.async_arm_area = AsyncMock(side_effect=self._rejected())
+        garage.coordinator.async_arm_area = AsyncMock(
+            side_effect=HomeAssistantError("nope")
+        )
+        entities = {
+            "alarm_control_panel.a_house": (_entry("aa:bb:cc:dd:ee:ff:1"), house),
+            "alarm_control_panel.b_garage": (_entry("aa:bb:cc:dd:ee:ff:2"), garage),
+        }
+        with (
+            patch.object(integration.persistent_notification, "async_create"),
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        assert type(ctx.exception) is HomeAssistantError
+        assert str(ctx.exception).startswith("Automatic arming failed for 2 of 2 areas")
+        assert "Area 2 was not armed: nope" in str(ctx.exception)
 
     async def test_rollback_partial_failure_names_still_bypassed(self) -> None:
         """An un-bypass that fails is named, with how to clear it, and not retried."""
@@ -1604,7 +1667,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             "mode": "away",
             "code": "x",
         }
-        with self.assertRaises(integration.vol.Invalid):
+        with self.assertRaises(integration.probatio.Invalid):
             integration.SERVICE_ALARM_ARM_AUTOMATIC_SCHEMA(bad_call)
 
     async def test_uncontended_automatic_arm_does_not_poll_or_sleep(self) -> None:
