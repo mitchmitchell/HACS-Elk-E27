@@ -1,8 +1,9 @@
 # serializer version: 1
 # name: test_zone_device_classes[binary_sensor.house_basement_door-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -20,6 +21,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Basement Door',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.MOTION: 'motion'>,
@@ -39,9 +41,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'BURG INTERIOR',
-      'device_class': 'motion',
-      'friendly_name': 'House Basement Door',
-      'icon': 'mdi:motion-sensor',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'motion',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Basement Door',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:motion-sensor',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -54,8 +56,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_co-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -73,6 +76,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'CO',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CO: 'carbon_monoxide'>,
@@ -92,9 +96,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'CARBON MONOXIDE',
-      'device_class': 'carbon_monoxide',
-      'friendly_name': 'House CO',
-      'icon': 'mdi:molecule-co',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'carbon_monoxide',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House CO',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:molecule-co',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -107,8 +111,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_front_door-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -126,6 +131,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Front Door',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.OPENING: 'opening'>,
@@ -145,9 +151,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'BURG EE DELAY',
-      'device_class': 'opening',
-      'friendly_name': 'House Front Door',
-      'icon': 'mdi:door-closed-lock',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'opening',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Front Door',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:door-closed-lock',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -160,8 +166,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_front_door_2-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -179,6 +186,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Front Door',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.MOISTURE: 'moisture'>,
@@ -198,9 +206,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'WATER',
-      'device_class': 'moisture',
-      'friendly_name': 'House Front Door',
-      'icon': 'mdi:water',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'moisture',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Front Door',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:water',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -213,8 +221,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_garage_window-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -232,6 +241,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Garage Window',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.OPENING: 'opening'>,
@@ -251,9 +261,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'BURG EE DELAY',
-      'device_class': 'opening',
-      'friendly_name': 'House Garage Window',
-      'icon': 'mdi:door-closed-lock',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'opening',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Garage Window',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:door-closed-lock',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -266,8 +276,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_hall_motion-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -285,6 +296,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Hall Motion',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.MOTION: 'motion'>,
@@ -304,9 +316,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'BURG INTERIOR',
-      'device_class': 'motion',
-      'friendly_name': 'House Hall Motion',
-      'icon': 'mdi:motion-sensor',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'motion',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Hall Motion',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:motion-sensor',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -319,8 +331,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_hall_motion_pir-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -338,6 +351,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Hall Motion PIR',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.SMOKE: 'smoke'>,
@@ -357,9 +371,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'FIRE',
-      'device_class': 'smoke',
-      'friendly_name': 'House Hall Motion PIR',
-      'icon': 'mdi:fire',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'smoke',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Hall Motion PIR',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:fire',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -372,8 +386,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_interior-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -391,6 +406,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Interior',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.MOTION: 'motion'>,
@@ -410,9 +426,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'BURG INTERIOR',
-      'device_class': 'motion',
-      'friendly_name': 'House Interior',
-      'icon': 'mdi:motion-sensor',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'motion',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Interior',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:motion-sensor',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -425,8 +441,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_kitchen_window-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -444,6 +461,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Kitchen Window',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.OPENING: 'opening'>,
@@ -463,9 +481,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'BURG PERIM INST',
-      'device_class': 'opening',
-      'friendly_name': 'House Kitchen Window',
-      'icon': 'mdi:window-closed',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'opening',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Kitchen Window',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:window-closed',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -478,8 +496,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_lid-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -497,6 +516,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Lid',
     'options': dict({
     }),
     'original_device_class': None,
@@ -516,8 +536,8 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'BURG BOX TAMPER',
-      'friendly_name': 'House Lid',
-      'icon': 'mdi:shield-off-outline',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Lid',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:shield-off-outline',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -530,8 +550,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_lights-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -549,6 +570,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Lights',
     'options': dict({
     }),
     'original_device_class': None,
@@ -568,8 +590,8 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'AUTOMATION',
-      'friendly_name': 'House Lights',
-      'icon': 'mdi:home-automation',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Lights',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:home-automation',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -582,8 +604,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_living_room_pir-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -601,6 +624,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Living Room PIR',
     'options': dict({
     }),
     'original_device_class': None,
@@ -620,8 +644,8 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'BURG 24HR',
-      'friendly_name': 'House Living Room PIR',
-      'icon': 'mdi:shield-alert',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Living Room PIR',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:shield-alert',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -634,8 +658,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_motion-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -653,6 +678,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Motion',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.OPENING: 'opening'>,
@@ -672,9 +698,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'BURG PERIM INST',
-      'device_class': 'opening',
-      'friendly_name': 'House Motion',
-      'icon': 'mdi:window-closed',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'opening',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Motion',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:window-closed',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -687,8 +713,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_odd-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -706,6 +733,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Odd',
     'options': dict({
     }),
     'original_device_class': None,
@@ -725,7 +753,7 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'SOMETHING NEW',
-      'friendly_name': 'House Odd',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Odd',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -738,8 +766,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_panic-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -757,6 +786,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Panic',
     'options': dict({
     }),
     'original_device_class': None,
@@ -776,8 +806,8 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'PANIC',
-      'friendly_name': 'House Panic',
-      'icon': 'mdi:alert-octagon',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Panic',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:alert-octagon',
       'trouble': None,
     }),
     'context': <ANY>,
@@ -790,8 +820,9 @@
 # ---
 # name: test_zone_device_classes[binary_sensor.house_smoke-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -809,6 +840,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Smoke',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.SMOKE: 'smoke'>,
@@ -828,9 +860,9 @@
     'attributes': ReadOnlyDict({
       'bypassed': None,
       'definition': 'FIRE',
-      'device_class': 'smoke',
-      'friendly_name': 'House Smoke',
-      'icon': 'mdi:fire',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'smoke',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'House Smoke',
+      <EntityStateAttribute.ICON: 'icon'>: 'mdi:fire',
       'trouble': None,
     }),
     'context': <ANY>,
