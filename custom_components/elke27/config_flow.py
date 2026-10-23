@@ -74,9 +74,10 @@ def _link_error_base(err: Elke27Error) -> str:
     """
     Map a remaining library error to a form error.
 
-    elke27 0.3.15 raises Elke27LinkSlotsFullError (code "link_slots_full") when
-    the panel's client-link table is full. Matched on the public error code so
-    this works before the pin moves to 0.3.15 (0.3.13 has no class to import).
+    elke27 0.3.15 (the pinned version) raises Elke27LinkSlotsFullError (code
+    "link_slots_full") when the panel's client-link table is full. This still
+    matches on the public error code; a follow-up can replace it with an
+    ``except Elke27LinkSlotsFullError`` and drop this helper and the constant.
     """
     return "no_link_slots" if err.code == LINK_SLOTS_FULL_CODE else "unknown"
 
