@@ -5,27 +5,94 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 
 ## [Unreleased] - 0.2.1 (draft)
 
+### Upgrade
+- **Upgrade in place, one re-link, from any 0.1.x.** No delete and re-add. After updating,
+  enter the access code and passphrase once on the Relink panel card. Entity IDs, registry
+  IDs, icons, areas, labels, disabled/hidden state, automations, dashboards and history are
+  kept. Config entry VERSION is now 2, so 0.1.x refuses to load an upgraded entry (restore a
+  backup to go back).
+- The migration runs in two steps: version 1 to 2 offline (plan only, no panel contact), then
+  after the re-link and before any entity loads it rewrites unique IDs to the 0.2.x form
+  (`<key>:<N>`, panel sensors `<key>:panel_name` / `<key>:panel_ready`) and moves the panel
+  device identifier, keeping the device, its area and labels. All or nothing: a conflict
+  writes nothing, raises the "Elk E27 upgrade blocked" Repairs issue and keeps the entry
+  waiting. Older duplicate entities raise a "Duplicate Elk E27 entities" Repairs issue and
+  are left for you to delete.
+- Alarm panels and zones that inherited the panel device's area keep it (pinned on the
+  entity) when they move to the per-area devices.
+- A 0.2.0 install that was deleted and re-added is unchanged (version bump only).
+- Entries whose unique ID came from the old client serial are cleared so the re-link can
+  match the panel by host and identity, then get the panel MAC as the unique ID.
+- Diagnostics: new `legacy_registry_migration` field (state, plan, with the old unique ID
+  bases redacted).
+- `scripts/restore_entity_names.py`: optional, renames entities back to saved names. Dry run
+  by default; `--apply --map` writes and saves an undo map, `--undo` reverses it.
+- The 0.2.0 "delete and re-add" advice is replaced by the above. Displayed names follow the
+  0.2.x area-style names; entity IDs do not change.
+
+### Changed
+- **Minimum Home Assistant is now 2026.10.0** (was 2026.1.0). HACS won't offer this
+  release on older Home Assistant; update Home Assistant first or stay on 0.2.0.
+- **Uses `elke27` 0.3.15.**
+- **Area devices:** new installs link area devices to the panel device by device ID, so
+  entity IDs follow the documented form (`alarm_control_panel.<area>`,
+  `binary_sensor.<area>_<zone>`). Upgrading from 0.2.0 on Home Assistant 2026.10 keeps
+  your existing area devices, device IDs and entity IDs as they are; on those installs
+  area entity IDs keep the panel name prefix 0.2.0 gave them (for example
+  `alarm_control_panel.<panel>_<area>`).
+- Setup forms and service checks use Home Assistant's current validation library, so
+  invalid input shows the usual form error.
+- Development: CI, lint and type checks run on Python 3.14 against Home Assistant 2026.10.2.
+- Zone sensors take their device class only from the panel's Zone Definition: `BURG INTERIOR`
+  is motion, perimeter and entry/exit are opening, `FIRE` smoke, `CARBON MONOXIDE` carbon
+  monoxide, `WATER` moisture, everything else generic. Zones the panel typed as Door/Window
+  now show as opening; undefined or unlisted zones change from opening to generic. "Show as"
+  overrides are kept across reloads and upgrades. (#110, supersedes #102; fixes #101)
+- Entities go unavailable as soon as the panel connection drops, not on the next update.
+  (#98, fixes #97)
+- "Panel connection lost" is logged once per drop at WARNING (was INFO). (#83, fixes #80)
+- Reconnect backoff is capped at 60 s (about 72 s with jitter), down from 5 minutes. (#82, fixes #79)
+- Lights: full brightness is sent as level 99 (the panel reports 100). A plain turn-on restores
+  the last level, and the reported level is scaled correctly. (#92, #100; fixes #91, #99)
+
 ### Fixed
-1. **Every way the panel rejects a code is now a user error.** When the panel rejected the
+- **Every way the panel rejects a code is now a user error.** When the panel rejected the
    code for a disarm, arm, custom bypass (including its rollback), automatic arm or zone
    bypass in a way 0.2.0 did not recognize, Home Assistant returned a server error and
    logged an ERROR. It now shows the same "The panel rejected the code" message, event and
    notification as every other rejected code, and logs nothing at ERROR level.
-2. **Arming an area that is not ready now shows a clear message.** When the panel refused
+- **Arming an area that is not ready now shows a clear message.** When the panel refused
    an arm or bypass because the area was not ready (a zone open), was in alarm, was
    already armed, or the zone can not be bypassed, Home Assistant returned a server error
    and logged an ERROR. It now shows a plain message saying why and logs nothing at ERROR
    level. Bypasses made by the same call are undone, except when the area turned out to be
    armed already, where they are kept as before. A duress code is treated as a rejected
    code.
+- No brief false "off" after turning on or dimming a light; the immediate re-read is gone.
+  (#93, fixes #89)
+- An all-zero user code is a validation error, not a server error. (#94, fixes #90)
+- A code the panel rejects (not authorized) is a user error (`code_rejected`) on arm, disarm,
+  bypass and auto-arm. The code is never shown or logged. (#108, fixes #109)
+- PENDING #107/#111: upgrade Repairs issues for unreadable upgrade notes, leftover
+  entities/devices/items, interrupted or failed saves, and duplicates (with guided
+  delete-and-retry). Strict reads of the upgrade record: setup fails cleanly on a damaged one.
+  Old identifiers are kept out of logs.
 
-## [Unreleased] - 0.2.0 (draft)
+### Docs
+- README accuracy fixes. (#95)
+
+### Internal
+- Integration ID read directly; typed library calls instead of getattr. (#88, #103)
+
+## [0.2.0] - 2026-10-16
 
 ### Breaking
-1. **Delete and re-add required** from any 0.1.x. Each install gets its own client ID, a
-   random 12-digit number sent to the panel, and the device layout changed. There is no
-   automatic migration and no Repairs issue; old entries fail setup with
-   "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
+1. **No in-place upgrade from 0.1.x in 0.2.0; go straight to 0.2.1**, which upgrades in
+   place with one re-link (see above). Each install gets its own client ID, a random
+   12-digit number sent to the panel, and the device layout changed. 0.2.0 itself leaves a
+   0.1.x entry failing setup with
+   "This entry was created before the client ID existed, or its client ID is invalid."
+   Don't delete it; update to 0.2.1.
 2. **Entity IDs and names change.** Unique IDs have a new format, and each area the panel
    reports gets a device named after it; its alarm panel is named after the area and its
    zones sit under it. Zones with no area and panel-wide entities stay on the panel device.
@@ -67,7 +134,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ### Removed
 - Diagnostics field `integration_serial`. `custom_components.elke27.hub`.
 
-## [Unreleased] - 0.1.9 (draft; #50 merged as 139acbe)
+## [0.1.9] - 2026-10-15
 
 ### Changed
 - Requires [elke27 0.3.13](https://pypi.org/project/elke27/0.3.13/), same as 0.1.8.1 (#50).

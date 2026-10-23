@@ -42,6 +42,7 @@ from homeassistant.exceptions import (
     HomeAssistantError,
     ServiceValidationError,
 )
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -232,6 +233,22 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             translation_domain=DOMAIN,
             translation_key="cannot_connect",
             translation_placeholders={"host": self._host, "port": str(self._port)},
+        )
+
+    def is_child_area_device(self, identifier: str) -> bool:
+        """
+        Return True when 0.2.0 registered this area device as a child device.
+
+        0.2.0 on HA 2026.10 created area devices as child devices, and the same
+        identifiers can't be registered again as a regular device. Checked from
+        the registry each time, so areas the panel reports after setup get the
+        right layout too.
+        """
+        return (
+            dr.async_get(self.hass).async_get_child_device_by_identifier(
+                (DOMAIN, identifier), self.config_entry.entry_id
+            )
+            is not None
         )
 
     async def async_shutdown_client(self) -> None:
@@ -1040,7 +1057,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         return True
 
     # D4: the three writes call the elke27 public methods with
-    # return_result=True (elke27 0.3.14 CommandResult) and return its
+    # return_result=True (elke27 CommandResult, since 0.3.14) and return its
     # status_refresh_ok. Failures raise the library's public errors.
 
     async def _async_write_arm(
