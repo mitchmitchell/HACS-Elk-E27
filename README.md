@@ -1009,7 +1009,7 @@ HA_TOKEN=... scripts/restore_entity_names.py --url ... --undo applied-map.json -
 ```
 
 Already on 0.2.0 (deleted and re-added)? Nothing changes for you. Went from 0.1.x to 0.2.0 by
-mistake? Don't delete the entry: update to 0.2.1 and re-link. Requires elke27 0.3.14, which
+mistake? Don't delete the entry: update to 0.2.1 and re-link. Requires elke27 0.3.15, which
 Home Assistant installs for you.
 
 ### To 0.2.0
