@@ -313,6 +313,41 @@ class LightEntityTest(unittest.TestCase):
         assert self._light(LightState(light_id=1, level=0)).is_on is False
         assert self._light(LightState(light_id=1)).is_on is None
 
+    def test_brightness_from_panel_level(self) -> None:
+        """Panel level 0-100 maps to HA brightness 0-255 (#91; read 100 is full)."""
+        for level, brightness in ((100, 255), (50, 128), (10, 26), (1, 3), (0, 0)):
+            light = self._light(LightState(light_id=1, state=True, level=level))
+            assert light.brightness == brightness, level
+        over = self._light(LightState(light_id=1, state=True, level=150))
+        assert over.brightness == 255
+
+    def _sent_level(self, **kwargs: Any) -> int:
+        """Turn the light on through the entity; return the level it sent."""
+        hub = _hub()
+        hub.async_set_light = AsyncMock(return_value=True)
+        snapshot = _snapshot(lights={1: LightState(light_id=1, state=False, level=0)})
+        light = Elke27Light(_bound(hub, snapshot), _entry(), 1, snapshot.lights[1])
+        asyncio.run(light.async_turn_on(**kwargs))
+        hub.async_set_light.assert_awaited_once()
+        assert hub.async_set_light.await_args.kwargs["state"] is True
+        return hub.async_set_light.await_args.kwargs["level"]
+
+    def test_turn_on_sends_panel_level(self) -> None:
+        """An explicit HA brightness maps to panel level 1-99; full sends 99 (#99)."""
+        cases = ((255, 99), (128, 50), (26, 10), (1, 1))
+        for brightness, level in cases:
+            assert self._sent_level(brightness=brightness) == level, brightness
+
+    def test_turn_on_without_brightness_restores_last_level(self) -> None:
+        """On with no brightness sends 100: the panel restores the last level (#99)."""
+        assert self._sent_level() == 100
+
+    def test_every_level_round_trips(self) -> None:
+        """Panel level -> HA brightness -> turn_on sends the same level, for 1-99."""
+        for level in range(1, 100):
+            light = self._light(LightState(light_id=1, state=True, level=level))
+            assert self._sent_level(brightness=light.brightness) == level, level
+
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
 class ClimateEntityTest(unittest.TestCase):
@@ -362,7 +397,9 @@ class ZoneEntityTest(unittest.TestCase):
             _bound(_hub(), snapshot), _entry(), 7, zone, definition
         )
         assert entity.name == "Kitchen Window"
-        assert entity.device_class is BinarySensorDeviceClass.WINDOW
+        assert (
+            entity.device_class is BinarySensorDeviceClass.OPENING
+        )  # definition decides, not zone_type
         assert entity.is_on is True
         assert entity.icon == "mdi:window-open"
         assert entity.extra_state_attributes == {
@@ -389,14 +426,14 @@ class ZoneEntityTest(unittest.TestCase):
         assert entity.icon is None
 
     def test_no_zone_definition(self) -> None:
-        """Without a ZoneDefinition, fall back to the zone name and opening class."""
+        """Without a ZoneDefinition, fall back to the zone name and no device class."""
         zone = ZoneState(zone_id=8, name="Hall", open=False)
         snapshot = _snapshot(zones={8: zone})
         entity = Elke27ZoneBinarySensor(
             _bound(_hub(), snapshot), _entry(), 8, zone, None
         )
         assert entity.name == "Hall"
-        assert entity.device_class is BinarySensorDeviceClass.OPENING
+        assert entity.device_class is None
         assert entity.icon is None
         assert entity.is_on is False
 

@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from elke27_lib.errors import Elke27PinRequiredError
 
-from homeassistant.components.light import ATTR_BRIGHTNESS, LightEntity
-from homeassistant.components.light.const import ColorMode
+from homeassistant.components.light import LightEntity
+from homeassistant.components.light.const import ATTR_BRIGHTNESS, ColorMode
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -31,7 +31,12 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
-_ELK_MAX_DIM_LEVEL = 99
+# Panel light levels (confirmed by Elk, #99): a command level is 1-99, where
+# 99 is full brightness; a command of 100 means "on at the last level". The
+# panel reports full as 100, so readback stays on the 0-100 scale.
+_ELK_MAX_DIM_LEVEL = 100
+_ELK_MAX_COMMAND_LEVEL = 99
+_ELK_RESTORE_LAST_LEVEL = 100
 
 
 async def async_setup_entry(
@@ -115,8 +120,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
             return None
         # elke27_lib has no py.typed yet; narrow Any snapshot fields until typed.
         level_int = int(level) if not isinstance(level, int) else level
-        bounded = max(0, min(_ELK_MAX_DIM_LEVEL, level_int))
-        return round(bounded * 255 / _ELK_MAX_DIM_LEVEL)
+        return _brightness_from_level(level_int)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on if supported by the client."""
@@ -129,7 +133,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
                 raise_if_not_sent(sent=sent, coordinator=self.coordinator)
             else:
                 sent = await self.coordinator.async_set_light(
-                    self._light_id, state=True, level=_ELK_MAX_DIM_LEVEL
+                    self._light_id, state=True, level=_ELK_RESTORE_LAST_LEVEL
                 )
                 raise_if_not_sent(sent=sent, coordinator=self.coordinator)
         except Elke27PinRequiredError as err:
@@ -164,14 +168,32 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
         _LOGGER.debug("Light %s missing from snapshot", self._light_id)
 
 
+def _brightness_from_level(level: int) -> int:
+    """Map an Elk level (0-100) to Home Assistant brightness (0-255), half up."""
+    bounded = max(0, min(_ELK_MAX_DIM_LEVEL, level))
+    return (bounded * 255 + _ELK_MAX_DIM_LEVEL // 2) // _ELK_MAX_DIM_LEVEL
+
+
+def _level_from_brightness(brightness: int) -> int:
+    """
+    Map Home Assistant brightness (0-255) to an Elk command level (0-99), half up.
+
+    The 0-100 scale is kept so levels 1-99 round-trip with
+    _brightness_from_level; only the top is capped at 99 (full), because a
+    command of 100 means "on at the last level" to the panel (#99).
+    """
+    bounded = max(0, min(255, brightness))
+    level = (bounded * _ELK_MAX_DIM_LEVEL + 127) // 255
+    return min(_ELK_MAX_COMMAND_LEVEL, level)
+
+
 def _level_from_kwargs(kwargs: dict[str, Any]) -> int:
-    """Map Home Assistant brightness kwargs to Elk level (0-100)."""
+    """Map Home Assistant brightness kwargs to an Elk command level (1-99)."""
     brightness = kwargs.get(ATTR_BRIGHTNESS)
     if isinstance(brightness, int):
-        bounded = max(0, min(255, brightness))
         # Keep minimum 1 for ON requests with brightness set.
-        return max(1, round(bounded * _ELK_MAX_DIM_LEVEL / 255))
-    return _ELK_MAX_DIM_LEVEL
+        return max(1, _level_from_brightness(brightness))
+    return _ELK_MAX_COMMAND_LEVEL
 
 
 def _get_light(snapshot: PanelSnapshot, light_id: int) -> LightState | None:

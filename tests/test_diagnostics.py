@@ -137,7 +137,7 @@ async def test_diagnostics_d5_fields_read_properties_only(
     assert result["fallback_refresh_count"] == 2
     assert result["last_fallback_at"] is not None
     assert result["stale_auto_refresh_count"] == 1
-    assert result["integration_version"] == "0.2.0"
+    assert result["integration_version"] == "0.2.1"
     assert result["elke27_version"] == package_version("elke27")
     assert result["area_device_count"] == len(mock_client.snapshot.areas)
 

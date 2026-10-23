@@ -16,6 +16,7 @@ from homeassistant.helpers import issue_registry as ir
 from .const import (
     DOMAIN,
     ISSUE_RECONNECT_FAILED,
+    RECONNECT_BACKOFF_MAX,
     RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD,
 )
 from .errors import AUTH_ERRORS, COMMAND_ERRORS, is_reconnect_retryable
@@ -204,8 +205,8 @@ class ReconnectSupervisor:
                 self._on_reconnected()
                 return
             self._reconnect_attempts += 1
-            # Cap the base delay at 300 s before jitter (max sleep is about 360 s).
-            base_delay = min(300, 2**self._reconnect_attempts)
+            # Cap the base delay before jitter (max sleep is about 72 s).
+            base_delay = min(RECONNECT_BACKOFF_MAX, 2**self._reconnect_attempts)
             delay = base_delay * random.uniform(0.8, 1.2)  # noqa: S311
             _LOGGER.debug(
                 "Reconnect attempt %s sleeping for %s seconds",

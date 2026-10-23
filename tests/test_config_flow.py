@@ -21,9 +21,9 @@ from elke27_lib.errors import (
     Elke27ProtocolError,
     InvalidCredentials,
 )
+import probatio
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-import voluptuous as vol
 
 from custom_components.elke27.config_flow import (
     CONF_ACCESS_CODE,
@@ -731,7 +731,7 @@ async def test_reauth_rejects_different_panel(
     assert dict(mock_config_entry.data) == old_data
 
 
-def _panel_select(schema: vol.Schema) -> SelectSelector:
+def _panel_select(schema: probatio.Schema) -> SelectSelector:
     for marker, field in schema.schema.items():
         if marker.schema == CONF_PANEL:
             assert isinstance(field, SelectSelector)

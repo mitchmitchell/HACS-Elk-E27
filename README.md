@@ -60,10 +60,12 @@ through the [`elke27`](https://github.com/mitchmitchell/elke27) Python library
 
 ## Features
 
-The integration creates one **device** for the panel, showing the panel's name, model, firmware
-version, serial number and MAC address. All entities belong to that device. Entities are named
-after the names programmed into the panel. If an item has no name, a fallback such as `Area 1`
-or `Zone 12` is used.
+The integration creates a **panel device**, showing the panel's name, model, firmware
+version, serial number and MAC address, and (since 0.2.0) one **area device** per area, linked
+to the panel device. Each area's alarm control panel and its zones belong to that area's
+device. Zones with no area and panel-wide entities (outputs, lights, locks, thermostats, panel
+status) belong to the panel device. Entities are named after the names programmed into the
+panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Platform | One entity per | What you can do |
 |---|---|---|
@@ -123,9 +125,21 @@ or `Zone 12` is used.
 ### Binary sensors (zones)
 
 - The sensor is **on** when the zone is open/violated.
-- The device class is *motion*, *window* or *door* when the panel's zone type says so.
-  Otherwise it is *opening*. Fire, CO and water zones also show as *opening*, not as
-  smoke, CO or moisture sensors (see [Known issues](#known-issues)).
+- The device class comes only from the zone's definition in the panel, following Elk
+  guidance. The zone's name and wiring don't affect it.
+
+  | Zone definition | Device class |
+  |---|---|
+  | `BURG INTERIOR` | Motion |
+  | `BURG PERIM INST`, `BURG EE DELAY` | Opening |
+  | `FIRE` | Smoke |
+  | `CARBON MONOXIDE` | Carbon monoxide |
+  | `WATER` | Moisture |
+  | Anything else (24-hour, tamper, panic, medical, automation, power supervision, hi/lo temp, unknown) | None (generic) |
+
+- These are only defaults. If a zone is really something else (for example an interior door
+  contact on a `BURG INTERIOR` zone), change it under the entity's settings with **Show as**.
+  Home Assistant keeps your choice across reloads, restarts and upgrades.
 - The icon follows the zone definition (burglary entry/exit, perimeter, interior, 24-hour,
   tamper, fire, CO, panic, medical, automation, power supervision, water, hi/lo temp) and
   changes when the zone opens.
@@ -136,11 +150,17 @@ or `Zone 12` is used.
 
 ### Lights
 
-- On/off with brightness. The panel's 0–99 level is mapped to Home Assistant's brightness
-  scale.
-- Turning a light on without a brightness value sets it to full (level 99).
-- After a change, the integration asks the panel for the light's status right away and
-  again about 3 seconds later, because some (Z-Wave) dimmers report their new state late.
+- On/off with brightness. The panel's 0–100 level is mapped to Home Assistant's 0–255
+  brightness scale (for example 50 ↔ 128).
+- Turning a light on without a brightness value turns it on at its last level (the panel's
+  "restore last level" command, level 100).
+- Setting a brightness sends a level from 1 to 99; full brightness (255 or 100%) is level
+  99, which the panel reports back as 100 and Home Assistant shows as brightness 255.
+  These level rules are confirmed by Elk.
+- After a change, the integration asks the panel for the light's status again about
+  3 seconds later, because some (Z-Wave) dimmers report their new state late. After turning
+  a light off it also asks right away; after turning one on it waits, because an immediate
+  read can briefly report the light as off while it ramps up.
   A short delay before the state updates is normal.
 
 ### Locks
@@ -172,7 +192,9 @@ or `Zone 12` is used.
 
 ## Requirements
 
-- **Home Assistant 2026.1.0 or newer.**
+- **Home Assistant 2026.10.0 or newer.** Starting with 0.2.1 the minimum is 2026.10.0
+  (it was 2026.1.0). On an older Home Assistant, HACS won't offer 0.2.1; update Home
+  Assistant first, or stay on 0.2.0.
 - An **Elk E27** panel on your local network that Home Assistant can reach over TCP. Manual
   setup connects on port **2101**.
   Tested on an E27 with firmware **0.0.6.4** (hardware 0.0.1.4, bootloader 0.0.2.24). Other
@@ -193,6 +215,9 @@ or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | CI: 2026.10.2 (minimum 2026.10.0); hardware: TBD | TBD |
+| 0.2.0 | [0.3.14](https://pypi.org/project/elke27/0.3.14/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
+| 0.1.9 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.8 | [0.3.12](https://pypi.org/project/elke27/0.3.12/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
@@ -317,9 +342,10 @@ doesn't answer discovery: the new address counts as a new panel.
 ### Re-linking (reauthentication)
 
 If the stored link keys are missing or rejected when the integration **loads**, Home Assistant
-shows a **reauthentication** notice. Open it and enter the **access code** and **passphrase**
+shows a **reauthentication** notice in two places: a card under **Settings → Devices & services**
+and an issue under **Settings → System → Repairs**. Open either one and enter the **access code** and **passphrase**
 again (*Relink panel*). The flow checks that you are linking the **same panel** by comparing
-**MAC address or panel serial** (not the integration serial used for E27 pairing). The entry
+**MAC address or panel serial** (not the integration's client ID). The entry
 reloads with new link keys. Your entities and their IDs stay the same. Re-linking only
 refreshes the link keys for the stored address; to change the address, see
 [Changing the panel's address](#changing-the-panels-address).
@@ -327,6 +353,10 @@ refreshes the link keys for the stored address; to change the address, see
 If the keys are rejected while **reconnecting**, the integration stops retrying and starts the
 **reauthentication** flow once, so the notice appears. Entities stay unavailable until you
 re-link (or reload the integration).
+
+You can't start a re-link from Home Assistant. To re-link on purpose, remove Home Assistant's
+link from the panel in the Elk Connect mobile app (this needs your installer code), then reload
+the integration and open the notice. *(This procedure has not been hardware-tested yet.)*
 
 ---
 
@@ -612,15 +642,15 @@ conditions:
   stored in the config entry, so it stays the same across restarts. It is the integration's
   own ID, not a panel serial number.
 - **Reconnects:** if the connection drops, entities become unavailable and the integration
-  keeps reconnecting with a delay that starts at 2 seconds and doubles up to 5 minutes between
-  attempts, with no limit on attempts. When the
+  keeps reconnecting with a delay that starts at 2 seconds and doubles up to 60 seconds (about 72 s with jitter) between
+  attempts, with no limit on attempts (0.2.1 and later; 0.2.0 doubled up to 5 minutes). When the
   connection comes back, it refreshes everything from the panel. If the panel rejects the link
-  keys, it stops retrying without showing a notice. Reload the integration (or restart Home
-  Assistant) to get the re-link prompt.
+  keys, it stops retrying and shows a re-link (reauthentication) notice once (see
+  [Re-linking](#re-linking-reauthentication)).
 - **Detecting a dropped connection:** a dead connection is usually noticed within about
   35 seconds for an idle link (30 seconds without traffic, plus a 5-second probe). If a command
   is in flight, the integration first waits for that command's timeout, then probes. *"Panel connection lost"* is
-  logged once when it happens. Until it's noticed, commands fail with *"The panel did not
+  logged once at WARNING when it happens. Until it's noticed, commands fail with *"The panel did not
   respond in time; the command may not have been applied."* This disconnect handling may
   still change in later releases.
 - **New items:** areas, zones, lights, locks, thermostats and outputs that show up after setup
@@ -665,7 +695,6 @@ These are problems that are tracked for a fix.
 - **Stale zone entities:** a zone you delete in the panel, or change to `UNDEFINED`, keeps its
   entity. Delete it yourself in Home Assistant. (`UNDEFINED` zones are only skipped at first
   setup.)
-- **Fire, CO and water zones show as generic openings**, not smoke, CO or moisture sensors.
 - **Address changes:** after the panel's IP address changes, reconnects keep using the old
   address. Use a DHCP reservation. If the integration knows the panel's MAC, run Manual setup
   at the new address to update the entry in place; otherwise delete the old entry first, then add it again (adding without deleting leaves
@@ -681,7 +710,7 @@ The integration handles connection problems and panel refusals differently.
 
 **Connection drops are retried automatically.** If the connection to the panel drops, the
 integration reconnects with a growing delay: it starts at 2 seconds and doubles after each
-failed attempt, up to 5 minutes (300 seconds) between attempts. There is no limit on the
+failed attempt, up to 60 seconds between attempts (about 72 s with jitter). There is no limit on the
 number of attempts. It only stops if the panel requires re-linking (see
 [Re-linking](#re-linking-reauthentication)). Entities are unavailable while it reconnects.
 
@@ -770,6 +799,22 @@ Host, panel MAC, unique ID and client ID are redacted; link keys are never inclu
 | *The panel has no room for another linked client…* | The panel keeps a list of linked clients, and it's full. This often happens after deleting and re-adding the integration several times, because each add links a new client ID and the old ones stay on the panel. Remove an unused linked client using the Elk Connect mobile app; this needs the installer code, so contact your installer if you don't have it. Then add the integration again. Your access code and passphrase are not the problem. |
 | *No panels were discovered…* | The panel is online and on the same network segment, and UDP broadcast on port 2362 isn't blocked. Otherwise use **Manual setup**. |
 | *This panel is already configured.* | The panel already has an entry, matched by MAC address, or by the panel's serial number when it reports a real one, or, if neither is reported, by the same host and port. |
+| *Elk E27 upgrade notes can't be read* (Repairs) | See [Upgrade problems shown in Repairs](#upgrade-problems-shown-in-repairs). |
+
+### Upgrade problems shown in Repairs
+
+If the upgrade from 0.1.x can't finish, Elk E27 stops before changing anything it can't
+undo and puts an issue under Settings → System → Repairs. Open it and follow the steps.
+Take a full Home Assistant backup first (Settings → System → Backups) if you haven't.
+
+| Repairs issue | What to do |
+|---|---|
+| **Elk E27 upgrade notes can't be read** | Select **Submit** to rebuild the notes from your current entities and reload. Nothing is restored from a backup and no names or entity IDs change. If a panel item has more than one older entity and the choice depends on which you edited last, a second screen lists the entities it will keep and the ones it will leave unavailable. Submit if that's right; if not, close it and restore your pre-upgrade backup. |
+| **Elk E27 upgrade blocked by leftover entities** | The issue lists every entity in the way (usually left over from a 0.2.0 trial). Select **Submit** to see the confirm screen, which lists exactly what will be deleted. Submitting it deletes only those Elk E27 entities, along with their history link, then retries the upgrade, so take a backup first. If some listed entities belong to another integration entry, the confirm screen names them and says how many it can't delete; remove those by hand under Settings → Devices & services → Entities. If none can be deleted for you, the screen lists them and only retries. To keep them, close the screen, delete or rename them yourself under Settings → Devices & services → Entities, then open the issue again and submit to retry. |
+| **Elk E27 upgrade blocked by a leftover device** | Delete the listed leftover Elk E27 device by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**), then open the issue and select **Submit** to retry. |
+| **Elk E27 upgrade blocked by leftover items** | Both leftover entities and a leftover Elk E27 device are in the way. First delete the leftover device by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**). Then open the issue and select **Submit**: the confirm screen lists exactly which entities will be deleted, and submitting it deletes only those, along with their history link, then retries the upgrade, so take a backup first. |
+| **Elk E27 upgrade interrupted** / **Elk E27 upgrade couldn't save** | Select **Submit** to retry. After an interruption, entities already converted are kept and the upgrade picks up where it stopped; after a failed save, every change was undone and the upgrade starts over. If it keeps failing, restore your pre-upgrade backup and download diagnostics before reporting it. |
+| **Duplicate Elk E27 entities from the older version** | Nothing is blocked; the upgrade kept one entity per panel item. Go to Settings → Devices & services → Entities, search for each listed entity ID, open it, select the gear icon, then **Delete**. Reload Elk E27 afterwards and the issue clears. |
 
 ### Panel error messages
 
@@ -806,7 +851,7 @@ reachable on the network. Brief drops during thermostat changes are a
 [known issue](#known-issues) and recover by themselves.
 
 The integration reconnects automatically, with a delay that starts at 2 seconds and doubles up
-to 300 seconds (5 minutes) between attempts. It refreshes everything from the panel, and
+to 60 seconds (about 72 s with jitter) between attempts. It refreshes everything from the panel, and
 entities come back shortly after the panel reconnects.
 
 While entities are unavailable, Home Assistant itself skips them when you call an entity
@@ -816,6 +861,14 @@ core behavior for every integration, not something this integration can change. 
 automations, check the entity's state first (or use a condition on it) if you need to know
 the action ran. The integration's own actions, `elke27.alarm_arm_automatic` and
 `elke27.zone_bypass`, do report an error when the panel is not connected.
+
+To trace a call that seemed to do nothing, look in the Home Assistant log. When the link
+drops, the integration logs one `WARNING` line, `Panel connection lost`; that is the line to
+look for. Home Assistant *may* also log "Referenced entities … are missing or not currently
+available", but it does not always: in Home Assistant 2026.1.3, `entity_service_call`
+silently skips entities that are registered but unavailable. A disarm or other entity
+action sent during that window returns success (HTTP 200 from the REST API) without reaching
+the panel.
 
 If a command fails with *"The panel did not respond in time; the command may not have been
 applied."* or *"Lost connection to the panel; the command may not have been applied."*, the
@@ -871,7 +924,7 @@ Go to **Settings → Devices & services → Elk E27 Alarm Engine Integration**, 
 **Download diagnostics**.
 
 - The download contains the panel snapshot, with sensitive values redacted by the library.
-- It also contains the panel host/port and the integration's client serial number.
+- Host, panel MAC, unique ID and client ID are redacted; link keys are never included.
 
 Attach it to bug reports.
 
@@ -932,28 +985,79 @@ whole °F, so setpoints you set in °C are rounded.
 
 ## Upgrading
 
+### To 0.2.1
+
+> [!IMPORTANT]
+> **Upgrade in place, one re-link.** From any 0.1.x, update to 0.2.1 in HACS, restart Home
+> Assistant, then enter your access code and passphrase once on the **Relink panel** card.
+> Do **not** delete the integration. Your entity IDs, registry IDs, names you set, icons,
+> areas, labels, disabled and hidden state, automations, dashboards and history are kept.
+
+1. **Take a full Home Assistant backup first** (Settings → System → Backups, include the
+   database) and keep a copy off the machine. **Restoring that backup is the only way to roll
+   back to 0.1.x**: there is no downgrade, and 0.1.x refuses to load an upgraded entry.
+2. Update in HACS and restart Home Assistant. Home Assistant shows the re-link in two places:
+   an attention-required card for the integration under Settings → Devices & services, and a
+   "Reauthentication is needed" entry in Repairs. Open either one to get **Relink panel**.
+3. Enter the access code and passphrase. This links Home Assistant to the panel again with a
+   new client ID; the panel's Network Devices list gets a new entry, and you can remove the
+   old 0.1.x one there when you like.
+4. Done. On that first start the integration rewrites its unique IDs and moves the panel
+   device to the new identity before any entity loads. It is all or nothing: if anything
+   conflicts (for example entities left over from a 0.2.0 trial), nothing is changed, a
+   **Elk E27 upgrade blocked** Repairs issue lists the conflicts, and the entry waits. Open it
+   to delete the listed leftovers (after a confirm screen) and retry; it then completes.
+   Entities left over as duplicates from very old versions are listed in a Repairs issue and
+   left untouched for you to delete. See
+   [Upgrade problems shown in Repairs](#upgrade-problems-shown-in-repairs).
+
+Action targets: `elke27.alarm_arm_automatic` and `elke27.zone_bypass` must target the area
+device (or an alarm panel or zone entity), not the panel device. Since each area is now its own
+device, an automation that targeted the panel device needs to target the area device instead.
+
+What changes: each area the panel reports is now its own device, and its alarm panel and
+zones sit under it, named after the area (for example "Main House Front Door"). Entity IDs
+do not change, so only dashboard captions that show friendly names look different. Alarm
+panels and zones that took their area from the panel device keep that area. If you want the
+old displayed names back, `scripts/restore_entity_names.py` renames entities from a saved
+list (dry run by default, with undo; see its `--help`). It reads an `entity_id,name` CSV, or
+with `--from-markdown` the Markdown names table saved before the upgrade (one row per entity
+with `entity_id` and `displayed name (friendly_name)` columns). A registry name replaces
+the whole displayed name, so by default each entity gets its exact old displayed name (device
+name plus zone name, e.g. "<device> Front Door"); `--original-name` uses the bare name
+("Front Door") instead.
+`--apply` saves an undo map listing every planned rename before the first write, refuses to
+overwrite an existing map unless you pass `--force`, and never deletes the map, even if it
+fails part way (for example when the connection drops). `--undo` sets each entity back to its
+old name and skips any that already match, so it is safe to re-run; only a successful
+`--undo --apply` removes the map.
+`--to-csv names.csv` only converts the table, without connecting:
+
+```bash
+scripts/restore_entity_names.py --from-markdown names.md --to-csv names.csv
+HA_TOKEN=... scripts/restore_entity_names.py --url ws://homeassistant.local:8123 names.csv
+HA_TOKEN=... scripts/restore_entity_names.py --url ... names.csv --apply --map applied-map.json
+HA_TOKEN=... scripts/restore_entity_names.py --url ... --undo applied-map.json --apply
+```
+
+Already on 0.2.0 (deleted and re-added)? Nothing changes for you. Went from 0.1.x to 0.2.0 by
+mistake? Don't delete the entry: update to 0.2.1 and re-link. Requires elke27 0.3.14, which
+Home Assistant installs for you.
+
 ### To 0.2.0
 
-> [!WARNING]
-> **One-time delete and re-add required.** 0.2.0 can't upgrade an existing entry in place.
-> Entity IDs and names change, so update your automations, dashboards and scripts.
-> Entries left over from 0.1.x fail setup with:
-> "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
+0.2.0 has no in-place upgrade from 0.1.x. **Go from 0.1.x straight to
+[0.2.1](#to-021)**, which upgrades in place with one re-link. If you did install 0.2.0 over
+0.1.x, the entry shows "This entry was created before the client ID existed, or its client ID
+is invalid." Don't delete it: reinstall the 0.1.x you had (0.2.0 doesn't change the entry) or update to
+0.2.1 and re-link.
 
-1. Make a Home Assistant backup.
-2. Note the entity IDs your automations, dashboards and scripts use.
-3. Delete the integration: Settings → Devices & services → Elk E27 Alarm Engine Integration → ⋮ → Delete.
-4. Update in HACS and restart Home Assistant.
-5. Add the integration again with the same access code and passphrase.
-6. Update automations, dashboards and scripts to the new entity IDs.
-
-Each area now appears as its own device, with its zones under it; the area's alarm panel is
+Each area appears as its own device, with its zones under it; the area's alarm panel is
 named after the area, and zones are named "<area> <zone>". Zones with no area and panel-wide
-entities (outputs, lights, locks, thermostats, panel status) stay on the panel device. New
-entity IDs follow the new names, for example `alarm_control_panel.<panel>_<area>` becomes
+entities (outputs, lights, locks, thermostats, panel status) stay on the panel device. A new
+0.2.0 install (not an upgrade) creates entity IDs from those names, for example
 `alarm_control_panel.<area>`, and areas or zones with the same name get `_2`, `_3` IDs.
-Going back to 0.1.x also needs a delete and re-add. Requires elke27 0.3.14, which Home
-Assistant installs for you.
+Requires elke27 0.3.14, which Home Assistant installs for you.
 <!-- PENDING MITCH: Network Devices clean-up step -->
 See the [0.2.0 release notes](docs/release-notes/v0.2.0.md).
 

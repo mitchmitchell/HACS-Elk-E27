@@ -1,8 +1,9 @@
-# ruff: noqa: S101, PT027, SLF001, PLR2004
+# ruff: noqa: S101, PT027, SLF001
 """Tests for Elke27 hub use of the elke27 0.3.8 client API."""
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from datetime import UTC, datetime
 import importlib.util
@@ -20,7 +21,14 @@ _HAS_DEPS = all(
 if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parents[1]))
 
-    from elke27_lib import Elke27Event, EventType, LinkKeys, PanelInfo, PanelSnapshot
+    from elke27_lib import (
+        ArmMode,
+        Elke27Event,
+        EventType,
+        LinkKeys,
+        PanelInfo,
+        PanelSnapshot,
+    )
     from elke27_lib.client import Elke27Client, Result
     from elke27_lib.errors import (
         Elke27AuthError,
@@ -31,7 +39,7 @@ if _HAS_DEPS:
 
     from custom_components.elke27 import coordinator as hub_module
     from custom_components.elke27.coordinator import _connection_state
-    from homeassistant.exceptions import HomeAssistantError
+    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
     from tests.conftest import make_coordinator
 
 
@@ -82,9 +90,21 @@ class HubConnectTest(unittest.IsolatedAsyncioTestCase):
         client = _client()
         client.wait_ready.return_value = True
         link_keys = LinkKeys(tempkey_hex="00", linkkey_hex="11", linkhmac_hex="22")
-        hub = make_coordinator(MagicMock(), link_keys_json=link_keys.to_json())
-        with patch.object(hub_module, "Elke27Client", return_value=client):
+        hass = MagicMock()
+        # Run background work as plain loop tasks, as HA would.
+        hass.async_create_background_task.side_effect = lambda coro, _name: (
+            asyncio.get_running_loop().create_task(coro)
+        )
+        hub = make_coordinator(hass, link_keys_json=link_keys.to_json())
+        # The panel MAC check is stubbed (autospec; its behaviour is covered in
+        # test_panel_mac.py), so this test only checks that connect starts it.
+        with (
+            patch.object(hub_module, "Elke27Client", return_value=client),
+            patch.object(hub_module, "async_verify_panel_mac", autospec=True) as verify,
+        ):
             await hub.async_connect()
+            await asyncio.sleep(0)
+        verify.assert_awaited_once_with(hass, hub.config_entry)
 
         client.set_client_identity.assert_called_once_with(
             {"mn": "222", "sn": "123456789012"}
@@ -156,8 +176,8 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HomeAssistantError):
             await _hub(client).async_set_zone_bypass(5, bypassed=True, pin="1234")
 
-    async def test_bypass_not_authorized_reason_reaches_user(self) -> None:
-        """A panel 11008 rejection shows the library's reason, not a generic error."""
+    async def test_bypass_rejected_code_is_validation_error(self) -> None:
+        """A panel 11008 code rejection is a translated user error, not a 500."""
         message = "Panel rejected the request: not authorized (error 11008)."
         err = Elke27ProtocolError(message)
         err.panel_error_code = 11008  # type: ignore[attr-defined]
@@ -167,12 +187,53 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
             self.assertLogs(
                 "custom_components.elke27.coordinator", level="WARNING"
             ) as logs,
-            self.assertRaises(HomeAssistantError) as ctx,
+            self.assertRaises(ServiceValidationError) as ctx,
         ):
             await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")
-        assert str(ctx.exception) == message
+        assert ctx.exception.translation_domain == "elke27"
+        assert ctx.exception.translation_key == "code_rejected"
+        assert "rejected the code" in str(ctx.exception)
+        assert "1234" not in str(ctx.exception)
+        assert ctx.exception.__cause__ is err
         assert "11008" in logs.output[0]
-        assert "1234" not in logs.output[0]
+        assert all("1234" not in line for line in logs.output)
+
+    async def test_arm_and_disarm_rejected_code_is_validation_error(self) -> None:
+        """Arm and disarm map a panel 11008 code rejection the same way."""
+        err = Elke27ProtocolError("not authorized (error 11008).")
+        err.panel_error_code = 11008  # type: ignore[attr-defined]
+        client = _client()
+        client.async_arm_area.side_effect = err
+        client.async_disarm_area.side_effect = err
+        hub = _hub(client)
+        for call in (
+            lambda: hub.async_arm_area(1, ArmMode.ARMED_AWAY, "4321"),
+            lambda: hub.async_disarm_area(1, "4321"),
+        ):
+            with (
+                self.assertLogs(
+                    "custom_components.elke27.coordinator", level="WARNING"
+                ) as logs,
+                self.assertRaises(ServiceValidationError) as ctx,
+            ):
+                await call()
+            assert ctx.exception.translation_key == "code_rejected"
+            assert "4321" not in str(ctx.exception)
+            assert all("4321" not in line for line in logs.output)
+        client.async_arm_area.assert_awaited_once()
+        client.async_disarm_area.assert_awaited_once()
+
+    async def test_other_panel_error_stays_ha_error(self) -> None:
+        """A panel refusal other than 11008 keeps the library reason."""
+        message = "Panel rejected the request: area not ready (error 11015)."
+        err = Elke27ProtocolError(message)
+        err.panel_error_code = 11015  # type: ignore[attr-defined]
+        client = _client()
+        client.async_set_zone_bypass.side_effect = err
+        with self.assertRaises(HomeAssistantError) as ctx:
+            await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")
+        assert not isinstance(ctx.exception, ServiceValidationError)
+        assert str(ctx.exception) == message
 
     async def test_bypass_pin_required_error_propagates(self) -> None:
         """A PIN-required error from the library is re-raised unchanged."""
@@ -205,32 +266,68 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
         await hub.async_set_light(2, state=False, level=80)
         sets = [item for item in sent if item[0] == "light_set_status"]
         assert sets == [
-            ("light_set_status", {"light_id": 2, "status": "ON", "level": 99}),
+            ("light_set_status", {"light_id": 2, "status": "ON", "level": 100}),
             ("light_set_status", {"light_id": 2, "status": "ON", "level": 50}),
             ("light_set_status", {"light_id": 2, "status": "OFF", "level": 0}),
         ]
         for task in hub.background_tasks:
             task.close()
 
-    async def test_light_set_requests_status_now_and_later(self) -> None:
-        """A light change is followed by light_get_status, now and after a delay."""
+    async def test_light_set_requests_status_only_after_a_delay(self) -> None:
+        """A light change is followed by one delayed light_get_status only (#89)."""
         sent: list[tuple[str, dict[str, Any]]] = []
         hub = _hub(_executing_client(sent))
         with patch.object(hub_module, "LIGHT_REFRESH_DELAY", 0):
             assert await hub.async_set_light(3, state=True, level=50)
             assert sent == [
                 ("light_set_status", {"light_id": 3, "status": "ON", "level": 50}),
+            ]
+            assert len(hub.background_tasks) == 1
+            await hub.background_tasks[0]
+        assert sent == [
+            ("light_set_status", {"light_id": 3, "status": "ON", "level": 50}),
+            ("light_get_status", {"light_id": 3}),
+        ]
+
+    async def test_light_set_waits_before_rereading(self) -> None:
+        """The turn-on re-read waits LIGHT_REFRESH_DELAY, so no early level-0 reply."""
+        sent: list[tuple[str, dict[str, Any]]] = []
+        hub = _hub(_executing_client(sent))
+        with patch.object(hub_module, "LIGHT_REFRESH_DELAY", 30):
+            assert await hub.async_set_light(3, state=True, level=10)
+            task = asyncio.ensure_future(hub.background_tasks[0])
+            for _ in range(5):
+                await asyncio.sleep(0)
+            assert not task.done()
+            assert sent == [
+                ("light_set_status", {"light_id": 3, "status": "ON", "level": 10}),
+            ]
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+    async def test_light_turn_off_rereads_now_and_later(self) -> None:
+        """A turn-off is read back at once and again after the delay."""
+        sent: list[tuple[str, dict[str, Any]]] = []
+        hub = _hub(_executing_client(sent))
+        with patch.object(hub_module, "LIGHT_REFRESH_DELAY", 0):
+            assert await hub.async_set_light(3, state=False)
+            assert sent == [
+                ("light_set_status", {"light_id": 3, "status": "OFF", "level": 0}),
                 ("light_get_status", {"light_id": 3}),
             ]
             assert len(hub.background_tasks) == 1
             await hub.background_tasks[0]
-        assert sent[-1] == ("light_get_status", {"light_id": 3})
-        assert len(sent) == 3
+        assert [c for c, _ in sent] == [
+            "light_set_status",
+            "light_get_status",
+            "light_get_status",
+        ]
 
     async def test_light_status_refresh_failure_is_ignored(self) -> None:
         """A failing status refresh doesn't fail the light command."""
-        client = _client()
         calls: list[str] = []
+        client = _client()
 
         async def _execute(command_key: str, /, **_params: Any) -> Any:
             calls.append(command_key)
@@ -240,11 +337,21 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
 
         client.async_execute.side_effect = _execute
         hub = _hub(client)
-        assert await hub.async_set_light(3, state=False)
-        assert calls == ["light_set_status", "light_get_status"]
-        hub._stopping = True
-        await hub.background_tasks[0]
-        assert calls == ["light_set_status", "light_get_status"]
+        with patch.object(hub_module, "LIGHT_REFRESH_DELAY", 0):
+            assert await hub.async_set_light(3, state=False)
+            assert calls == ["light_set_status", "light_get_status"]
+            await hub.background_tasks[0]
+        assert calls == ["light_set_status", "light_get_status", "light_get_status"]
+
+    async def test_light_reread_skipped_after_shutdown(self) -> None:
+        """No delayed re-read once the hub has shut its client down."""
+        sent: list[tuple[str, dict[str, Any]]] = []
+        hub = _hub(_executing_client(sent))
+        with patch.object(hub_module, "LIGHT_REFRESH_DELAY", 0):
+            assert await hub.async_set_light(3, state=True, level=50)
+            await hub.async_shutdown_client()
+            await hub.background_tasks[0]
+        assert [c for c, _ in sent] == ["light_set_status"]
 
     async def test_failed_light_set_does_not_refresh(self) -> None:
         """No status refresh when the set command fails."""
@@ -255,6 +362,43 @@ class HubCommandTest(unittest.IsolatedAsyncioTestCase):
             await hub.async_set_light(3, state=True)
         client.async_execute.assert_awaited_once()
         assert hub.background_tasks == []
+
+    async def test_all_zero_code_is_validation_error_and_sends_nothing(self) -> None:
+        """Arm, disarm and bypass refuse an all-zero code before the client (#90)."""
+        client = _client()
+        hub = _hub(client)
+        calls = [
+            lambda: hub.async_disarm_area(1, "0000"),
+            lambda: hub.async_arm_area(1, "away", "0000"),
+            lambda: hub.async_set_zone_bypass(2, bypassed=True, pin="0"),
+        ]
+        with self.assertNoLogs("custom_components.elke27", level="ERROR"):
+            for call in calls:
+                with self.assertRaises(ServiceValidationError) as err:
+                    await call()
+                assert err.exception.translation_key == "code_all_zero"
+        assert client.method_calls == []
+
+    async def test_non_ascii_or_huge_zero_code_sends_nothing(self) -> None:
+        """Arm, disarm and bypass refuse non-ASCII digits and 5,000 zeros cleanly."""
+        client = _client()
+        hub = _hub(client)
+        cases = [
+            ("\u00b2", "code_not_numeric"),
+            ("\uff11\uff12\uff13\uff14", "code_not_numeric"),
+        ]
+        cases.append(("0" * 5000, "code_all_zero"))
+        with self.assertNoLogs("custom_components.elke27", level="ERROR"):
+            for code, key in cases:
+                for call in (
+                    lambda c=code: hub.async_disarm_area(1, c),
+                    lambda c=code: hub.async_arm_area(1, "away", c),
+                    lambda c=code: hub.async_set_zone_bypass(2, bypassed=True, pin=c),
+                ):
+                    with self.assertRaises(ServiceValidationError) as err:
+                        await call()
+                    assert err.exception.translation_key == key
+        assert client.method_calls == []
 
     async def test_lock_payloads(self) -> None:
         """Lock is status ON, unlock is status OFF."""

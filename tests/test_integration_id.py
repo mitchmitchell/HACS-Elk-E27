@@ -90,9 +90,15 @@ def test_build_client_identity_passes_id_unchanged() -> None:
 async def test_setup_rejects_entry_without_valid_integration_id(
     hass: HomeAssistant, data_extra: dict[str, Any]
 ) -> None:
-    """Old or invalid entries fail setup (delete and re-add) and never connect."""
+    """
+    A VERSION 2 entry without a valid ID fails setup and never connects.
+
+    VERSION 1 (0.1.x) entries are upgraded in place instead; see
+    test_legacy_migration.py.
+    """
     entry = MockConfigEntry(
         domain=DOMAIN,
+        version=2,
         unique_id=PANEL_MAC,
         data={
             CONF_HOST: HOST,
