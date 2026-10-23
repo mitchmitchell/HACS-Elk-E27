@@ -66,6 +66,22 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Elke27LinkSlotsFullError.code (elke27 0.3.15+): the panel has no free client slot.
+LINK_SLOTS_FULL_CODE = "link_slots_full"
+
+
+def _link_error_base(err: Elke27Error) -> str:
+    """
+    Map a remaining library error to a form error.
+
+    elke27 0.3.15 (the pinned version) raises Elke27LinkSlotsFullError (code
+    "link_slots_full") when the panel's client-link table is full. This still
+    matches on the public error code; a follow-up can replace it with an
+    ``except Elke27LinkSlotsFullError`` and drop this helper and the constant.
+    """
+    return "no_link_slots" if err.code == LINK_SLOTS_FULL_CODE else "unknown"
+
+
 CONF_ACCESS_CODE = "access_code"
 CONF_PASSPHRASE = "passphrase"
 CONF_PANEL_INFO = "panel_info"
@@ -410,7 +426,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             # Log the exception type only: its message can carry host, port or
             # panel fields, and none of those belong in the log.
             _LOGGER.warning("Elke27 link (%s) failed: %s", step_id, type(err).__name__)
-            errors["base"] = "unknown"
+            errors["base"] = (
+                _link_error_base(err) if isinstance(err, Elke27Error) else "unknown"
+            )
         finally:
             with contextlib.suppress(OSError, TimeoutError, E27Error, Elke27Error):
                 await client.async_disconnect()
