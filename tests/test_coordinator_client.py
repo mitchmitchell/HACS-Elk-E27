@@ -192,7 +192,6 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
             await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")
         assert ctx.exception.translation_domain == "elke27"
         assert ctx.exception.translation_key == "code_rejected"
-        assert "rejected the code" in str(ctx.exception)
         assert "1234" not in str(ctx.exception)
         assert ctx.exception.__cause__ is err
         assert "11008" in logs.output[0]

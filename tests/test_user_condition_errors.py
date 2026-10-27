@@ -40,11 +40,9 @@ USER_CONDITION_CODES = [
 ]
 
 
-@pytest.fixture(
-    autouse=True, params=USER_CONDITION_CODES, ids=lambda c: f"panel_{c[0]}"
-)
+@pytest.fixture(params=USER_CONDITION_CODES, ids=lambda c: f"panel_{c[0]}")
 def code_and_key(request: pytest.FixtureRequest) -> tuple[int, str]:
-    """Run every test once per user-condition panel error code."""
+    """Run parametrized tests once per user-condition panel error code."""
     return request.param
 
 
@@ -52,16 +50,6 @@ def code_and_key(request: pytest.FixtureRequest) -> tuple[int, str]:
 def rejected_code(code_and_key: tuple[int, str]) -> int:
     """Return the panel error code under test."""
     return code_and_key[0]
-
-
-@pytest.fixture(autouse=True)
-def _expected_key(code_and_key: tuple[int, str]) -> None:
-    """Set the translation key the refusal must carry."""
-    global EXPECTED_KEY  # noqa: PLW0603
-    EXPECTED_KEY = code_and_key[1]
-
-
-EXPECTED_KEY = ""
 
 
 class ScriptedClient(FakeClient):
@@ -105,14 +93,19 @@ class ScriptedClient(FakeClient):
 REJECT = object()
 
 
-def _assert_code_rejected(err: pytest.ExceptionInfo[ServiceValidationError]) -> None:
+def _assert_code_rejected(
+    err: pytest.ExceptionInfo[ServiceValidationError], key: str
+) -> None:
     assert type(err.value) is ServiceValidationError
-    assert err.value.translation_key == EXPECTED_KEY
+    assert err.value.translation_key == key
     assert CODE not in str(err.value)
 
 
 async def test_custom_bypass_rejected_code_rolls_back_and_raises_code_rejected(
-    rejected_code: int, hass: HomeAssistant, setup: Setup
+    code_and_key: tuple[int, str],
+    rejected_code: int,
+    hass: HomeAssistant,
+    setup: Setup,
 ) -> None:
     # Zone 1 bypass accepted, zone 2 bypass refused, the rollback of zone 1 ok.
     client = ScriptedClient([None, REJECT, None], rejected_code)
@@ -124,7 +117,7 @@ async def test_custom_bypass_rejected_code_rolls_back_and_raises_code_rejected(
             {"entity_id": ALARM, ATTR_CODE: CODE},
             blocking=True,
         )
-    _assert_code_rejected(err)
+    _assert_code_rejected(err, code_and_key[1])
     assert client.writes() == [
         ("bypass", 1, True),
         ("bypass", 2, True),
@@ -133,7 +126,10 @@ async def test_custom_bypass_rejected_code_rolls_back_and_raises_code_rejected(
 
 
 async def test_custom_bypass_arm_rejected_rolls_back_bypasses(
-    rejected_code: int, hass: HomeAssistant, setup: Setup
+    code_and_key: tuple[int, str],
+    rejected_code: int,
+    hass: HomeAssistant,
+    setup: Setup,
 ) -> None:
     client = ScriptedClient([None, None, REJECT], rejected_code)
     await setup(client)
@@ -144,7 +140,7 @@ async def test_custom_bypass_arm_rejected_rolls_back_bypasses(
             {"entity_id": ALARM, ATTR_CODE: CODE},
             blocking=True,
         )
-    _assert_code_rejected(err)
+    _assert_code_rejected(err, code_and_key[1])
     assert client.writes() == [
         ("bypass", 1, True),
         ("bypass", 2, True),
@@ -174,6 +170,7 @@ async def test_custom_bypass_arm_rejected_rolls_back_bypasses(
     ids=["bypass_refused", "arm_refused"],
 )
 async def test_arm_automatic_rejected_code_raises_code_rejected(
+    code_and_key: tuple[int, str],
     rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
@@ -189,12 +186,13 @@ async def test_arm_automatic_rejected_code_raises_code_rejected(
             {"entity_id": ALARM, "mode": "away", ATTR_CODE: CODE},
             blocking=True,
         )
-    _assert_code_rejected(err)
+    _assert_code_rejected(err, code_and_key[1])
     assert client.writes() == expected
 
 
 @pytest.mark.parametrize("service", ["custom_bypass", "arm_automatic"])
 async def test_rollback_failure_still_raises_code_rejected(
+    code_and_key: tuple[int, str],
     rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
@@ -217,7 +215,7 @@ async def test_rollback_failure_still_raises_code_rejected(
             {"entity_id": ALARM, ATTR_CODE: CODE, **call[2]},
             blocking=True,
         )
-    _assert_code_rejected(err)
+    _assert_code_rejected(err, code_and_key[1])
     messages = [r.getMessage() for r in caplog.records]
     assert any(
         m == "Code rejected; zones still bypassed after rollback: 2" for m in messages
@@ -248,6 +246,7 @@ def _arm_automatic_reports(
     ids=["bypass_stage", "arm_stage_failed_rollback"],
 )
 async def test_arm_automatic_rejected_code_still_notifies_and_fires_event(
+    code_and_key: tuple[int, str],
     rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
@@ -270,7 +269,7 @@ async def test_arm_automatic_rejected_code_still_notifies_and_fires_event(
             {"entity_id": ALARM, "mode": "away", ATTR_CODE: CODE},
             blocking=True,
         )
-    _assert_code_rejected(err)
+    _assert_code_rejected(err, code_and_key[1])
     await hass.async_block_till_done()
     assert len(events) == 1
     data = events[0]
@@ -293,7 +292,10 @@ async def test_arm_automatic_rejected_code_still_notifies_and_fires_event(
 
 
 async def test_custom_bypass_failed_rollback_notifies_still_bypassed_zones(
-    rejected_code: int, hass: HomeAssistant, setup: Setup
+    code_and_key: tuple[int, str],
+    rejected_code: int,
+    hass: HomeAssistant,
+    setup: Setup,
 ) -> None:
     client = ScriptedClient([None, None, REJECT, REJECT, None], rejected_code)
     await setup(client)
@@ -304,7 +306,7 @@ async def test_custom_bypass_failed_rollback_notifies_still_bypassed_zones(
             {"entity_id": ALARM, ATTR_CODE: CODE},
             blocking=True,
         )
-    _assert_code_rejected(err)
+    _assert_code_rejected(err, code_and_key[1])
     await hass.async_block_till_done()
     notifications = [
         n
@@ -354,6 +356,7 @@ def _assert_no_error_logs(caplog: pytest.LogCaptureFixture) -> None:
     ids=["disarm", "arm", "custom_bypass", "arm_automatic", "zone_bypass"],
 )
 async def test_every_code_path_raises_code_rejected_without_error_log(
+    code_and_key: tuple[int, str],
     rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
@@ -373,12 +376,13 @@ async def test_every_code_path_raises_code_rejected_without_error_log(
             {"entity_id": target, ATTR_CODE: CODE, **extra},
             blocking=True,
         )
-    _assert_code_rejected(err)
+    _assert_code_rejected(err, code_and_key[1])
     await hass.async_block_till_done()
     _assert_no_error_logs(caplog)
 
 
 async def test_custom_bypass_rollback_raises_code_rejected_without_error_log(
+    code_and_key: tuple[int, str],
     rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
@@ -394,7 +398,7 @@ async def test_custom_bypass_rollback_raises_code_rejected_without_error_log(
             {"entity_id": ALARM, ATTR_CODE: CODE},
             blocking=True,
         )
-    _assert_code_rejected(err)
+    _assert_code_rejected(err, code_and_key[1])
     await hass.async_block_till_done()
     _assert_no_error_logs(caplog)
 

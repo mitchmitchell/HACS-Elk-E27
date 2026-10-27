@@ -654,8 +654,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         assert type(err) is HomeAssistantError
         text = str(err)
         assert text.startswith("Automatic arming failed for 2 of 2 areas")
-        assert "alarm_control_panel.a_house: The area is not ready" in text
-        assert "alarm_control_panel.b_garage: The area is in alarm" in text
+        assert "alarm_control_panel.a_house: not_ready" in text
+        assert "alarm_control_panel.b_garage: in_alarm" in text
         assert "1234" not in text
         # Each area still rolled back and reported on its own.
         assert hass.bus.async_fire.call_count == 2
@@ -683,8 +683,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         hass = MagicMock()
         err, _house, _garage = await self._run_two_areas(hass, 11008, 11015)
         assert type(err) is HomeAssistantError
-        assert "a_house: The panel rejected the code" in str(err)
-        assert "b_garage: The area is not ready" in str(err)
+        assert "a_house: code_rejected" in str(err)
+        assert "b_garage: not_ready" in str(err)
 
     async def test_rollback_partial_failure_names_still_bypassed(self) -> None:
         """An un-bypass that fails is named, with how to clear it, and not retried."""

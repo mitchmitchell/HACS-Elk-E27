@@ -30,7 +30,7 @@ NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
 
 # Panel error codes that mean the panel rejected the user code (a wrong code,
 # or a code not allowed for this action). Each is a user error.
-PANEL_ERROR_CODES_REJECTED: frozenset[int] = frozenset({11004, 11008, 11037})
+PANEL_ERROR_CODES_REJECTED: frozenset[int] = frozenset({11004, 11008, 11037, 11038})
 
 
 # Panel error codes that mean the panel refused the action because of the
@@ -41,7 +41,6 @@ PANEL_ERROR_CODES_USER_CONDITION: dict[int, str] = {
     11023: "not_bypassable",  # zone can not be bypassed
     11027: "in_alarm",  # area is in alarm
     11028: "not_allowed_armed",  # not allowed while the area is armed
-    11038: "code_rejected",  # code is a duress code, not allowed for this action
 }
 
 # Translation keys of the panel refusals that get the same rollback, event and
@@ -57,39 +56,12 @@ USER_REFUSAL_KEYS: frozenset[str] = frozenset(
 )
 
 
-def is_code_rejected_panel_error(err: BaseException | None) -> bool:
-    """Return True when the panel error code means the code was rejected."""
-    return panel_error_code(err) in PANEL_ERROR_CODES_REJECTED
-
-
 def user_refusal_key(err: BaseException | None) -> str | None:
     """Return the translation key when the panel refused as a user error."""
     code = panel_error_code(err)
-    if code is None:
-        return None
     if code in PANEL_ERROR_CODES_REJECTED:
         return "code_rejected"
     return PANEL_ERROR_CODES_USER_CONDITION.get(code)
-
-
-CODE_REJECTED_MESSAGE = (
-    "The panel rejected the code. Check the user code and that it is allowed"
-    " for this area."
-)
-
-# Untranslated fallback messages; translations/en.json has the same text.
-USER_REFUSAL_MESSAGES: dict[str, str] = {
-    "code_rejected": CODE_REJECTED_MESSAGE,
-    "not_ready": (
-        "The area is not ready to arm. Close the open zones or bypass them,"
-        " then try again."
-    ),
-    "not_bypassable": "This zone can not be bypassed.",
-    "in_alarm": ("The area is in alarm. Disarm it to clear the alarm, then try again."),
-    "not_allowed_armed": (
-        "This is not allowed while the area is armed. Disarm it, then try again."
-    ),
-}
 
 
 TIMEOUT_MESSAGE = (
@@ -179,7 +151,6 @@ def command_error(err: BaseException) -> HomeAssistantError:
     key = user_refusal_key(err)
     if key is not None:
         return ServiceValidationError(
-            USER_REFUSAL_MESSAGES[key],
             translation_domain=DOMAIN,
             translation_key=key,
         )
