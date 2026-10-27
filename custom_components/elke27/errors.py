@@ -59,6 +59,8 @@ USER_REFUSAL_KEYS: frozenset[str] = frozenset(
 def user_refusal_key(err: BaseException | None) -> str | None:
     """Return the translation key when the panel refused as a user error."""
     code = panel_error_code(err)
+    if code is None:
+        return None
     if code in PANEL_ERROR_CODES_REJECTED:
         return "code_rejected"
     return PANEL_ERROR_CODES_USER_CONDITION.get(code)

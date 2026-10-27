@@ -8,6 +8,7 @@ import contextlib
 import contextvars
 import dataclasses
 import importlib.util
+import json
 from pathlib import Path
 import sys
 from types import MappingProxyType
@@ -46,6 +47,12 @@ if _HAS_DEPS:
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
+    with (_COMPONENT / "translations" / "en.json").open(encoding="utf-8") as fh:
+        _EXCEPTION_MESSAGES = {
+            key: entry["message"].rstrip(".")
+            for key, entry in json.load(fh)["exceptions"].items()
+        }
+
     # What the panel client's writes return with return_result=True
     # (elke27 0.3.14 and later).
     _WRITE_OK = CommandResult(route="test", status_refresh_ok=True)
@@ -78,6 +85,32 @@ def _patch_entity_lookup(test: unittest.TestCase) -> None:
         patcher = patch.object(integration, name, mock)
         patcher.start()
         test.addCleanup(patcher.stop)
+
+
+def _fake_exception_message(
+    _translation_domain: str,
+    translation_key: str,
+    translation_placeholders: dict[str, str] | None = None,
+) -> str:
+    """Render exceptions like HA, using integration en.json (unittest has no hass)."""
+    message = _EXCEPTION_MESSAGES.get(translation_key, translation_key)
+    if translation_placeholders:
+        with contextlib.suppress(KeyError):
+            message = message.format(**translation_placeholders)
+    return message
+
+
+@contextlib.contextmanager
+def _english_exception_messages() -> Any:
+    """Patch exception __str__ so ServiceValidationError reads like production HA."""
+    with (
+        patch("homeassistant.exceptions._function_cache", {}),
+        patch(
+            "homeassistant.helpers.translation.async_get_exception_message",
+            side_effect=_fake_exception_message,
+        ),
+    ):
+        yield
 
 
 @contextlib.contextmanager
@@ -650,12 +683,19 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_mixed_user_refusals_raise_combined_error(self) -> None:
         """Not ready in one area and in alarm in another name both areas."""
         hass = MagicMock()
-        err, _house, _garage = await self._run_two_areas(hass, 11015, 11027)
+        with _english_exception_messages():
+            err, _house, _garage = await self._run_two_areas(hass, 11015, 11027)
         assert type(err) is HomeAssistantError
         text = str(err)
         assert text.startswith("Automatic arming failed for 2 of 2 areas")
-        assert "alarm_control_panel.a_house: not_ready" in text
-        assert "alarm_control_panel.b_garage: in_alarm" in text
+        assert (
+            "alarm_control_panel.a_house: The area is not ready to arm"
+            in text
+        )
+        assert (
+            "alarm_control_panel.b_garage: The area is in alarm"
+            in text
+        )
         assert "1234" not in text
         # Each area still rolled back and reported on its own.
         assert hass.bus.async_fire.call_count == 2
@@ -681,10 +721,12 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_rejected_code_and_not_ready_raise_combined_error(self) -> None:
         """A rejected code in one area and not ready in another are combined."""
         hass = MagicMock()
-        err, _house, _garage = await self._run_two_areas(hass, 11008, 11015)
+        with _english_exception_messages():
+            err, _house, _garage = await self._run_two_areas(hass, 11008, 11015)
         assert type(err) is HomeAssistantError
-        assert "a_house: code_rejected" in str(err)
-        assert "b_garage: not_ready" in str(err)
+        text = str(err)
+        assert "a_house: The panel rejected the code" in text
+        assert "b_garage: The area is not ready to arm" in text
 
     async def test_rollback_partial_failure_names_still_bypassed(self) -> None:
         """An un-bypass that fails is named, with how to clear it, and not retried."""
