@@ -61,6 +61,10 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 - An all-zero user code is a validation error, not a server error. (#94, fixes #90)
 - A code the panel rejects (not authorized) is a user error (`code_rejected`) on arm, disarm,
   bypass and auto-arm. The code is never shown or logged. (#108, fixes #109)
+- Every other way the panel rejects a code (including an invalid user code) is also a user
+  error on disarm, arm, custom bypass and its rollback, automatic arm and zone bypass: the
+  same "The panel rejected the code" message, event and notification, nothing at ERROR
+  level. (#114)
 - Upgrade Repairs issues for unreadable upgrade notes, leftover
   entities/devices/items, interrupted or failed saves, and duplicates (with guided
   delete-and-retry). Strict reads of the upgrade record: setup fails cleanly on a damaged one.
