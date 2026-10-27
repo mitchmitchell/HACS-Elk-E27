@@ -72,7 +72,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   error on disarm, arm, custom bypass and its rollback, automatic arm and zone bypass: the
   same "The panel rejected the code" message, event and notification, nothing at ERROR
   level. (#114)
-- PENDING #107/#111: upgrade Repairs issues for unreadable upgrade notes, leftover
+- Upgrade Repairs issues for unreadable upgrade notes, leftover
   entities/devices/items, interrupted or failed saves, and duplicates (with guided
   delete-and-retry). Strict reads of the upgrade record: setup fails cleanly on a damaged one.
   Old identifiers are kept out of logs.
@@ -83,7 +83,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ### Internal
 - Integration ID read directly; typed library calls instead of getattr. (#88, #103)
 
-## [0.2.0] - 2026-10-16
+## [0.2.0] - 2026-10-15
 
 ### Breaking
 1. **No in-place upgrade from 0.1.x in 0.2.0; go straight to 0.2.1**, which upgrades in
