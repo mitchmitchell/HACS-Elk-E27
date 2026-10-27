@@ -11,6 +11,7 @@
       "cannot_connect": "Unable to connect to the panel. Confirm the host is reachable and the panel is online.",
       "invalid_auth": "Unable to authenticate with the panel. Check the access code, passphrase, and network connectivity.",
       "link_required": "The panel requires linking. Enter the access code and passphrase again.",
+      "no_link_slots": "The panel has no room for another linked client. Each Home Assistant setup links with its own client ID, and the panel can only hold a limited number of them. Remove an unused linked client using the Elk Connect mobile app (this needs the installer code; contact your installer if you don't have it), then try again.",
       "no_panels_found": "No panels were discovered. Confirm the panel is online, then try again or set it up manually.",
       "unknown": "Something went wrong linking the panel. Check the access code and passphrase and try again. If it keeps failing, check the logs."
     },
