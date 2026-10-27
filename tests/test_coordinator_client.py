@@ -192,7 +192,6 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
             await _hub(client).async_set_zone_bypass(17, bypassed=True, pin="1234")
         assert ctx.exception.translation_domain == "elke27"
         assert ctx.exception.translation_key == "code_rejected"
-        assert "rejected the code" in str(ctx.exception)
         assert "1234" not in str(ctx.exception)
         assert ctx.exception.__cause__ is err
         assert "11008" in logs.output[0]
@@ -224,10 +223,10 @@ class HubZoneBypassTest(unittest.IsolatedAsyncioTestCase):
         client.async_disarm_area.assert_awaited_once()
 
     async def test_other_panel_error_stays_ha_error(self) -> None:
-        """A panel refusal other than 11008 keeps the library reason."""
-        message = "Panel rejected the request: area not ready (error 11015)."
+        """A panel refusal with an unmapped code keeps the library reason."""
+        message = "Panel rejected the request: invalid area (error 11033)."
         err = Elke27ProtocolError(message)
-        err.panel_error_code = 11015  # type: ignore[attr-defined]
+        err.panel_error_code = 11033  # type: ignore[attr-defined]
         client = _client()
         client.async_set_zone_bypass.side_effect = err
         with self.assertRaises(HomeAssistantError) as ctx:

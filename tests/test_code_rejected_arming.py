@@ -1,6 +1,6 @@
 # ruff: noqa: S101, D103, TC001
 """
-A code the panel rejects (11008) while bypassing or arming, through HA.
+A code the panel rejects (any code-rejected panel error), through HA.
 
 The refusal reaches the caller as ServiceValidationError(code_rejected),
 never re-wrapped as a zone-bypass or automatic-arming failure. Zones this
@@ -26,13 +26,26 @@ ALARM = "alarm_control_panel.house"
 CODE = "1234"
 
 
+# Literal panel codes, not read from the set under test.
+REJECTED_CODES = [11004, 11008, 11037]
+
+
+@pytest.fixture(autouse=True, params=REJECTED_CODES, ids=lambda c: f"panel_{c}")
+def rejected_code(request: pytest.FixtureRequest) -> int:
+    """Run every test once per code-rejected panel error code."""
+    return request.param
+
+
 class ScriptedClient(FakeClient):
     """Write outcomes popped in order; ``None`` means accepted."""
 
-    def __init__(self, outcomes: list[BaseException | None]) -> None:
-        """Script the outcome of each write, in order."""
+    def __init__(
+        self, outcomes: list[BaseException | object | None], rejected_code: int
+    ) -> None:
+        """Script each write's outcome; REJECT raises ``rejected_code``."""
         super().__init__(command_result(refresh=True))
-        self.outcomes = outcomes
+        self.rejected_code = rejected_code
+        self.outcomes = list(outcomes)
         self.snapshot = snapshot_with(
             self.snapshot,
             areas={1: AreaState(area_id=1, name="House", ready=False)},
@@ -45,6 +58,8 @@ class ScriptedClient(FakeClient):
     async def _write(self, kind: str, **params: Any) -> Any:
         self.calls.append((kind, params))
         outcome = self.outcomes.pop(0) if self.outcomes else None
+        if outcome is REJECT:
+            raise Elke27PanelError(self.rejected_code, "not authorized")
         if outcome is not None:
             raise outcome
         return self.write_result
@@ -58,8 +73,8 @@ class ScriptedClient(FakeClient):
         ]
 
 
-def _rejected() -> Elke27PanelError:
-    return Elke27PanelError(11008, "not authorized")
+# Scripted refusal: ScriptedClient raises its rejected_code panel error.
+REJECT = object()
 
 
 def _assert_code_rejected(err: pytest.ExceptionInfo[ServiceValidationError]) -> None:
@@ -69,10 +84,10 @@ def _assert_code_rejected(err: pytest.ExceptionInfo[ServiceValidationError]) -> 
 
 
 async def test_custom_bypass_rejected_code_rolls_back_and_raises_code_rejected(
-    hass: HomeAssistant, setup: Setup
+    rejected_code: int, hass: HomeAssistant, setup: Setup
 ) -> None:
     # Zone 1 bypass accepted, zone 2 bypass refused, the rollback of zone 1 ok.
-    client = ScriptedClient([None, _rejected(), None])
+    client = ScriptedClient([None, REJECT, None], rejected_code)
     await setup(client)
     with pytest.raises(ServiceValidationError) as err:
         await hass.services.async_call(
@@ -90,9 +105,9 @@ async def test_custom_bypass_rejected_code_rolls_back_and_raises_code_rejected(
 
 
 async def test_custom_bypass_arm_rejected_rolls_back_bypasses(
-    hass: HomeAssistant, setup: Setup
+    rejected_code: int, hass: HomeAssistant, setup: Setup
 ) -> None:
-    client = ScriptedClient([None, None, _rejected()])
+    client = ScriptedClient([None, None, REJECT], rejected_code)
     await setup(client)
     with pytest.raises(ServiceValidationError) as err:
         await hass.services.async_call(
@@ -115,10 +130,10 @@ async def test_custom_bypass_arm_rejected_rolls_back_bypasses(
     ("outcomes", "expected"),
     [
         # The first bypass is refused: nothing to roll back.
-        ([_rejected()], [("bypass", 1, True)]),
+        ([REJECT], [("bypass", 1, True)]),
         # Both bypasses accepted, the arm refused: both rolled back.
         (
-            [None, None, _rejected()],
+            [None, None, REJECT],
             [
                 ("bypass", 1, True),
                 ("bypass", 2, True),
@@ -131,12 +146,13 @@ async def test_custom_bypass_arm_rejected_rolls_back_bypasses(
     ids=["bypass_refused", "arm_refused"],
 )
 async def test_arm_automatic_rejected_code_raises_code_rejected(
+    rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
     outcomes: list[BaseException | None],
     expected: list[tuple[str, int | None, bool | None]],
 ) -> None:
-    client = ScriptedClient(outcomes)
+    client = ScriptedClient(outcomes, rejected_code)
     await setup(client)
     with pytest.raises(ServiceValidationError) as err:
         await hass.services.async_call(
@@ -151,6 +167,7 @@ async def test_arm_automatic_rejected_code_raises_code_rejected(
 
 @pytest.mark.parametrize("service", ["custom_bypass", "arm_automatic"])
 async def test_rollback_failure_still_raises_code_rejected(
+    rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
     caplog: pytest.LogCaptureFixture,
@@ -158,7 +175,7 @@ async def test_rollback_failure_still_raises_code_rejected(
 ) -> None:
     # Both bypasses accepted, the arm refused, then the un-bypass of zone 2
     # fails (the panel refuses the same code) while zone 1 is undone.
-    client = ScriptedClient([None, None, _rejected(), _rejected(), None])
+    client = ScriptedClient([None, None, REJECT, REJECT, None], rejected_code)
     await setup(client)
     caplog.set_level(logging.WARNING, logger="custom_components.elke27")
     if service == "custom_bypass":
@@ -196,13 +213,14 @@ def _arm_automatic_reports(
     ("outcomes", "stage", "zone_id", "bypassed", "rolled_back", "still"),
     [
         # Zone 1 bypassed, zone 2's bypass refused, zone 1 rolled back.
-        ([None, _rejected(), None], "bypass", 2, [1], [1], []),
+        ([None, REJECT, None], "bypass", 2, [1], [1], []),
         # Both bypassed, the arm refused, zone 2's rollback refused.
-        ([None, None, _rejected(), _rejected(), None], "arm", None, [1, 2], [1], [2]),
+        ([None, None, REJECT, REJECT, None], "arm", None, [1, 2], [1], [2]),
     ],
     ids=["bypass_stage", "arm_stage_failed_rollback"],
 )
 async def test_arm_automatic_rejected_code_still_notifies_and_fires_event(
+    rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
     caplog: pytest.LogCaptureFixture,
@@ -213,7 +231,7 @@ async def test_arm_automatic_rejected_code_still_notifies_and_fires_event(
     rolled_back: list[int],
     still: list[int],
 ) -> None:
-    client = ScriptedClient(outcomes)
+    client = ScriptedClient(outcomes, rejected_code)
     await setup(client)
     caplog.set_level(logging.DEBUG, logger="custom_components.elke27")
     events, _ = _arm_automatic_reports(hass)
@@ -247,9 +265,9 @@ async def test_arm_automatic_rejected_code_still_notifies_and_fires_event(
 
 
 async def test_custom_bypass_failed_rollback_notifies_still_bypassed_zones(
-    hass: HomeAssistant, setup: Setup
+    rejected_code: int, hass: HomeAssistant, setup: Setup
 ) -> None:
-    client = ScriptedClient([None, None, _rejected(), _rejected(), None])
+    client = ScriptedClient([None, None, REJECT, REJECT, None], rejected_code)
     await setup(client)
     with pytest.raises(ServiceValidationError) as err:
         await hass.services.async_call(
@@ -274,9 +292,9 @@ async def test_custom_bypass_failed_rollback_notifies_still_bypassed_zones(
 
 
 async def test_custom_bypass_full_rollback_creates_no_notification(
-    hass: HomeAssistant, setup: Setup
+    rejected_code: int, hass: HomeAssistant, setup: Setup
 ) -> None:
-    client = ScriptedClient([None, None, _rejected()])
+    client = ScriptedClient([None, None, REJECT], rejected_code)
     await setup(client)
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(
@@ -290,3 +308,64 @@ async def test_custom_bypass_full_rollback_creates_no_notification(
         key.startswith("elke27_code_rejected_bypass_")
         for key in hass.data.get("persistent_notification", {})
     )
+
+
+def _assert_no_error_logs(caplog: pytest.LogCaptureFixture) -> None:
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+@pytest.mark.parametrize(
+    ("domain", "service", "target", "extra"),
+    [
+        ("alarm_control_panel", "alarm_disarm", ALARM, {}),
+        ("alarm_control_panel", "alarm_arm_away", ALARM, {}),
+        ("alarm_control_panel", "alarm_arm_custom_bypass", ALARM, {}),
+        ("elke27", "alarm_arm_automatic", ALARM, {"mode": "away"}),
+        ("elke27", "zone_bypass", "binary_sensor.house_front_door", {"bypass": True}),
+    ],
+    ids=["disarm", "arm", "custom_bypass", "arm_automatic", "zone_bypass"],
+)
+async def test_every_code_path_raises_code_rejected_without_error_log(
+    rejected_code: int,
+    hass: HomeAssistant,
+    setup: Setup,
+    caplog: pytest.LogCaptureFixture,
+    domain: str,
+    service: str,
+    target: str,
+    extra: dict[str, Any],
+) -> None:
+    client = ScriptedClient([REJECT, None, None], rejected_code)
+    await setup(client)
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            domain,
+            service,
+            {"entity_id": target, ATTR_CODE: CODE, **extra},
+            blocking=True,
+        )
+    _assert_code_rejected(err)
+    await hass.async_block_till_done()
+    _assert_no_error_logs(caplog)
+
+
+async def test_custom_bypass_rollback_raises_code_rejected_without_error_log(
+    rejected_code: int,
+    hass: HomeAssistant,
+    setup: Setup,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = ScriptedClient([None, None, REJECT, REJECT, None], rejected_code)
+    await setup(client)
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            "alarm_control_panel",
+            "alarm_arm_custom_bypass",
+            {"entity_id": ALARM, ATTR_CODE: CODE},
+            blocking=True,
+        )
+    _assert_code_rejected(err)
+    await hass.async_block_till_done()
+    _assert_no_error_logs(caplog)
