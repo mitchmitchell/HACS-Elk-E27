@@ -56,11 +56,6 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   the last level, and the reported level is scaled correctly. (#92, #100; fixes #91, #99)
 
 ### Fixed
-- **Every way the panel rejects a code is now a user error.** When the panel rejected the
-   code for a disarm, arm, custom bypass (including its rollback), automatic arm or zone
-   bypass in a way 0.2.0 did not recognize, Home Assistant returned a server error and
-   logged an ERROR. It now shows the same "The panel rejected the code" message, event and
-   notification as every other rejected code, and logs nothing at ERROR level.
 - **Arming an area that is not ready now shows a clear message.** When the panel refused
    an arm or bypass because the area was not ready (a zone open), was in alarm, was
    already armed, or the zone can not be bypassed, Home Assistant returned a server error
@@ -73,6 +68,10 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 - An all-zero user code is a validation error, not a server error. (#94, fixes #90)
 - A code the panel rejects (not authorized) is a user error (`code_rejected`) on arm, disarm,
   bypass and auto-arm. The code is never shown or logged. (#108, fixes #109)
+- Every other way the panel rejects a code (including an invalid user code) is also a user
+  error on disarm, arm, custom bypass and its rollback, automatic arm and zone bypass: the
+  same "The panel rejected the code" message, event and notification, nothing at ERROR
+  level. (#114)
 - PENDING #107/#111: upgrade Repairs issues for unreadable upgrade notes, leftover
   entities/devices/items, interrupted or failed saves, and duplicates (with guided
   delete-and-retry). Strict reads of the upgrade record: setup fails cleanly on a damaged one.
