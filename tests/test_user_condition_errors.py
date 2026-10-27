@@ -10,9 +10,11 @@ notification still fire, and nothing is logged at ERROR level.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from elke27_lib import AreaState, ZoneState
@@ -23,10 +25,37 @@ from custom_components.elke27.errors import code_rejected_error, command_error
 from homeassistant.const import ATTR_CODE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from tests.conftest import FakeClient, Setup, command_result, snapshot_with
+from tests.conftest import (
+    FakeClient,
+    Setup,
+    command_result,
+    entity_ids,
+    panel_snapshot,
+    snapshot_with,
+)
 
 ALARM = "alarm_control_panel.house"
 CODE = "1234"
+
+
+def _two_area_panel_snapshot() -> Any:
+    """Open zones in both areas so automatic arming bypasses before arm."""
+    return dataclasses.replace(
+        panel_snapshot(),
+        areas=MappingProxyType(
+            {
+                1: AreaState(area_id=1, name="House", ready=False),
+                2: AreaState(area_id=2, name="Garage", ready=True),
+            }
+        ),
+        zones=MappingProxyType(
+            {
+                1: ZoneState(zone_id=1, name="Front Door", area_id=1, open=True),
+                2: ZoneState(zone_id=2, name="Back Door", area_id=1, open=True),
+                4: ZoneState(zone_id=4, name="Garage Door", area_id=2, open=True),
+            }
+        ),
+    )
 
 
 # 11028 (not allowed while armed) is a user error too, but it keeps the
@@ -91,6 +120,26 @@ class ScriptedClient(FakeClient):
 
 # Scripted refusal: ScriptedClient raises its rejected_code panel error.
 REJECT = object()
+
+
+class TwoAreaArmRefusalClient(FakeClient):
+    """Two-area snapshot; refuse ``arm`` per area with the given panel codes."""
+
+    def __init__(self, snapshot: Any, arm_refusals: dict[int, int]) -> None:
+        """Install the snapshot and map each area id to its arm refusal code."""
+        super().__init__(command_result(refresh=True))
+        self.snapshot = snapshot
+        self.arm_refusals = arm_refusals
+
+    async def _write(self, kind: str, **params: Any) -> Any:
+        self.calls.append((kind, params))
+        if kind == "arm":
+            area_id = params.get("area_id")
+            if area_id in self.arm_refusals:
+                raise Elke27PanelError(self.arm_refusals[area_id], "refused")
+        if isinstance(self.write_result, BaseException):
+            raise self.write_result
+        return self.write_result
 
 
 def _assert_code_rejected(
@@ -442,6 +491,56 @@ def test_not_allowed_armed_is_user_error_without_rollback(
     assert code_rejected_error(panel_err) is None
     assert code_rejected_error(result) is None
     _assert_no_error_logs(caplog)
+
+
+async def test_multi_area_mixed_user_refusals_combined_message(
+    hass: HomeAssistant, setup: Setup
+) -> None:
+    """Different user refusals in two areas produce readable English in one error."""
+    client = TwoAreaArmRefusalClient(
+        _two_area_panel_snapshot(),
+        arm_refusals={1: 11015, 2: 11027},
+    )
+    await setup(client)
+    panels = sorted(entity_ids(hass, "alarm_control_panel"))
+    assert len(panels) == 2  # noqa: PLR2004
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            "elke27",
+            "alarm_arm_automatic",
+            {"entity_id": panels, "mode": "away", ATTR_CODE: CODE},
+            blocking=True,
+        )
+    text = str(err.value)
+    assert text.startswith("Automatic arming failed for 2 of 2 areas")
+    assert panels[0] in text
+    assert panels[1] in text
+    assert "The area is not ready to arm" in text
+    assert "The area is in alarm" in text
+    assert CODE not in text
+
+
+async def test_multi_area_rejected_code_and_not_ready_combined_message(
+    hass: HomeAssistant, setup: Setup
+) -> None:
+    """A rejected code in one area and not ready in another stay readable."""
+    client = TwoAreaArmRefusalClient(
+        _two_area_panel_snapshot(),
+        arm_refusals={1: 11008, 2: 11015},
+    )
+    await setup(client)
+    panels = sorted(entity_ids(hass, "alarm_control_panel"))
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            "elke27",
+            "alarm_arm_automatic",
+            {"entity_id": panels, "mode": "away", ATTR_CODE: CODE},
+            blocking=True,
+        )
+    text = str(err.value)
+    assert "The panel rejected the code" in text
+    assert "The area is not ready to arm" in text
+    assert CODE not in text
 
 
 async def test_arm_away_not_allowed_armed_without_error_log(

@@ -161,9 +161,7 @@ async def _async_handle_alarm_arm_automatic(
         # Different reasons: name each area so no reason is lost. A user
         # refusal carries no area in its message, so prefix its entity.
         details = "; ".join(
-            f"{entity_id}: {err}"
-            if code_rejected_error(err) is err
-            else str(err)
+            f"{entity_id}: {err}" if code_rejected_error(err) is err else str(err)
             for entity_id, err in zip(failed_ids, failures, strict=True)
         )
         msg = (
