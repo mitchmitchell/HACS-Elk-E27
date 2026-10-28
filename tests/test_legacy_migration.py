@@ -328,6 +328,33 @@ def reauth_flows(hass: HomeAssistant, entry: MockConfigEntry) -> list[Any]:
     ]
 
 
+async def _async_setup_entry(hass: HomeAssistant, entry: MockConfigEntry) -> bool:
+    """Run config entry setup and drain the queue."""
+    result = await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return result
+
+
+async def _async_setup_phase_a_v1(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    """
+    VERSION 1 0.1.x: Phase A runs during setup; entry stays unloaded until re-link.
+
+    Home Assistant returns False from async_setup while the re-link card is required.
+    """
+    await _async_setup_entry(hass, entry)
+    assert entry.version == 2
+    assert legacy_migration_pending(entry)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def _async_setup_expect_loaded(
+    hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    """Set up a linked entry and assert the integration loads."""
+    assert await _async_setup_entry(hass, entry)
+    assert entry.state is ConfigEntryState.LOADED
+
+
 async def relink(hass: HomeAssistant, entry: MockConfigEntry) -> Any:
     """Complete the re-link card the user sees (access code + passphrase)."""
     flows = reauth_flows(hass, entry)
@@ -522,8 +549,7 @@ async def test_conflict_writes_nothing_and_raises_repairs(
     legacy = seed_legacy_registry(
         hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
     )
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_phase_a_v1(hass, entry)
     relinked = entry_relinked()
     hass.config_entries.async_update_entry(
         entry,
@@ -613,8 +639,9 @@ async def _phase_a_on_relinked(hass: HomeAssistant, entry: MockConfigEntry) -> N
         version=1,
         data={k: v for k, v in data.items() if k != CONF_INTEGRATION_ID},
     )
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
+    assert entry.version == 2
+    assert CONF_LEGACY_MIGRATION in entry.data
     hass.config_entries.async_update_entry(
         entry,
         unique_id=KEY,
@@ -900,8 +927,7 @@ async def test_migration_is_idempotent(
         hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
     )
     await _phase_a_on_relinked(hass, entry)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_expect_loaded(hass, entry)
     done = dict(entry.data[CONF_LEGACY_MIGRATION])
     after = registry_view(hass, entry.entry_id)
     devices_after = device_view(hass, entry.entry_id)
@@ -919,8 +945,7 @@ async def test_migration_is_idempotent(
         entry,
         data={**entry.data, CONF_LEGACY_MIGRATION: {**done, "state": "pending"}},
     )
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_expect_loaded(hass, entry)
     assert entry.data[CONF_LEGACY_MIGRATION]["state"] == "done"
     assert registry_view(hass, entry.entry_id) == after
 
@@ -942,8 +967,7 @@ async def test_retry_on_partly_migrated_registry_succeeds(
         kind, n = key.split(":")
         ent_reg.async_update_entity(legacy[key], new_unique_id=_new_uid(kind, int(n)))
 
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_expect_loaded(hass, entry)
 
     assert entry.state is ConfigEntryState.LOADED
     assert not legacy_migration_pending(entry)
@@ -1036,8 +1060,7 @@ async def test_duplicate_legacy_rows_keep_majority_base_and_raise_repairs(
     assert issue is not None
     assert issue.translation_key == ISSUE_LEGACY_DUPLICATES
 
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_expect_loaded(hass, entry)
     kept = ent_reg.async_get(legacy["zone:1"])
     left = ent_reg.async_get(stale.entity_id)
     assert kept is not None
@@ -1078,8 +1101,7 @@ async def test_rebuild_with_duplicate_raises_issue_that_survives_reload(
     issue_id = duplicates_issue_id(entry.entry_id)
     assert issue_id not in our_issues(hass)
 
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_expect_loaded(hass, entry)
     issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
     assert issue is not None
     assert issue.translation_key == ISSUE_LEGACY_DUPLICATES
@@ -1111,8 +1133,7 @@ async def test_duplicate_tie_keeps_newest(
         "binary_sensor", DOMAIN, "base-b:zone:7", config_entry=entry
     )
     ent_reg.async_update_entity(newer.entity_id, icon="mdi:door")
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_phase_a_v1(hass, entry)
     state = entry.data[CONF_LEGACY_MIGRATION]
     assert [row["entity_registry_id"] for row in state["plan"]] == [newer.id]
     assert [row["entity_registry_id"] for row in state["duplicates"]] == [older.id]
@@ -1138,8 +1159,7 @@ async def test_unparseable_and_unmapped_rows_are_left_alone(
     }
     assert not planned & {reg.unique_id for reg in odd}
 
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_expect_loaded(hass, entry)
     for reg in odd:
         current = ent_reg.async_get(reg.entity_id)
         assert current is not None
@@ -1163,8 +1183,7 @@ async def test_skipped_panel_sensors_are_logged_and_in_diagnostics(
         suggested_object_id="elk_panel_extra",
     )
     with caplog.at_level(logging.WARNING, logger="custom_components.elke27"):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+        await _async_setup_phase_a_v1(hass, entry)
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert any(reg.entity_id in r.getMessage() for r in warnings)
     assert not any(LEGACY_SERIAL in r.getMessage() for r in caplog.records)
@@ -1221,8 +1240,8 @@ async def test_phase_a_clears_entry_unique_id_unless_panel_identity(
     entry = entry_017()
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(entry, unique_id=unique_id, options=options)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
+    assert entry.version == 2
     assert entry.unique_id == (unique_id if kept else None)
 
 
@@ -1656,8 +1675,7 @@ async def test_entity_conflict_lists_entity_id_only(
     seed_legacy_registry(
         hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
     )
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_phase_a_v1(hass, entry)
     relinked = entry_relinked()
     hass.config_entries.async_update_entry(
         entry,
@@ -1913,8 +1931,7 @@ async def _blocked_entry(
     seed_legacy_registry(
         hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
     )
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_phase_a_v1(hass, entry)
     relinked = entry_relinked()
     hass.config_entries.async_update_entry(
         entry,
