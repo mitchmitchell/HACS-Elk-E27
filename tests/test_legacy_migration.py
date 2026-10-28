@@ -329,8 +329,11 @@ def reauth_flows(hass: HomeAssistant, entry: MockConfigEntry) -> list[Any]:
 
 
 async def _async_setup_entry(hass: HomeAssistant, entry: MockConfigEntry) -> bool:
-    """Run config entry setup and drain the queue."""
-    result = await hass.config_entries.async_setup(entry.entry_id)
+    """Run config entry setup (or reload after a prior failed attempt) and drain."""
+    if entry.state is ConfigEntryState.NOT_LOADED:
+        result = await hass.config_entries.async_setup(entry.entry_id)
+    else:
+        result = await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     return result
 
@@ -412,8 +415,7 @@ async def test_upgrade_from_017_in_place_with_one_relink(
     before = registry_view(hass, entry.entry_id)
     (panel_device_id,) = device_view(hass, entry.entry_id)
 
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
 
     # Phase A: version 2, plan stored, entry unique_id (host-derived) cleared,
     # registry untouched, and the re-link card is up instead of a delete.
@@ -477,8 +479,7 @@ async def test_upgrade_from_019_in_place(
     before = registry_view(hass, entry.entry_id)
     devices_before = device_view(hass, entry.entry_id)
 
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert entry.unique_id == KEY  # a formatted panel MAC is a panel identity
     assert legacy_migration_pending(entry)
 
@@ -571,8 +572,7 @@ async def test_conflict_writes_nothing_and_raises_repairs(
     before = registry_view(hass, entry.entry_id)
     devices_before = device_view(hass, entry.entry_id)
 
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
@@ -622,8 +622,7 @@ async def test_device_identifier_conflict_blocks(
     before = registry_view(hass, entry.entry_id)
     devices_before = device_view(hass, entry.entry_id)
 
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert registry_view(hass, entry.entry_id) == before
@@ -685,7 +684,7 @@ async def test_failure_mid_write_rolls_back_everything(
         return real_update(self, entity_id, **kwargs)
 
     with patch.object(er.EntityRegistry, "async_update_entity", flaky):
-        await hass.config_entries.async_setup(entry.entry_id)
+        await _async_setup_entry(hass, entry)
         await hass.async_block_till_done()
 
     # Three writes (the device move came first), the failure, then three undos.
@@ -733,7 +732,7 @@ async def test_failed_undo_stays_pending_without_error_log(
         patch.object(er.EntityRegistry, "async_update_entity", flaky),
         caplog.at_level(logging.ERROR, logger="custom_components.elke27"),
     ):
-        await hass.config_entries.async_setup(entry.entry_id)
+        await _async_setup_entry(hass, entry)
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
@@ -778,7 +777,7 @@ async def test_reload_after_partial_undo_finishes_the_upgrade(
         return real_update(self, entity_id, **kwargs)
 
     with patch.object(er.EntityRegistry, "async_update_entity", flaky):
-        await hass.config_entries.async_setup(entry.entry_id)
+        await _async_setup_entry(hass, entry)
         await hass.async_block_till_done()
 
     issue_reg = ir.async_get(hass)
@@ -841,8 +840,7 @@ async def test_repairs_and_logs_never_name_the_panel_key(
         config_entry=other,
         suggested_object_id="trial_garage",
     )
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert entry.state is ConfigEntryState.SETUP_RETRY
     issue = _assert_key_absent(hass, entry, caplog)
     assert issue.translation_key == f"{ISSUE_LEGACY_MIGRATION_BLOCKED}_mixed"
@@ -900,7 +898,7 @@ async def test_failure_on_device_move_writes_nothing(
         patch.object(dr.DeviceRegistry, "async_update_device", broken),
         caplog.at_level(logging.ERROR, logger="custom_components.elke27"),
     ):
-        await hass.config_entries.async_setup(entry.entry_id)
+        await _async_setup_entry(hass, entry)
         await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
@@ -998,8 +996,7 @@ async def test_panel_offline_after_relink_keeps_pending(
     before = registry_view(hass, entry.entry_id)
     panel.client.async_connect.side_effect = Elke27ConnectionError("offline")
 
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
     assert registry_view(hass, entry.entry_id) == before
@@ -1024,8 +1021,7 @@ async def test_relink_to_wrong_panel_keeps_pending(
         hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
     )
     before = registry_view(hass, entry.entry_id)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
 
     result = await relink(hass, entry)
     assert result["reason"] == "wrong_panel"
@@ -1251,8 +1247,7 @@ async def test_relink_while_pending_keys_on_discovery_mac(
     """§2.3 step 2: the re-link stores the MAC as tier 1 (filled = False)."""
     entry = entry_017()
     entry.add_to_hass(hass)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     await relink(hass, entry)
     assert entry.data[CONF_PANEL_MAC] == RAW_MAC
     assert entry.data[CONF_PANEL_MAC_FILLED] is False
@@ -1271,8 +1266,7 @@ async def test_entry_without_id_and_not_pending_is_still_an_error(
         domain=DOMAIN, version=2, data={CONF_HOST: HOST, CONF_PORT: PORT}
     )
     entry.add_to_hass(hass)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert entry.state is ConfigEntryState.SETUP_ERROR
     assert reauth_flows(hass, entry) == []
 
@@ -1290,8 +1284,7 @@ async def test_blocked_raises_not_ready(
     er.async_get(hass).async_get_or_create(
         "sensor", DOMAIN, f"{KEY}:panel_ready", config_entry=entry
     )
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
 
@@ -1362,8 +1355,7 @@ async def test_malformed_record_fails_setup_cleanly(
     """Setup: SETUP_ERROR, record unchanged (not done), log has type + field only."""
     entry, record, name = await _pending_with(hass, path, field)
     before = registry_view(hass, entry.entry_id)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert entry.state is ConfigEntryState.SETUP_ERROR
     assert entry.data[CONF_LEGACY_MIGRATION] == record
     assert "done_at" not in entry.data[CONF_LEGACY_MIGRATION]
@@ -1430,8 +1422,7 @@ async def test_invalid_record_value_diagnostics_type_and_field(
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_LEGACY_MIGRATION: record}
     )
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert entry.state is ConfigEntryState.SETUP_ERROR
     assert entry.data[CONF_LEGACY_MIGRATION] == record
     assert await async_setup_component(hass, "diagnostics", {})
@@ -1474,8 +1465,7 @@ async def test_diagnostics_redact_old_unique_id_base(
     entry = entry_019()
     entry.add_to_hass(hass)
     seed_legacy_registry(hass, entry, base=KEY, device_identifier=KEY)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert legacy_migration_pending(entry)
     result = await get_diagnostics_for_config_entry(hass, hass_client, entry)
     diag = result["legacy_registry_migration"]
@@ -1532,8 +1522,7 @@ async def test_user_device_class_override_survives_upgrade(
         return real_update(self, entity_id, **kwargs)
 
     with patch.object(er.EntityRegistry, "async_update_entity", spy):
-        await hass.config_entries.async_setup(entry.entry_id)  # Phase A
-        await hass.async_block_till_done()
+        await _async_setup_phase_a_v1(hass, entry)
         assert legacy_migration_pending(entry)
         assert device_class() == "window"
         result = await relink(hass, entry)  # re-link, then Phase B
@@ -1567,8 +1556,7 @@ async def test_removing_entry_clears_migration_issues(
     er.async_get(hass).async_get_or_create(
         "switch", DOMAIN, f"{KEY}:1", config_entry=entry
     )
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert blocked_issue_id(entry.entry_id) in our_issues(hass)
     await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
@@ -1692,8 +1680,7 @@ async def test_entity_conflict_lists_entity_id_only(
         config_entry=entry,
         suggested_object_id="trial_planted",
     )
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     placeholders = await _assert_no_identifiers(
         hass, entry, caplog, _forbidden(_new_uid("zone", 2)), hass_client
     )
@@ -1718,8 +1705,7 @@ async def test_device_conflict_is_counted_not_named(
         config_entry_id=other.entry_id, identifiers={(DOMAIN, KEY)}, name=_PLANT_NAME
     )
     await _phase_a_on_relinked(hass, entry)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     placeholders = await _assert_no_identifiers(
         hass, entry, caplog, _forbidden(device.id, _PLANT_NAME), hass_client
     )
@@ -1784,8 +1770,7 @@ async def test_017_relink_link_failure_logs_type_only_and_retries(
     seed_legacy_registry(
         hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
     )
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert legacy_migration_pending(entry)
 
     flow_client.async_link.side_effect = error
@@ -1850,8 +1835,7 @@ async def test_diagnostics_degrade_on_non_list_or_non_mapping_rows(
             },
         },
     )
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     # Setup does not re-check a done record, so the entry loads.
     assert entry.state is ConfigEntryState.LOADED
     assert await async_setup_component(hass, "diagnostics", {})
@@ -1958,8 +1942,7 @@ async def _blocked_entry(
         config_entry=other,
         suggested_object_id="trial_foreign",
     )
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert entry.state is ConfigEntryState.SETUP_RETRY
     return entry, owned, foreign
 
@@ -2126,8 +2109,7 @@ async def test_rebuild_with_user_edited_duplicate_needs_confirm(
 ) -> None:
     """An unclear keeper is shown keep vs leave; nothing changes until submit."""
     entry, edited, other = _duplicate_entry(hass)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     assert entry.state is ConfigEntryState.SETUP_ERROR
     issue_id = record_issue_id(entry.entry_id)
     issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
@@ -2446,8 +2428,7 @@ async def test_017_entity_ids_stay_stable_through_migration_and_reload(
     }
     assert set(ids_before) == set(legacy.values())
 
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _async_setup_entry(hass, entry)
     await relink(hass, entry)
     assert entry.state is ConfigEntryState.LOADED
 
