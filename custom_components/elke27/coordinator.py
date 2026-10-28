@@ -236,14 +236,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             translation_placeholders={"host": self._host, "port": str(self._port)},
         )
 
-    def is_child_area_device(self, identifier: str) -> bool:
-        """Return True when 0.2.0 registered this area device as a child device."""
-        from .entity import registry_is_child_area_device  # noqa: PLC0415  # avoid cycle
-
-        return registry_is_child_area_device(
-            self.hass, self.config_entry.entry_id, identifier
-        )
-
     async def async_shutdown_client(self) -> None:
         """
         Stop updates and disconnect the client (entry unload or failed setup).

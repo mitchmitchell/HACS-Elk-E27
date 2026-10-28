@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import dataclasses
 from types import MappingProxyType
-from unittest.mock import MagicMock
 
 from elke27_lib import AreaState
+from elke27_lib.events import AreaStatusUpdated
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -148,7 +148,18 @@ async def test_late_areas_keep_0_2_0_child_device_and_new_ones_use_via_device_id
             }
         ),
     )
-    mock_client.emit(MagicMock(name="AreaStatusUpdated"))
+    mock_client.emit(
+        AreaStatusUpdated(
+            kind="area",
+            at=0.0,
+            seq=None,
+            classification="BROADCAST",
+            route=("area", "status"),
+            session_id=None,
+            area_id=1,
+            changed_fields=(),
+        )
+    )
     await hass.async_block_till_done()
 
     assert sorted(entity_ids(hass, "alarm_control_panel")) == [

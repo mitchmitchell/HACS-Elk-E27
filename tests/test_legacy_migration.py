@@ -687,7 +687,6 @@ async def test_failure_mid_write_rolls_back_everything(
 
     with patch.object(er.EntityRegistry, "async_update_entity", flaky):
         await _async_setup_entry(hass, entry)
-        await hass.async_block_till_done()
 
     # Three writes (the device move came first), the failure, then three undos.
     assert calls["n"] == 7
@@ -735,7 +734,6 @@ async def test_failed_undo_stays_pending_without_error_log(
         caplog.at_level(logging.ERROR, logger="custom_components.elke27"),
     ):
         await _async_setup_entry(hass, entry)
-        await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
@@ -780,7 +778,6 @@ async def test_reload_after_partial_undo_finishes_the_upgrade(
 
     with patch.object(er.EntityRegistry, "async_update_entity", flaky):
         await _async_setup_entry(hass, entry)
-        await hass.async_block_till_done()
 
     issue_reg = ir.async_get(hass)
     issue = issue_reg.async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
@@ -901,7 +898,6 @@ async def test_failure_on_device_move_writes_nothing(
         caplog.at_level(logging.ERROR, logger="custom_components.elke27"),
     ):
         await _async_setup_entry(hass, entry)
-        await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
     assert registry_view(hass, entry.entry_id) == before
