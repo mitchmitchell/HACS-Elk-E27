@@ -176,6 +176,16 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         # Drawn once per flow, so a retried link reuses the same client sn.
         self._integration_id: str | None = None
         self._discovered_panels: list[Any] | None = None
+        self._manual_bootstrap_errors: dict[str, str] | None = None
+
+    async def _async_enter_manual_from_empty_discovery(self) -> ConfigFlowResult:
+        """Leave discover when no panel target exists; manual host entry is next."""
+        self._manual_bootstrap_errors = {"base": "no_panels_found"}
+        self._discovered_panels = []
+        self._selected_panel = None
+        self._selected_host = None
+        self._selected_port = None
+        return await self.async_step_manual()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -211,6 +221,10 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 data_schema=STEP_MANUAL_DATA_SCHEMA,
             )
 
+        if self._manual_bootstrap_errors:
+            errors = {**self._manual_bootstrap_errors}
+            self._manual_bootstrap_errors = None
+
         return self.async_show_form(
             step_id="manual",
             data_schema=STEP_MANUAL_DATA_SCHEMA,
@@ -233,36 +247,21 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not self._discovered_panels or panel_idx >= len(
                     self._discovered_panels
                 ):
-                    errors["base"] = "no_panels_found"
-                    return self.async_show_form(
-                        step_id="discover",
-                        data_schema=await self._async_discovery_schema(),
-                        errors=errors,
-                    )
+                    return await self._async_enter_manual_from_empty_discovery()
                 panel = self._discovered_panels[panel_idx]
                 host = getattr(panel, "panel_host", None) or getattr(
                     panel, "host", None
                 )
                 port = getattr(panel, "port", None) or DEFAULT_PORT
                 if not host:
-                    errors["base"] = "no_panels_found"
-                    return self.async_show_form(
-                        step_id="discover",
-                        data_schema=await self._async_discovery_schema(),
-                        errors=errors,
-                    )
+                    return await self._async_enter_manual_from_empty_discovery()
                 self._selected_host = host
                 self._selected_port = int(port)
                 self._selected_panel = panel
             else:
                 data_schema = STEP_LINK_DATA_SCHEMA
             if self._selected_panel is None:
-                errors["base"] = "no_panels_found"
-                return self.async_show_form(
-                    step_id="discover",
-                    data_schema=data_schema,
-                    errors=errors,
-                )
+                return await self._async_enter_manual_from_empty_discovery()
             if self._is_panel_configured(self._selected_panel):
                 return self.async_abort(reason="already_configured")
             return await self._async_link_and_create_entry(
@@ -277,8 +276,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             discovery = AIOELKDiscovery()
             self._discovered_panels = self._dedupe_panels(await discovery.async_scan())
         if not self._discovered_panels:
-            errors["base"] = "no_panels_found"
-        if self._discovered_panels and len(self._discovered_panels) == 1:
+            return await self._async_enter_manual_from_empty_discovery()
+        if len(self._discovered_panels) == 1:
             panel = self._discovered_panels[0]
             self._selected_panel = panel
             self._selected_host = getattr(panel, "panel_host", None) or getattr(

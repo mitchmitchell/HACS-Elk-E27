@@ -65,6 +65,9 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   the last level, and the reported level is scaled correctly. (#92, #100; fixes #91, #99)
 
 ### Fixed
+- **Empty panel discovery opens manual host setup.** When discovery finds no panels, setup
+  continues on the manual IP/host form (with the existing “no panels found” message) instead
+  of staying on Discover with access code and passphrase fields and no panel to link.
 - **Arming an area that is not ready now shows a clear message.** When the panel refused
    an arm or bypass because the area was not ready (a zone open), was in alarm, was
    already armed, or the zone can not be bypassed, Home Assistant returned a server error
