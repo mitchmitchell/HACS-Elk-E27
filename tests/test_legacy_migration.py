@@ -1683,6 +1683,7 @@ async def test_entity_conflict_lists_entity_id_only(
         config_entry=entry,
         suggested_object_id="trial_planted",
     )
+    caplog.clear()
     await _async_setup_entry(hass, entry)
     placeholders = await _assert_no_identifiers(
         hass, entry, caplog, _forbidden(_new_uid("zone", 2)), hass_client
@@ -1708,6 +1709,7 @@ async def test_device_conflict_is_counted_not_named(
         config_entry_id=other.entry_id, identifiers={(DOMAIN, KEY)}, name=_PLANT_NAME
     )
     await _phase_a_on_relinked(hass, entry)
+    caplog.clear()
     await _async_setup_entry(hass, entry)
     placeholders = await _assert_no_identifiers(
         hass, entry, caplog, _forbidden(device.id, _PLANT_NAME), hass_client
