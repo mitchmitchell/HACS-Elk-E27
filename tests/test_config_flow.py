@@ -892,7 +892,7 @@ async def test_discover_empty_scan_redirects_to_manual_host(
 async def test_discover_rescan_still_empty_redirects_to_manual(
     hass: HomeAssistant, flow_client: Any
 ) -> None:
-    """Rescan that still finds no panels returns to manual host setup."""
+    """Empty rescan opens manual setup and linking there can create the entry."""
     panel_a = SimpleNamespace(
         panel_host=HOST,
         port=PORT,
@@ -929,6 +929,14 @@ async def test_discover_rescan_still_empty_redirects_to_manual(
     assert result["step_id"] == "manual"
     assert result["errors"] == {"base": "no_panels_found"}
     flow_client.async_link.assert_not_awaited()
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_HOST] == HOST
+    flow_client.async_link.assert_awaited_once()
 
 
 async def test_discover_no_link_slots(hass: HomeAssistant, flow_client: Any) -> None:
