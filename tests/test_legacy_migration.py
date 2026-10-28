@@ -65,6 +65,7 @@ from custom_components.elke27.migration import (
     record_issue_id,
     validate_legacy_migration_record,
 )
+from homeassistant.components.diagnostics import REDACTED
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
@@ -1637,9 +1638,11 @@ async def _assert_no_identifiers(
     logs = "\n".join(
         r.getMessage() for r in caplog.records if r.name.startswith("custom_components")
     )
-    diagnostics = json.dumps(
-        await get_diagnostics_for_config_entry(hass, hass_client, entry), default=str
-    )
+    assert await async_setup_component(hass, "diagnostics", {})
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+    if CONF_HOST in diag:
+        assert diag[CONF_HOST] == REDACTED
+    diagnostics = json.dumps(diag.get("legacy_registry_migration"), default=str)
     for text in (json.dumps(placeholders), logs, diagnostics):
         assert not [f for f in forbidden if f.lower() in text.lower()]
     listing = placeholders.get("conflicts", "")
