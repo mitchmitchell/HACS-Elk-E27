@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
     ChildDeviceInfo,
@@ -19,6 +20,8 @@ from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
     from elke27_lib import AreaState, PanelSnapshot, ZoneState
+
+    from homeassistant.core import HomeAssistant
 
     from .coordinator import Elke27DataUpdateCoordinator
     from .models import Elke27ConfigEntry
@@ -129,6 +132,25 @@ def area_device_name(area_id: int, area: AreaState | None) -> str:
     return name or f"Area {area_id}"
 
 
+def registry_is_child_area_device(
+    hass: HomeAssistant, config_entry_id: str, identifier: str
+) -> bool:
+    """
+    Return True when 0.2.0 registered this area device as a child device.
+
+    0.2.0 on HA 2026.10 created area devices as child devices, and the same
+    identifiers can't be registered again as a regular device. Checked from
+    the registry each time, so areas the panel reports after setup get the
+    right layout too.
+    """
+    return (
+        dr.async_get(hass).async_get_child_device_by_identifier(
+            (DOMAIN, identifier), config_entry_id
+        )
+        is not None
+    )
+
+
 def zone_entity_name(zone_name: str, area_name: str | None) -> str:
     """
     Return the zone entity name shown under its device.
@@ -159,7 +181,7 @@ def area_device_info(
     identifiers = {(DOMAIN, identifier)}
     name = area_device_name(area_id, area)
     panel_device_id = coordinator.panel_device_id
-    if coordinator.is_child_area_device(identifier):
+    if registry_is_child_area_device(coordinator.hass, entry.entry_id, identifier):
         # Only areas 0.2.0 already created stay child devices, so their device
         # and entity IDs are kept; every other area uses via_device_id below.
         return ChildDeviceInfo(

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 from types import MappingProxyType
+from unittest.mock import MagicMock
 
 from elke27_lib import AreaState
 import pytest
@@ -137,19 +138,17 @@ async def test_late_areas_keep_0_2_0_child_device_and_new_ones_use_via_device_id
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    coordinator = mock_config_entry.runtime_data.coordinator
-    coordinator.async_set_updated_data(
-        dataclasses.replace(
-            mock_client.snapshot,
-            areas=MappingProxyType(
-                {
-                    1: AreaState(area_id=1, name="House"),
-                    2: AreaState(area_id=2, name=None),
-                    3: AreaState(area_id=3, name=None),
-                }
-            ),
-        )
+    mock_client.snapshot = dataclasses.replace(
+        mock_client.snapshot,
+        areas=MappingProxyType(
+            {
+                1: AreaState(area_id=1, name="House"),
+                2: AreaState(area_id=2, name=None),
+                3: AreaState(area_id=3, name=None),
+            }
+        ),
     )
+    mock_client.emit(MagicMock(name="AreaStatusUpdated"))
     await hass.async_block_till_done()
 
     assert sorted(entity_ids(hass, "alarm_control_panel")) == [

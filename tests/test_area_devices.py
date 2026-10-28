@@ -217,11 +217,11 @@ async def test_setup_keeps_unlisted_area_device(
     assert await async_remove_config_entry_device(hass, mock_config_entry, stale)
 
 
-def _coordinator(snapshot: object) -> MagicMock:
+def _coordinator(hass: HomeAssistant, snapshot: object) -> MagicMock:
     coordinator = MagicMock()
+    coordinator.hass = hass
     coordinator.data = snapshot
     coordinator.panel_name = None
-    coordinator.is_child_area_device.return_value = False
     return coordinator
 
 
@@ -233,12 +233,12 @@ def _bare_entry(entry_id: str = "entry-1") -> MagicMock:
     return entry
 
 
-def test_area_device_info_entry_id_tier() -> None:
+async def test_area_device_info_entry_id_tier(hass: HomeAssistant) -> None:
     """With no MAC or serial, area devices hang off the entry id identity."""
     snapshot = dataclasses.replace(
         panel_snapshot(), panel=dataclasses.replace(panel_snapshot().panel, mac=None)
     )
-    coordinator = _coordinator(snapshot)
+    coordinator = _coordinator(hass, snapshot)
     entry = _bare_entry()
     assert entry_identity_key(coordinator, entry) == "entry-1"
     info = area_device_info(coordinator, entry, 3, AreaState(area_id=3, name=None))
@@ -247,9 +247,9 @@ def test_area_device_info_entry_id_tier() -> None:
     assert info["name"] == "Area 3"
 
 
-def test_area_device_info_mac_tier() -> None:
+async def test_area_device_info_mac_tier(hass: HomeAssistant) -> None:
     """MAC tier key for the identifier; linked by panel device id."""
-    coordinator = _coordinator(panel_snapshot())
+    coordinator = _coordinator(hass, panel_snapshot())
     info = area_device_info(
         coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
     )
@@ -258,9 +258,9 @@ def test_area_device_info_mac_tier() -> None:
     assert info["name"] == "House"
 
 
-def test_zone_device_fallbacks() -> None:
+async def test_zone_device_fallbacks(hass: HomeAssistant) -> None:
     """Zones without a known area use the panel device."""
-    coordinator = _coordinator(panel_snapshot())
+    coordinator = _coordinator(hass, panel_snapshot())
     entry = _bare_entry()
     for area_id in (None, 0, 42):
         zone = ZoneState(zone_id=1, name="Z", area_id=area_id)
@@ -357,9 +357,9 @@ async def test_cleanup_and_delete_route_through_area_has_device(
     assert calls == [1]
 
 
-def test_area_device_info_links_by_panel_device_id() -> None:
+async def test_area_device_info_links_by_panel_device_id(hass: HomeAssistant) -> None:
     """Area devices link by the panel device id."""
-    coordinator = _coordinator(panel_snapshot())
+    coordinator = _coordinator(hass, panel_snapshot())
     coordinator.panel_device_id = "panel-device-id"
     info = area_device_info(
         coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")

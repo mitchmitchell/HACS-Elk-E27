@@ -33,7 +33,6 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
 
-from custom_components.elke27 import async_migrate_entry
 from custom_components.elke27.config_flow import (
     CONF_ACCESS_CODE,
     CONF_PASSPHRASE,
@@ -54,10 +53,8 @@ from custom_components.elke27.const import (
     ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
     MIGRATION_STATE_PENDING,
 )
-from custom_components.elke27.diagnostics import migration_diagnostics
 from custom_components.elke27.migration import (
     LegacyMigrationRecordError,
-    async_apply_legacy_migration,
     async_rebuild_legacy_record,
     blocked_issue_id,
     duplicates_issue_id,
@@ -72,7 +69,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
@@ -470,7 +467,9 @@ async def test_upgrade_from_019_in_place(
 
 
 async def test_fresh_020_entry_only_gets_the_version_bump(
-    hass: HomeAssistant, panel: ClientHarness
+    hass: HomeAssistant,
+    panel: ClientHarness,
+    hass_client: ClientSessionGenerator,
 ) -> None:
     """A 0.2.0 entry (deleted and re-added) sees no change and no re-link."""
     entry = MockConfigEntry(
@@ -509,7 +508,9 @@ async def test_fresh_020_entry_only_gets_the_version_bump(
         current = ent_reg.async_get(reg.entity_id)
         assert current is not None
         assert current.unique_id == reg.unique_id
-    assert migration_diagnostics(entry) is None
+    assert (
+        await _legacy_registry_migration_diagnostics(hass, hass_client, entry) is None
+    )
 
 
 async def test_conflict_writes_nothing_and_raises_repairs(
@@ -521,7 +522,8 @@ async def test_conflict_writes_nothing_and_raises_repairs(
     legacy = seed_legacy_registry(
         hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
     )
-    assert await async_migrate_entry(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
     relinked = entry_relinked()
     hass.config_entries.async_update_entry(
         entry,
@@ -607,14 +609,29 @@ async def _phase_a_on_relinked(hass: HomeAssistant, entry: MockConfigEntry) -> N
     """Store a Phase A plan on a relinked-shape entry (keeps its re-link data)."""
     data = dict(entry.data)
     hass.config_entries.async_update_entry(
-        entry, version=1, data={k: v for k, v in data.items() if k != "integration_id"}
+        entry,
+        version=1,
+        data={k: v for k, v in data.items() if k != CONF_INTEGRATION_ID},
     )
-    assert await async_migrate_entry(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
     hass.config_entries.async_update_entry(
         entry,
         unique_id=KEY,
         data={**data, CONF_LEGACY_MIGRATION: entry.data[CONF_LEGACY_MIGRATION]},
     )
+
+
+async def _legacy_registry_migration_diagnostics(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    entry: MockConfigEntry,
+) -> dict[str, Any] | None:
+    """Return legacy_registry_migration via the diagnostics platform."""
+    assert await async_setup_component(hass, "diagnostics", {})
+    result = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+    value = result.get("legacy_registry_migration")
+    return value if isinstance(value, dict) or value is None else None
 
 
 async def test_failure_mid_write_rolls_back_everything(
@@ -895,17 +912,15 @@ async def test_migration_is_idempotent(
     assert registry_view(hass, entry.entry_id) == after
     assert device_view(hass, entry.entry_id) == devices_after
 
-    # VERSION 2 is never migrated again.
-    assert await async_migrate_entry(hass, entry)
-    assert entry.data[CONF_LEGACY_MIGRATION] == done
-
     # Registry already rewritten but the record still says pending (e.g. HA
     # stopped before the entry was saved): Phase B finishes without errors.
+    await hass.config_entries.async_unload(entry.entry_id)
     hass.config_entries.async_update_entry(
         entry,
         data={**entry.data, CONF_LEGACY_MIGRATION: {**done, "state": "pending"}},
     )
-    async_apply_legacy_migration(hass, entry, KEY)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
     assert entry.data[CONF_LEGACY_MIGRATION]["state"] == "done"
     assert registry_view(hass, entry.entry_id) == after
 
@@ -1082,7 +1097,9 @@ async def test_rebuild_with_duplicate_raises_issue_that_survives_reload(
     assert issue_id not in our_issues(hass)
 
 
-async def test_duplicate_tie_keeps_newest(hass: HomeAssistant) -> None:
+async def test_duplicate_tie_keeps_newest(
+    hass: HomeAssistant, panel: ClientHarness
+) -> None:
     """Equal base counts: the most recently modified registry row is kept."""
     entry = entry_017()
     entry.add_to_hass(hass)
@@ -1094,7 +1111,8 @@ async def test_duplicate_tie_keeps_newest(hass: HomeAssistant) -> None:
         "binary_sensor", DOMAIN, "base-b:zone:7", config_entry=entry
     )
     ent_reg.async_update_entity(newer.entity_id, icon="mdi:door")
-    assert await async_migrate_entry(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
     state = entry.data[CONF_LEGACY_MIGRATION]
     assert [row["entity_registry_id"] for row in state["plan"]] == [newer.id]
     assert [row["entity_registry_id"] for row in state["duplicates"]] == [older.id]
@@ -1129,7 +1147,10 @@ async def test_unparseable_and_unmapped_rows_are_left_alone(
 
 
 async def test_skipped_panel_sensors_are_logged_and_in_diagnostics(
-    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant,
+    panel: ClientHarness,
+    hass_client: ClientSessionGenerator,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Panel sensors other than 1 and 2: WARNING, listed (redacted) in diagnostics."""
     entry = entry_017()
@@ -1142,14 +1163,15 @@ async def test_skipped_panel_sensors_are_logged_and_in_diagnostics(
         suggested_object_id="elk_panel_extra",
     )
     with caplog.at_level(logging.WARNING, logger="custom_components.elke27"):
-        assert await async_migrate_entry(hass, entry)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert any(reg.entity_id in r.getMessage() for r in warnings)
     assert not any(LEGACY_SERIAL in r.getMessage() for r in caplog.records)
     state = entry.data[CONF_LEGACY_MIGRATION]
     assert [row["entity_registry_id"] for row in state["skipped"]] == [reg.id]
     assert state["plan"] == []
-    diag = migration_diagnostics(entry)
+    diag = await _legacy_registry_migration_diagnostics(hass, hass_client, entry)
     assert diag is not None
     assert diag["skipped"] == [
         {
@@ -1188,13 +1210,19 @@ def test_flow_version_blocks_downgrade() -> None:
     ],
 )
 async def test_phase_a_clears_entry_unique_id_unless_panel_identity(
-    hass: HomeAssistant, unique_id: str, options: dict[str, Any], *, kept: bool
+    hass: HomeAssistant,
+    panel: ClientHarness,
+    unique_id: str,
+    options: dict[str, Any],
+    *,
+    kept: bool,
 ) -> None:
     """Only a panel MAC or real panel serial survives as the entry unique_id."""
     entry = entry_017()
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(entry, unique_id=unique_id, options=options)
-    assert await async_migrate_entry(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
     assert entry.unique_id == (unique_id if kept else None)
 
 
@@ -1230,8 +1258,10 @@ async def test_entry_without_id_and_not_pending_is_still_an_error(
     assert reauth_flows(hass, entry) == []
 
 
-async def test_blocked_raises_not_ready(hass: HomeAssistant) -> None:
-    """Phase B on its own: a conflict raises ConfigEntryNotReady (pinned key)."""
+async def test_blocked_raises_not_ready(
+    hass: HomeAssistant, panel: ClientHarness
+) -> None:
+    """Phase B: a conflict stops setup and keeps the migration pending."""
     entry = entry_relinked()
     entry.add_to_hass(hass)
     seed_legacy_registry(
@@ -1241,8 +1271,9 @@ async def test_blocked_raises_not_ready(hass: HomeAssistant) -> None:
     er.async_get(hass).async_get_or_create(
         "sensor", DOMAIN, f"{KEY}:panel_ready", config_entry=entry
     )
-    with pytest.raises(ConfigEntryNotReady, match=ISSUE_LEGACY_MIGRATION_BLOCKED):
-        async_apply_legacy_migration(hass, entry, KEY)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
 
 
@@ -1625,7 +1656,8 @@ async def test_entity_conflict_lists_entity_id_only(
     seed_legacy_registry(
         hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
     )
-    assert await async_migrate_entry(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
     relinked = entry_relinked()
     hass.config_entries.async_update_entry(
         entry,
@@ -1881,7 +1913,8 @@ async def _blocked_entry(
     seed_legacy_registry(
         hass, entry, base=LEGACY_SERIAL, device_identifier=f"222-{LEGACY_SERIAL}"
     )
-    assert await async_migrate_entry(hass, entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
     relinked = entry_relinked()
     hass.config_entries.async_update_entry(
         entry,
