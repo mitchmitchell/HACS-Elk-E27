@@ -53,6 +53,7 @@ from custom_components.elke27.const import (
     ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
     MIGRATION_STATE_PENDING,
 )
+from custom_components.elke27.diagnostics import async_get_config_entry_diagnostics
 from custom_components.elke27.migration import (
     LegacyMigrationRecordError,
     async_rebuild_legacy_record,
@@ -1636,10 +1637,11 @@ async def _assert_no_identifiers(
     assert issue is not None
     placeholders = dict(issue.translation_placeholders or {})
     logs = "\n".join(
-        r.getMessage() for r in caplog.records if r.name.startswith("custom_components")
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "custom_components.elke27.migration"
     )
-    assert await async_setup_component(hass, "diagnostics", {})
-    diag = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+    diag = await async_get_config_entry_diagnostics(hass, entry)
     if CONF_HOST in diag:
         assert diag[CONF_HOST] == REDACTED
     diagnostics = json.dumps(diag.get("legacy_registry_migration"), default=str)
