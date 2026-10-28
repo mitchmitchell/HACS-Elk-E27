@@ -880,6 +880,7 @@ async def test_discover_empty_scan_redirects_to_manual_host(
     field_names = _schema_field_names(result["data_schema"])
     assert CONF_HOST in field_names
     assert CONF_PANEL not in field_names
+    flow_client.async_link.assert_not_awaited()
 
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
@@ -917,11 +918,17 @@ async def test_discover_rescan_still_empty_redirects_to_manual(
         )
         assert result["step_id"] == "discover"
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_PANEL: CONF_RESCAN}
+            result["flow_id"],
+            {
+                CONF_PANEL: CONF_RESCAN,
+                CONF_ACCESS_CODE: ACCESS_CODE,
+                CONF_PASSPHRASE: PASSPHRASE,
+            },
         )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "manual"
     assert result["errors"] == {"base": "no_panels_found"}
+    flow_client.async_link.assert_not_awaited()
 
 
 async def test_discover_no_link_slots(hass: HomeAssistant, flow_client: Any) -> None:
