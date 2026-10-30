@@ -53,7 +53,6 @@ from custom_components.elke27.const import (
     ISSUE_LEGACY_MIGRATION_WRITE_FAILED,
     MIGRATION_STATE_PENDING,
 )
-from custom_components.elke27.diagnostics import async_get_config_entry_diagnostics
 from custom_components.elke27.migration import (
     LegacyMigrationRecordError,
     async_rebuild_legacy_record,
@@ -66,7 +65,6 @@ from custom_components.elke27.migration import (
     record_issue_id,
     validate_legacy_migration_record,
 )
-from homeassistant.components.diagnostics import REDACTED
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
@@ -658,8 +656,7 @@ async def _legacy_registry_migration_diagnostics(
     """Return legacy_registry_migration via the diagnostics platform."""
     assert await async_setup_component(hass, "diagnostics", {})
     result = await get_diagnostics_for_config_entry(hass, hass_client, entry)
-    value = result.get("legacy_registry_migration")
-    return value if isinstance(value, dict) or value is None else None
+    return result["legacy_registry_migration"]
 
 
 async def test_failure_mid_write_rolls_back_everything(
@@ -1269,10 +1266,10 @@ async def test_entry_without_id_and_not_pending_is_still_an_error(
     assert reauth_flows(hass, entry) == []
 
 
-async def test_blocked_raises_not_ready(
+async def test_blocked_retries_setup_and_raises_blocked_issue(
     hass: HomeAssistant, panel: ClientHarness
 ) -> None:
-    """Phase B: a conflict stops setup and keeps the migration pending."""
+    """Phase B: a conflict retries setup, keeps it pending, raises the blocked issue."""
     entry = entry_relinked()
     entry.add_to_hass(hass)
     seed_legacy_registry(
@@ -1285,6 +1282,9 @@ async def test_blocked_raises_not_ready(
     await _async_setup_entry(hass, entry)
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert legacy_migration_pending(entry)
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, blocked_issue_id(entry.entry_id))
+    assert issue is not None
+    assert issue.translation_key == ISSUE_LEGACY_MIGRATION_BLOCKED
 
 
 _ROW = {
@@ -1622,6 +1622,18 @@ def _forbidden(*extra: str) -> list[str]:
     ]
 
 
+def _is_ha_core_record(record: logging.LogRecord) -> bool:
+    """
+    Return True for a record Home Assistant core wrote on the integration logger.
+
+    Core logs setup retries on the integration's logger with the entry title,
+    which the user controls and which can be the host (see
+    homeassistant/config_entries.py ConfigEntry.async_setup). That line is not
+    integration output, so the probe skips it and checks every other record.
+    """
+    return Path(record.pathname).match("homeassistant/config_entries.py")
+
+
 async def _assert_no_identifiers(
     hass: HomeAssistant,
     entry: MockConfigEntry,
@@ -1635,12 +1647,12 @@ async def _assert_no_identifiers(
     logs = "\n".join(
         r.getMessage()
         for r in caplog.records
-        if r.name == "custom_components.elke27.migration"
+        if r.name.startswith("custom_components") and not _is_ha_core_record(r)
     )
-    diag = await async_get_config_entry_diagnostics(hass, entry)
-    if CONF_HOST in diag:
-        assert diag[CONF_HOST] == REDACTED
-    diagnostics = json.dumps(diag.get("legacy_registry_migration"), default=str)
+    assert await async_setup_component(hass, "diagnostics", {})
+    diagnostics = json.dumps(
+        await get_diagnostics_for_config_entry(hass, hass_client, entry), default=str
+    )
     for text in (json.dumps(placeholders), logs, diagnostics):
         assert not [f for f in forbidden if f.lower() in text.lower()]
     listing = placeholders.get("conflicts", "")
@@ -1962,7 +1974,9 @@ async def test_blocked_flow_deletes_nothing_until_confirm_submitted(
     # Repairs lists every entity_id, logs carry the count only.
     assert owned.entity_id in (issue.translation_placeholders or {})["conflicts"]
     logs = "\n".join(
-        r.getMessage() for r in caplog.records if r.name.startswith("custom_components")
+        r.getMessage()
+        for r in caplog.records
+        if r.name.startswith("custom_components") and not _is_ha_core_record(r)
     )
     assert owned.entity_id not in logs
     assert foreign.entity_id not in logs
@@ -1994,7 +2008,9 @@ async def test_blocked_flow_deletes_nothing_until_confirm_submitted(
     assert ent_reg.async_get(foreign.entity_id) is not None
     reload.assert_called_once_with(entry.entry_id)
     logs = "\n".join(
-        r.getMessage() for r in caplog.records if r.name.startswith("custom_components")
+        r.getMessage()
+        for r in caplog.records
+        if r.name.startswith("custom_components") and not _is_ha_core_record(r)
     )
     assert "leftover entities deleted: 1" in logs
     assert owned.entity_id not in logs
