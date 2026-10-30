@@ -7,6 +7,7 @@ import dataclasses
 from types import MappingProxyType
 
 from elke27_lib import AreaState
+from elke27_lib.events import AreaStatusUpdated
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -137,17 +138,26 @@ async def test_late_areas_keep_0_2_0_child_device_and_new_ones_use_via_device_id
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    coordinator = mock_config_entry.runtime_data.coordinator
-    coordinator.async_set_updated_data(
-        dataclasses.replace(
-            mock_client.snapshot,
-            areas=MappingProxyType(
-                {
-                    1: AreaState(area_id=1, name="House"),
-                    2: AreaState(area_id=2, name=None),
-                    3: AreaState(area_id=3, name=None),
-                }
-            ),
+    mock_client.snapshot = dataclasses.replace(
+        mock_client.snapshot,
+        areas=MappingProxyType(
+            {
+                1: AreaState(area_id=1, name="House"),
+                2: AreaState(area_id=2, name=None),
+                3: AreaState(area_id=3, name=None),
+            }
+        ),
+    )
+    mock_client.emit(
+        AreaStatusUpdated(
+            kind="area",
+            at=0.0,
+            seq=None,
+            classification="BROADCAST",
+            route=("area", "status"),
+            session_id=None,
+            area_id=1,
+            changed_fields=(),
         )
     )
     await hass.async_block_till_done()
