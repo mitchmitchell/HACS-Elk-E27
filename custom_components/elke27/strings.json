@@ -3,9 +3,9 @@
     "abort": {
       "already_configured": "This panel is already configured.",
       "missing_context": "Panel details are missing. Restart the flow.",
-      "reauth_successful": "Panel relinked.",
+      "reauth_successful": "Panel reconfigured.",
       "wrong_panel": "The credentials linked a different panel than the one configured for this entry.",
-      "reauth_successful_upgrade": "Panel relinked. The upgrade will finish when Elk E27 reloads."
+      "reauth_successful_upgrade": "Panel reconfigured. The upgrade will finish when Elk E27 reloads."
     },
     "error": {
       "cannot_connect": "Unable to connect to the panel. Confirm the host is reachable and the panel is online.",
@@ -65,8 +65,8 @@
           "access_code": "The access code you set for linking the panel.",
           "passphrase": "The passphrase used during linking."
         },
-        "description": "Enter the access code and passphrase to relink the panel. After an upgrade from 0.1.x this one relink finishes the upgrade: entity IDs, areas, icons and history are kept.",
-        "title": "Relink panel"
+        "description": "Enter the access code and passphrase to reconfigure the panel link. After an upgrade from 0.1.x, reconfiguring once finishes the upgrade: entity IDs, areas, icons and history are kept.",
+        "title": "Reconfigure panel"
       },
       "user": {
         "data": {
@@ -296,7 +296,7 @@
   },
   "exceptions": {
     "auth_failed": {
-      "message": "The panel no longer accepts the stored link. Relink the panel."
+      "message": "The panel no longer accepts the stored link. Select Reconfigure and enter the access code and passphrase."
     },
     "cannot_connect": {
       "message": "Unable to connect to the panel at {host}:{port}."
@@ -329,7 +329,7 @@
       "message": "The client did not become ready before timeout."
     },
     "legacy_relink_required": {
-      "message": "Elk E27 was upgraded from the older version (0.1). Relink the panel (enter the access code and passphrase) to finish; your entities are kept."
+      "message": "Elk E27 was upgraded from the older version (0.1). Select Reconfigure and enter the access code and passphrase to finish; your entities are kept."
     },
     "legacy_migration_blocked": {
       "message": "The upgrade is blocked by leftover entities. Open Settings → Repairs to fix it."

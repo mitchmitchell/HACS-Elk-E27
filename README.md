@@ -344,7 +344,7 @@ doesn't answer discovery: the new address counts as a new panel.
 If the stored link keys are missing or rejected when the integration **loads**, Home Assistant
 shows a **reauthentication** notice in two places: a card under **Settings → Devices & services**
 and an issue under **Settings → System → Repairs**. Open either one and enter the **access code** and **passphrase**
-again (*Relink panel*). The flow checks that you are linking the **same panel** by comparing
+again (*Reconfigure panel*). The flow checks that you are linking the **same panel** by comparing
 **MAC address or panel serial** (not the integration's client ID). The entry
 reloads with new link keys. Your entities and their IDs stay the same. Re-linking only
 refreshes the link keys for the stored address; to change the address, see
@@ -989,7 +989,7 @@ whole °F, so setpoints you set in °C are rounded.
 
 > [!IMPORTANT]
 > **Upgrade in place, one re-link.** From any 0.1.x, update to 0.2.1 in HACS, restart Home
-> Assistant, then enter your access code and passphrase once on the **Relink panel** card.
+> Assistant, then enter your access code and passphrase once on the **Reconfigure panel** card.
 > Do **not** delete the integration. Your entity IDs, registry IDs, names you set, icons,
 > areas, labels, disabled and hidden state, automations, dashboards and history are kept.
 
@@ -998,7 +998,7 @@ whole °F, so setpoints you set in °C are rounded.
    back to 0.1.x**: there is no downgrade, and 0.1.x refuses to load an upgraded entry.
 2. Update in HACS and restart Home Assistant. Home Assistant shows the re-link in two places:
    an attention-required card for the integration under Settings → Devices & services, and a
-   "Reauthentication is needed" entry in Repairs. Open either one to get **Relink panel**.
+   "Reauthentication is needed" entry in Repairs. Open either one to get **Reconfigure panel**.
 3. Enter the access code and passphrase. This links Home Assistant to the panel again with a
    new client ID; the panel's Network Devices list gets a new entry, and you can remove the
    old 0.1.x one there when you like.

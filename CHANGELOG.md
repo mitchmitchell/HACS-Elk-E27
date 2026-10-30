@@ -5,6 +5,10 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 
 ## [Unreleased]
 
+### Changed
+- The relink dialog now uses the same verb as the button that opens it: "Reconfigure panel"
+  instead of "Relink panel", and the related messages say "Select Reconfigure" ([#134](https://github.com/mitchmitchell/HACS-Elk-E27/issues/134)).
+
 ### Development
 - Test against Home Assistant 2026.10.4 (pytest-homeassistant-custom-component 0.13.375).
 
