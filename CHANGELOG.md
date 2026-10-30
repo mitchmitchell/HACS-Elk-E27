@@ -3,7 +3,7 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
-## [Unreleased] - 0.2.1 (draft)
+## [0.2.1] - 2026-10-30
 
 ### Upgrade
 - **Upgrade in place, one re-link, from any 0.1.x.** No delete and re-add. After updating,

@@ -215,7 +215,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
-| 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | CI: 2026.10.2 (minimum 2026.10.0); hardware: TBD | TBD |
+| 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | Hardware: 2026.10.2; CI: 2026.10.2 (minimum 2026.10.0) | Tested: E27 panel (firmware not recorded); garage doors not hardware-tested |
 | 0.2.0 | [0.3.14](https://pypi.org/project/elke27/0.3.14/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.9 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
@@ -680,7 +680,7 @@ These are by design or limits of the panel.
   - HVAC *action* (heating/cooling/off) is inferred from the selected mode. It does not
     show whether the equipment is actually running.
   - Only Auto and On fan modes are supported.
-- **Garage doors:** planned for 0.2.1; see [Garage doors](#garage-doors).
+- **Garage doors:** added in 0.2.1 but not yet tested on hardware; see [Garage doors](#garage-doors).
 - **Setup**
   - Manual setup always uses port 2101.
   - There is no options or reconfigure flow (see
@@ -741,7 +741,7 @@ to retry (see [the example](#retry-automatic-arming-after-a-failure)).
 
 ## Garage doors
 
-Planned for Elk E27 Alarm Engine Integration 0.2.1. It requires elke27 0.3.15, which Home Assistant installs for you. This is an added feature: updating from 0.2.0 needs no delete and re-add, and your existing entities don't change.
+Added in Elk E27 Alarm Engine Integration 0.2.1, but not yet tested on hardware: opening and closing a real door was not verified for this release. It requires elke27 0.3.15, which Home Assistant installs for you. This is an added feature: updating from 0.2.0 needs no delete and re-add, and your existing entities don't change.
 
 Each garage door set up on your panel appears in Home Assistant as a garage door cover on the panel device. It uses the name set on the panel, or "Garage door <number>" if the panel has none.
 
@@ -766,7 +766,8 @@ Each garage door set up on your panel appears in Home Assistant as a garage door
 - If the panel is disconnected, the cover shows as unavailable and commands aren't queued ("Not connected to the panel; the garage door command was not sent.").
 - Tamper and low-battery sensors appear only for doors whose hardware reports them (TBD: not in #68 yet).
 
-**TBD**
+**Not yet verified on hardware**
+- Opening and closing a real door.
 - Whether door changes show up right away or only after a refresh.
 - Hardware confirmation of the error messages and of status after open/close (Tester).
 
@@ -960,7 +961,7 @@ single command or a refused request is not retried. See [Retries and errors](#re
 **Can I bypass a zone?** Yes, one or more, with [`elke27.zone_bypass`](#elke27zone_bypass).
 Disarming an armed area clears bypasses.
 
-**Can I control a garage door?** Planned for 0.2.1 (open, close and open/closed state); see
+**Can I control a garage door?** Since 0.2.1 (open, close and open/closed state), not yet tested on hardware; see
 [Garage doors](#garage-doors).
 
 **Does it support Celsius?** For display, yes: Home Assistant converts. The panel works in
