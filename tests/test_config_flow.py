@@ -19,6 +19,7 @@ from elke27_lib.errors import (
     Elke27Error,
     Elke27LinkRequiredError,
     Elke27ProtocolError,
+    Elke27TimeoutError,
     InvalidCredentials,
 )
 import probatio
@@ -994,3 +995,103 @@ async def test_reauth_no_link_slots(
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
+
+
+def _suggested_value(schema: probatio.Schema, name: str) -> Any:
+    for key in schema.schema:
+        if key == name:
+            return (key.description or {}).get("suggested_value")
+    raise AssertionError(name)
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "error", "reason"),
+    [
+        (Elke27AuthError("rejected"), "invalid_auth", "panel rejected the credentials"),
+        (
+            Elke27TimeoutError("slow"),
+            "cannot_connect",
+            "timed out waiting for the panel",
+        ),
+        (TimeoutError(), "cannot_connect", "timed out waiting for the panel"),
+        (Elke27ConnectionError("refused"), "cannot_connect", "connection error"),
+        (OSError("unreachable"), "cannot_connect", "connection error"),
+        (Elke27LinkRequiredError("link"), "link_required", "panel requires a new link"),
+    ],
+)
+async def test_reauth_failure_logs_reason_and_keeps_access_code(
+    hass: HomeAssistant,
+    flow_client: Any,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    side_effect: BaseException,
+    error: str,
+    reason: str,
+) -> None:
+    """A failed relink logs one reason line and re-shows the access code."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    flow_client.async_link.side_effect = side_effect
+    caplog.clear()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": error}
+    schema = result["data_schema"]
+    assert _suggested_value(schema, CONF_ACCESS_CODE) == ACCESS_CODE
+    assert _suggested_value(schema, CONF_PASSPHRASE) is None
+    lines = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "custom_components.elke27.config_flow"
+    ]
+    assert lines == [f"Elke27 link (reauth_confirm) failed: {reason}"]
+    assert all(
+        r.levelname == "WARNING"
+        for r in caplog.records
+        if r.name.startswith("custom_components.elke27")
+    )
+    assert ACCESS_CODE not in caplog.text
+    assert PASSPHRASE not in caplog.text
+
+
+async def test_reauth_not_ready_logs_reason(
+    hass: HomeAssistant,
+    flow_client: Any,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A relink whose session never becomes ready logs why."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    flow_client.wait_ready.return_value = False
+    caplog.clear()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert _suggested_value(result["data_schema"], CONF_ACCESS_CODE) == ACCESS_CODE
+    assert (
+        "Elke27 link (reauth_confirm) failed: panel did not become ready" in caplog.text
+    )
+
+
+@pytest.mark.usefixtures("flow_client")
+async def test_reauth_success_logs_no_warning(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A successful relink logs no link-failure warning."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    caplog.clear()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert "Elke27 link" not in caplog.text
