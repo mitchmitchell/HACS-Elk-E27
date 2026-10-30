@@ -358,6 +358,14 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             self._integration_id = generate_integration_id()
         return self._integration_id
 
+    def _schema_keeping_access_code(
+        self, data_schema: probatio.Schema, access_code: str
+    ) -> probatio.Schema:
+        """Re-show the link form with the access code kept and the passphrase blank."""
+        return self.add_suggested_values_to_schema(
+            data_schema, {CONF_ACCESS_CODE: access_code}
+        )
+
     async def _async_link_and_create_entry(
         self,
         access_code: str,
@@ -399,9 +407,12 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             ready = await client.wait_ready(timeout_s=READY_TIMEOUT)
             if not ready:
                 errors["base"] = "cannot_connect"
+                _log_link_failure(step_id, "panel did not become ready")
                 return self.async_show_form(
                     step_id=step_id,
-                    data_schema=data_schema,
+                    data_schema=self._schema_keeping_access_code(
+                        data_schema, access_code
+                    ),
                     errors=errors,
                 )
 
@@ -410,24 +421,19 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             table_info = asdict(snapshot.table_info)
         except InvalidCredentials, Elke27AuthError, Elke27CryptoError:
             errors["base"] = "invalid_auth"
-        except Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError:
+            _log_link_failure(step_id, "panel rejected the credentials")
+        except Elke27TimeoutError, TimeoutError:
             errors["base"] = "cannot_connect"
-        except OSError, TimeoutError, E27Error:
+            _log_link_failure(step_id, "timed out waiting for the panel")
+        except Elke27ConnectionError, Elke27DisconnectedError, OSError, E27Error:
             errors["base"] = "cannot_connect"
+            _log_link_failure(step_id, "connection error")
         except Elke27LinkRequiredError:
             errors["base"] = "link_required"
-        # Kept on purpose: host/port are guarded above (None -> form error) and
-        # come from validated entry data, but the library also raises
-        # Elke27InvalidArgument for an empty access code/passphrase or a
-        # rejected client identity, and no stored 0.1.7 host/port value has been
-        # shown to trigger it. Catching it keeps the form usable (no 500).
+            _log_link_failure(step_id, "panel requires a new link")
         except (Elke27Error, Elke27InvalidArgument) as err:
-            # Log the exception type only: its message can carry host, port or
-            # panel fields, and none of those belong in the log.
-            _LOGGER.warning("Elke27 link (%s) failed: %s", step_id, type(err).__name__)
-            errors["base"] = (
-                _link_error_base(err) if isinstance(err, Elke27Error) else "unknown"
-            )
+            errors["base"] = _unexpected_link_error_base(err)
+            _log_link_failure(step_id, type(err).__name__)
         finally:
             with contextlib.suppress(OSError, TimeoutError, E27Error, Elke27Error):
                 await client.async_disconnect()
@@ -435,7 +441,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         if errors or link_keys is None:
             return self.async_show_form(
                 step_id=step_id,
-                data_schema=data_schema,
+                data_schema=self._schema_keeping_access_code(data_schema, access_code),
                 errors=errors,
             )
 
@@ -628,6 +634,25 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             ):
                 return True
         return False
+
+
+def _log_link_failure(step_id: str, reason: str) -> None:
+    """Log why a link attempt failed, without host, port, or credentials."""
+    _LOGGER.warning("Elke27 link (%s) failed: %s", step_id, reason)
+
+
+def _unexpected_link_error_base(err: Elke27Error | Elke27InvalidArgument) -> str:
+    """
+    Map any other library error from a link attempt to a form error.
+
+    The catch stays broad on purpose: host/port are checked before linking, but
+    the library also raises Elke27InvalidArgument for an empty access code or
+    passphrase or a rejected client identity, and other Elke27Error subclasses
+    can surface from connect or snapshot. Catching them keeps the form usable
+    instead of a 500. Only the exception type is logged, because its message can
+    carry host, port, or panel fields.
+    """
+    return _link_error_base(err) if isinstance(err, Elke27Error) else "unknown"
 
 
 def _create_client() -> Elke27Client:
