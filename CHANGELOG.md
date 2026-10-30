@@ -3,6 +3,11 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
+## [Unreleased]
+
+### Development
+- Test against Home Assistant 2026.10.4 (pytest-homeassistant-custom-component 0.13.375).
+
 ## [0.2.1] - 2026-10-30
 
 ### Upgrade
