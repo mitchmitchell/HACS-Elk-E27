@@ -998,6 +998,16 @@ async def test_reauth_no_link_slots(
     assert result["reason"] == "reauth_successful"
 
 
+async def _finish_reauth(hass: HomeAssistant, flow_client: Any, flow_id: str) -> None:
+    flow_client.async_link.side_effect = None
+    flow_client.wait_ready.return_value = True
+    result = await hass.config_entries.flow.async_configure(
+        flow_id, {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+
+
 def _suggested_value(schema: probatio.Schema, name: str) -> Any:
     for key in schema.schema:
         if key == name:
@@ -1056,6 +1066,7 @@ async def test_reauth_failure_logs_reason_and_keeps_access_code(
     )
     assert ACCESS_CODE not in caplog.text
     assert PASSPHRASE not in caplog.text
+    await _finish_reauth(hass, flow_client, result["flow_id"])
 
 
 async def test_reauth_not_ready_logs_reason(
@@ -1073,11 +1084,15 @@ async def test_reauth_not_ready_logs_reason(
         result["flow_id"],
         {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
     )
+    assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
     assert _suggested_value(result["data_schema"], CONF_ACCESS_CODE) == ACCESS_CODE
-    assert (
-        "Elke27 link (reauth_confirm) failed: panel did not become ready" in caplog.text
-    )
+    assert [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "custom_components.elke27.config_flow"
+    ] == ["Elke27 link (reauth_confirm) failed: panel did not become ready"]
+    await _finish_reauth(hass, flow_client, result["flow_id"])
 
 
 @pytest.mark.usefixtures("flow_client")
@@ -1132,3 +1147,4 @@ async def test_reauth_unexpected_error_logs_type_only(
     assert "10.0.0.9" not in caplog.text
     assert ACCESS_CODE not in caplog.text
     assert PASSPHRASE not in caplog.text
+    await _finish_reauth(hass, flow_client, result["flow_id"])

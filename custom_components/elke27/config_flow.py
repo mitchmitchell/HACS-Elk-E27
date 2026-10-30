@@ -432,7 +432,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             errors["base"] = "link_required"
             _log_link_failure(step_id, "panel requires a new link")
         except (Elke27Error, Elke27InvalidArgument) as err:
-            errors["base"] = _unexpected_link_error_base(err, step_id)
+            errors["base"] = _unexpected_link_error_base(err)
+            _log_link_failure(step_id, type(err).__name__)
         finally:
             with contextlib.suppress(OSError, TimeoutError, E27Error, Elke27Error):
                 await client.async_disconnect()
@@ -640,9 +641,7 @@ def _log_link_failure(step_id: str, reason: str) -> None:
     _LOGGER.warning("Elke27 link (%s) failed: %s", step_id, reason)
 
 
-def _unexpected_link_error_base(
-    err: Elke27Error | Elke27InvalidArgument, step_id: str
-) -> str:
+def _unexpected_link_error_base(err: Elke27Error | Elke27InvalidArgument) -> str:
     """
     Map any other library error from a link attempt to a form error.
 
@@ -653,7 +652,6 @@ def _unexpected_link_error_base(
     instead of a 500. Only the exception type is logged, because its message can
     carry host, port, or panel fields.
     """
-    _log_link_failure(step_id, type(err).__name__)
     return _link_error_base(err) if isinstance(err, Elke27Error) else "unknown"
 
 
