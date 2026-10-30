@@ -764,12 +764,11 @@ Each garage door set up on your panel appears in Home Assistant as a garage door
 - Each command is sent once. If the integration can't tell whether the panel received it, you see "Garage door command may or may not have reached the panel; check the door before retrying", and the integration reads the door's status once; it never resends the command.
 - After each command the integration reads the door's status once.
 - If the panel is disconnected, the cover shows as unavailable and commands aren't queued ("Not connected to the panel; the garage door command was not sent.").
-- Tamper and low-battery sensors appear only for doors whose hardware reports them (TBD: not in #68 yet).
 
 **Not yet verified on hardware**
 - Opening and closing a real door.
 - Whether door changes show up right away or only after a refresh.
-- Hardware confirmation of the error messages and of status after open/close (Tester).
+- Hardware confirmation of the error messages and of status after open/close.
 
 ## Troubleshooting
 
