@@ -17,6 +17,7 @@ from elke27_lib.errors import (
     Elke27ConnectionError,
     Elke27CryptoError,
     Elke27Error,
+    Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27ProtocolError,
     Elke27TimeoutError,
@@ -1095,3 +1096,39 @@ async def test_reauth_success_logs_no_warning(
     )
     assert result["type"] is FlowResultType.ABORT
     assert "Elke27 link" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "side_effect",
+    [
+        Elke27ProtocolError("panel 10.0.0.9:2101 said no"),
+        Elke27InvalidArgument("client identity rejected for 10.0.0.9"),
+    ],
+)
+async def test_reauth_unexpected_error_logs_type_only(
+    hass: HomeAssistant,
+    flow_client: Any,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    side_effect: BaseException,
+) -> None:
+    """The fallback branch logs only the exception type, never its message."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    flow_client.async_link.side_effect = side_effect
+    caplog.clear()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.FORM
+    records = [
+        r for r in caplog.records if r.name == "custom_components.elke27.config_flow"
+    ]
+    assert [r.getMessage() for r in records] == [
+        f"Elke27 link (reauth_confirm) failed: {type(side_effect).__name__}"
+    ]
+    assert records[0].levelname == "WARNING"
+    assert "10.0.0.9" not in caplog.text
+    assert ACCESS_CODE not in caplog.text
+    assert PASSPHRASE not in caplog.text

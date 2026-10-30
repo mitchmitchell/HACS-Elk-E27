@@ -432,10 +432,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             errors["base"] = "link_required"
             _log_link_failure(step_id, "panel requires a new link")
         except (Elke27Error, Elke27InvalidArgument) as err:
-            errors["base"] = (
-                _link_error_base(err) if isinstance(err, Elke27Error) else "unknown"
-            )
-            _log_link_failure(step_id, type(err).__name__)
+            errors["base"] = _unexpected_link_error_base(err, step_id)
         finally:
             with contextlib.suppress(OSError, TimeoutError, E27Error, Elke27Error):
                 await client.async_disconnect()
@@ -641,6 +638,23 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
 def _log_link_failure(step_id: str, reason: str) -> None:
     """Log why a link attempt failed, without host, port, or credentials."""
     _LOGGER.warning("Elke27 link (%s) failed: %s", step_id, reason)
+
+
+def _unexpected_link_error_base(
+    err: Elke27Error | Elke27InvalidArgument, step_id: str
+) -> str:
+    """
+    Map any other library error from a link attempt to a form error.
+
+    The catch stays broad on purpose: host/port are checked before linking, but
+    the library also raises Elke27InvalidArgument for an empty access code or
+    passphrase or a rejected client identity, and other Elke27Error subclasses
+    can surface from connect or snapshot. Catching them keeps the form usable
+    instead of a 500. Only the exception type is logged, because its message can
+    carry host, port, or panel fields.
+    """
+    _log_link_failure(step_id, type(err).__name__)
+    return _link_error_base(err) if isinstance(err, Elke27Error) else "unknown"
 
 
 def _create_client() -> Elke27Client:
