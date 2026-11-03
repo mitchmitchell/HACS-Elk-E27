@@ -87,7 +87,13 @@ def panel_snapshot() -> PanelSnapshot:
     return dataclasses.replace(
         PanelSnapshot.empty(),
         panel=PanelInfo(mac=PANEL_MAC, panel_name="Test Panel"),
-        areas=MappingProxyType({1: AreaState(area_id=1, name="House", ready=True)}),
+        areas=MappingProxyType(
+            {
+                1: AreaState(
+                    area_id=1, name="House", ready=True, arm_mode=ArmMode.DISARMED
+                )
+            }
+        ),
         zones=MappingProxyType(
             {1: ZoneState(zone_id=1, name="Front Door", area_id=1, open=False)}
         ),

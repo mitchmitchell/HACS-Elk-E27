@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from elke27_lib import ArmMode, PanelSnapshot, ZoneState
+from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
     Elke27AuthError,
     Elke27InvalidArgument,
@@ -79,19 +80,10 @@ def _strict_int(value: object) -> int | None:
 
 
 def _arm_mode_from_text(value: Any) -> ArmMode | None:
-    """Map a panel arm_state string to an ArmMode (as elke27 does)."""
+    """Map a panel arm_state string to an ArmMode with elke27's own mapping (#145)."""
     if not isinstance(value, str):
         return None
-    lowered = value.lower()
-    if "disarm" in lowered:
-        return ArmMode.DISARMED
-    if "stay" in lowered:
-        return ArmMode.ARMED_STAY
-    if "away" in lowered:
-        return ArmMode.ARMED_AWAY
-    if "night" in lowered:
-        return ArmMode.ARMED_NIGHT
-    return None
+    return Elke27Client.arm_mode_from_panel_string(value)
 
 
 def _zone_with_status_char(zone: ZoneState, ch: str) -> ZoneState:

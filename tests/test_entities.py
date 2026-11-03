@@ -186,6 +186,7 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         assert entity.extra_state_attributes == {
             "ready": False,
             "ready_status": entity.coordinator.data.areas[1].ready_status,
+            "alarm_memory": entity.coordinator.data.areas[1].alarm_memory,
             "faulted_zone_ids": [1, 2],
             "faulted_zones": ["Front Door", "Rear Door"],
         }
@@ -215,6 +216,7 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         assert entity.extra_state_attributes == {
             "ready": None,
             "ready_status": None,
+            "alarm_memory": None,
             "faulted_zone_ids": None,
             "faulted_zones": None,
         }
@@ -222,11 +224,12 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
     def test_state_mapping(self) -> None:
         """Arm modes map to Home Assistant alarm states."""
         cases = {
-            None: AlarmControlPanelState.DISARMED,
+            None: None,
             ArmMode.DISARMED: AlarmControlPanelState.DISARMED,
             ArmMode.ARMED_STAY: AlarmControlPanelState.ARMED_HOME,
             ArmMode.ARMED_NIGHT: AlarmControlPanelState.ARMED_NIGHT,
             ArmMode.ARMED_AWAY: AlarmControlPanelState.ARMED_AWAY,
+            ArmMode.ARMED_VACATION: AlarmControlPanelState.ARMED_VACATION,
         }
         for mode, expected in cases.items():
             assert _area_state_to_ha(AreaState(area_id=1, arm_mode=mode)) is expected

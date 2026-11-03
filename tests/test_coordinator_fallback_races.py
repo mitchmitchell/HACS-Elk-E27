@@ -13,7 +13,7 @@ import contextlib
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-from elke27_lib import ArmMode, PanelSnapshot
+from elke27_lib import AreaState, ArmMode, PanelSnapshot
 
 from tests.conftest import (
     ClientHarness,
@@ -24,6 +24,7 @@ from tests.conftest import (
     link_event,
     run_command,
     settle,
+    snapshot_with,
 )
 
 if TYPE_CHECKING:
@@ -150,6 +151,10 @@ async def test_failed_reread_publishes_client_snapshot(
 ) -> None:
     """If the re-read fails, the stale first read is never published."""
     client = FakeClient(command_result(refresh=False))
+    client.snapshot = snapshot_with(
+        client.snapshot,
+        areas={1: AreaState(area_id=1, name="House", ready=True, arm_mode=None)},
+    )
     coordinator = await setup(client)
     gate = asyncio.Event()
     client.read_gates = [gate, None]
