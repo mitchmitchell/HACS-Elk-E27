@@ -78,7 +78,7 @@ async def test_alarm_state_published_to_hass(
 async def test_every_doc_arm_state_string_reaches_hass(
     hass: HomeAssistant, setup: Setup, arm_state: str, expected: str
 ) -> None:
-    """Each Dealer API ``area_get_status`` arm_state, mapped by the real library."""
+    """Each documented ``area_get_status`` arm_state, mapped by the real library."""
     mode = Elke27Client.arm_mode_from_panel_string(arm_state)
     client = FakeClient(command_result(refresh=True))
     coordinator = await setup(client)
