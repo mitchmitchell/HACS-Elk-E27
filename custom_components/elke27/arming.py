@@ -62,7 +62,14 @@ class ZoneBypassFailedError(HomeAssistantError):
 PANEL_ERROR_ALREADY_ARMED = 11028
 
 
-_ARMED_MODES = frozenset({ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY, ArmMode.ARMED_NIGHT})
+_ARMED_MODES = frozenset(
+    {
+        ArmMode.ARMED_AWAY,
+        ArmMode.ARMED_STAY,
+        ArmMode.ARMED_NIGHT,
+        ArmMode.ARMED_VACATION,
+    }
+)
 
 
 _ZONE_STATUS_BYPASSED = frozenset("DEF")
@@ -188,7 +195,7 @@ def area_arming_from_status_reply(area_payload: Mapping[str, Any]) -> bool:
     if not isinstance(cmd_raw, str):
         return False
     cmd_mode = _arm_mode_from_text(cmd_raw)
-    if cmd_mode not in (ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY):
+    if cmd_mode not in (ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY, ArmMode.ARMED_VACATION):
         return False
     ee_timer = area_payload.get("ee_timer")
     if type(ee_timer) is not int or ee_timer <= 0:
