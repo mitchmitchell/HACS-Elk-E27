@@ -3,7 +3,16 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-04
+
+### Upgrade
+- **Update in HACS and restart Home Assistant.** No re-link, no delete and re-add. Entity
+  IDs, registry IDs, areas, automations, dashboards and history are kept. Minimum Home
+  Assistant is unchanged (2026.10.0).
+- Requires `elke27` 0.4.0, which HACS installs with the update.
+- **Check automations that test for `disarmed`.** An area can now show `unknown` (the panel
+  didn't report an arm mode) or `armed_vacation` (armed in Vacation mode at the panel) where
+  0.2.1 showed `disarmed`. See [Alarm control panel (areas)](README.md#alarm-control-panel-areas).
 
 ### Changed
 - Uses [`elke27` 0.4.0](https://github.com/mitchmitchell/elke27/releases/tag/v0.4.0) (was 0.3.15). Arm mode `None` shows as Home Assistant `unknown` rather than `disarmed`; `ARMED_VACATION` maps to `armed_vacation` ([#145](https://github.com/mitchmitchell/HACS-Elk-E27/issues/145), [#146](https://github.com/mitchmitchell/HACS-Elk-E27/pull/146)).
