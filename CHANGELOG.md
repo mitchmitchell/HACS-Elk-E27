@@ -6,7 +6,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ## [Unreleased]
 
 ### Changed
-- Uses [`elke27` 0.4.0](https://github.com/mitchmitchell/elke27/releases/tag/v0.4.0) (was 0.3.15). Arm mode `None` shows as Home Assistant `unknown` rather than `disarmed`; `ARMED_VACATION` maps to `armed_vacation`; areas expose an `alarm_memory` attribute ([#145](https://github.com/mitchmitchell/HACS-Elk-E27/issues/145), [#146](https://github.com/mitchmitchell/HACS-Elk-E27/pull/146)).
+- Uses [`elke27` 0.4.0](https://github.com/mitchmitchell/elke27/releases/tag/v0.4.0) (was 0.3.15). Arm mode `None` shows as Home Assistant `unknown` rather than `disarmed`; `ARMED_VACATION` maps to `armed_vacation` ([#145](https://github.com/mitchmitchell/HACS-Elk-E27/issues/145), [#146](https://github.com/mitchmitchell/HACS-Elk-E27/pull/146)).
 - The relink dialog now uses the same verb as the button that opens it: "Reconfigure panel"
   instead of "Relink panel", and the related messages say "Select Reconfigure" ([#134](https://github.com/mitchmitchell/HACS-Elk-E27/issues/134)).
 

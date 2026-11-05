@@ -186,7 +186,6 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         assert entity.extra_state_attributes == {
             "ready": False,
             "ready_status": entity.coordinator.data.areas[1].ready_status,
-            "alarm_memory": entity.coordinator.data.areas[1].alarm_memory,
             "faulted_zone_ids": [1, 2],
             "faulted_zones": ["Front Door", "Rear Door"],
         }
@@ -216,7 +215,6 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         assert entity.extra_state_attributes == {
             "ready": None,
             "ready_status": None,
-            "alarm_memory": None,
             "faulted_zone_ids": None,
             "faulted_zones": None,
         }

@@ -90,7 +90,7 @@ async def test_every_doc_arm_state_string_reaches_hass(
 
 
 @pytest.mark.parametrize("alarm_memory", [True, False, None])
-async def test_alarm_memory_attribute(
+async def test_alarm_memory_not_exposed(
     hass: HomeAssistant, setup: Setup, *, alarm_memory: bool | None
 ) -> None:
     client = FakeClient(command_result(refresh=True))
@@ -102,7 +102,7 @@ async def test_alarm_memory_attribute(
     client.snapshot = snap
     coordinator.async_set_updated_data(snap)
     await hass.async_block_till_done()
-    assert hass.states.get(ALARM).attributes["alarm_memory"] is alarm_memory
+    assert "alarm_memory" not in hass.states.get(ALARM).attributes
 
 
 # --- Arm custom bypass (not verified) ----------------------------------------

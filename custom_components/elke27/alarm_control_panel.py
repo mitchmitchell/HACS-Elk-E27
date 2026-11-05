@@ -119,7 +119,6 @@ class Elke27AreaAlarmControlPanel(
             return {
                 "ready": None,
                 "ready_status": None,
-                "alarm_memory": None,
                 "faulted_zone_ids": None,
                 "faulted_zones": None,
             }
@@ -128,7 +127,6 @@ class Elke27AreaAlarmControlPanel(
         return {
             "ready": area.ready,
             "ready_status": area.ready_status,
-            "alarm_memory": area.alarm_memory,
             "faulted_zone_ids": [zone.zone_id for zone in faulted_zones],
             "faulted_zones": [
                 _zone_display_name(zone, definitions) for zone in faulted_zones
