@@ -81,7 +81,8 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 - **Arm away**, **arm home** (the panel's *Stay* mode) and **disarm**. Each one needs your
   numeric alarm user code, which is entered in the Home Assistant keypad.
-- The E27 has no *Night* or *Vacation* mode, so arm night and arm vacation are not offered.
+- Arm night and arm vacation are not offered from Home Assistant. If the area is armed in
+  *Night* or *Vacation* mode at a keypad, it shows `armed_night` or `armed_vacation`.
 - **Arm away may end up as armed home.** If no entry/exit zone opens before the exit delay
   ends, the panel's *auto-stay* switches the area to Stay and it shows `armed_home`. This is
   panel behavior. Check for both `armed_away` and `armed_home` in automations.
@@ -95,8 +96,13 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
   example *invalid parameter (check the user code) (error 11004)*. See
   [Panel error messages](#panel-error-messages). The reason and code are also logged as a
   warning.
-- States reported: `disarmed`, `arming` (during the exit delay), `armed_home`, `armed_away`
-  and `triggered` (alarm active). There is no `pending` state.
+- States reported: `disarmed`, `arming` (during the exit delay), `armed_home`, `armed_away`,
+  `armed_night`, `armed_vacation`, `triggered` (alarm active) and `unknown`. There is no
+  `pending` state.
+- `unknown` means the panel didn't report the area's arm mode, so Home Assistant can't tell
+  whether it is armed. It is never shown as `disarmed`. Check the keypad for the real state.
+  Before 0.3.0 this case showed `disarmed`; automations that test for `disarmed` should
+  allow for `unknown` and `armed_vacation`.
 - Extra attributes:
 
   | Attribute | Meaning |
@@ -215,6 +221,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| 0.3.0 | [0.4.0](https://pypi.org/project/elke27/0.4.0/) | Hardware: TEST HA Core 2026.10.2; CI: 2026.10.4 (minimum 2026.10.0) | Pre-release facts from PR #146 at 049fd71, not a release test of 0.3.0 (release-candidate test at the 0.3.0 commit still pending): TEST E27 panel, disarmed state verified on hardware; arm, vacation, night and triggered states verified in tests and simulator only; garage doors not hardware-tested |
 | 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | Hardware: 2026.10.2; CI: 2026.10.2 (minimum 2026.10.0) | Tested: E27 panel, model 260, firmware 2.6.1; garage doors not hardware-tested |
 | 0.2.0 | [0.3.14](https://pypi.org/project/elke27/0.3.14/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.9 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
