@@ -59,7 +59,7 @@ async def async_discover_panel_mac(host: str) -> str | None:
     """Unicast-discover ``host`` and return its normalized MAC, or None."""
     try:
         panel = await async_discover_host(host, timeout=DISCOVER_HOST_TIMEOUT)
-    except Exception as err:  # noqa: BLE001  # discovery must never break setup
+    except Exception as err:  # noqa: BLE001 -- discovery must never break setup
         _LOGGER.debug("Unicast discovery of %s failed: %s", host, err)
         return None
     return panel_mac_from_discovered(panel)

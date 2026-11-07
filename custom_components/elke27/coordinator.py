@@ -252,7 +252,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if self._unsubscribe is not None:
             try:
                 self._unsubscribe()
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:  # noqa: BLE001 -- must catch unsubscribe failures
                 _LOGGER.debug("Event unsubscribe failed: %s", err)
             self._unsubscribe = None
         for task in (
@@ -401,7 +401,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 if self._connection_unsubscribe is not None:
                     try:
                         self._connection_unsubscribe()
-                    except Exception as err:  # noqa: BLE001
+                    except Exception as err:  # noqa: BLE001 -- must catch unsubscribe failures
                         _LOGGER.debug("Connection unsubscribe failed: %s", err)
                     self._connection_unsubscribe = None
                 await self._async_disconnect_client(client)
@@ -413,7 +413,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if self._connection_unsubscribe is not None:
             try:
                 self._connection_unsubscribe()
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:  # noqa: BLE001 -- must catch unsubscribe failures
                 _LOGGER.debug("Connection unsubscribe failed: %s", err)
             self._connection_unsubscribe = None
         client = self._client
@@ -1037,7 +1037,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             if unsubscribe is not None:
                 try:
                     unsubscribe()
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:  # noqa: BLE001 -- must catch unsubscribe failures
                     _LOGGER.debug("Typed callback unsubscribe failed: %s", err)
             self._typed_callbacks[cb] = None
 

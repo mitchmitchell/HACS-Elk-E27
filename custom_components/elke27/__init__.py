@@ -21,7 +21,7 @@ from .const import (
     ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED,
     ISSUE_RECONNECT_FAILED,
 )
-from .coordinator import PRIMED_DOMAINS, SETUP_RETRY_ERRORS, Elke27DataUpdateCoordinator  # noqa: F401  # PRIMED_DOMAINS/SETUP_RETRY_ERRORS re-exported
+from .coordinator import PRIMED_DOMAINS, SETUP_RETRY_ERRORS, Elke27DataUpdateCoordinator  # noqa: F401 -- re-exported for tests and callers
 from .entity import (
     area_has_device,
     area_id_from_device_identifier,
@@ -44,7 +44,7 @@ from .migration import (
 )
 from .models import Elke27ConfigEntry, Elke27RuntimeData
 from .panel_mac import mismatch_issue_id
-from .services import (  # noqa: F401  # re-exported; tests and callers import these from the package
+from .services import (  # noqa: F401 -- re-exported for tests and callers
     ATTR_AREA_ID,
     EVENT_ARM_AUTOMATIC_FAILED,
     SERVICE_ALARM_ARM_AUTOMATIC,
@@ -130,7 +130,7 @@ def _record_errors_fail_setup(
             severity=ir.IssueSeverity.ERROR,
             translation_key=ISSUE_LEGACY_MIGRATION_RECORD_MALFORMED,
         )
-        _LOGGER.error(  # noqa: TRY400  # a traceback would carry values
+        _LOGGER.error(  # noqa: TRY400 -- traceback would carry sensitive values
             "Elke27 upgrade notes unreadable (field %s); see Settings > Repairs",
             err.field,
         )
@@ -183,7 +183,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bo
 
 async def async_migrate_entry(hass: HomeAssistant, entry: Elke27ConfigEntry) -> bool:
     """Migrate a config entry to VERSION 2 (0.1.x upgrade in place, Phase A)."""
-    if entry.version > 2:  # noqa: PLR2004  # VERSION in config_flow
+    if entry.version > 2:  # noqa: PLR2004 -- matches config_flow VERSION constant
         # Written by a newer release: refuse rather than mis-read it.
         return False
     if entry.version == 1:
@@ -220,7 +220,7 @@ def _entry_area_ids(
 
 
 async def async_remove_config_entry_device(
-    hass: HomeAssistant,  # noqa: ARG001  # Home Assistant signature
+    hass: HomeAssistant,  # noqa: ARG001 -- required Home Assistant callback signature
     entry: Elke27ConfigEntry,
     device_entry: dr.DeviceEntry,
 ) -> bool:

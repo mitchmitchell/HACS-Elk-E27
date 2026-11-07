@@ -103,13 +103,13 @@ class Elke27Thermostat(
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE_RANGE | ClimateEntityFeature.FAN_MODE
     )
-    _attr_hvac_modes = [  # noqa: RUF012
+    _attr_hvac_modes = [  # noqa: RUF012 -- class level HVAC modes list
         HVACMode.OFF,
         HVACMode.HEAT,
         HVACMode.COOL,
         HVACMode.HEAT_COOL,
     ]
-    _attr_fan_modes = [FAN_AUTO, FAN_ON]  # noqa: RUF012
+    _attr_fan_modes = [FAN_AUTO, FAN_ON]  # noqa: RUF012 -- class level fan modes list
     _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
     _attr_min_temp = 40
     _attr_max_temp = 99

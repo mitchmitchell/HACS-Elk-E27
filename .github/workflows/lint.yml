@@ -36,6 +36,9 @@ jobs:
       - name: Mypy
         run: python3 -m mypy custom_components/elke27
 
+      - name: Loopcheck
+        run: python3 scripts/loopcheck.py --config loopcheck.toml custom_components/elke27
+
   no-raw-passthrough:
     name: "No raw pass-through"
     runs-on: "ubuntu-latest"

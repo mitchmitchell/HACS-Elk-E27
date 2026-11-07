@@ -2,10 +2,17 @@
 
 target-version = "py314"
 
+extend-exclude = [
+    "scripts/loopcheck.py", # vendored from elke27 d3b51d0; do not local-edit
+    "tests/loopcheck", # intentional loopcheck rule fixtures, not product code
+]
+
 [lint]
 select = [
     "ALL",
 ]
+
+external = ["ELK"]
 
 ignore = [
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed

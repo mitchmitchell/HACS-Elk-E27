@@ -207,7 +207,7 @@ class ReconnectSupervisor:
             self._reconnect_attempts += 1
             # Cap the base delay before jitter (max sleep is about 72 s).
             base_delay = min(RECONNECT_BACKOFF_MAX, 2**self._reconnect_attempts)
-            delay = base_delay * random.uniform(0.8, 1.2)  # noqa: S311
+            delay = base_delay * random.uniform(0.8, 1.2)  # noqa: S311 -- non-crypto jitter for backoff
             _LOGGER.debug(
                 "Reconnect attempt %s sleeping for %s seconds",
                 self._reconnect_attempts,

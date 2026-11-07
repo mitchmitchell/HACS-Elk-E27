@@ -189,12 +189,12 @@ def validate_legacy_migration_record(entry: ConfigEntry) -> None:
         return
     record = record_field(entry.data, CONF_LEGACY_MIGRATION)
     if not isinstance(record, Mapping):
-        raise LegacyMigrationRecordError("record", "invalid")  # noqa: EM101  # field name
+        raise LegacyMigrationRecordError("record", "invalid")  # noqa: EM101 -- literal field name only
     state = record_field(record, "state")
     if state == MIGRATION_STATE_DONE:
         return
     if state != MIGRATION_STATE_PENDING:
-        raise LegacyMigrationRecordError("state", "invalid")  # noqa: EM101  # field name
+        raise LegacyMigrationRecordError("state", "invalid")  # noqa: EM101 -- literal field name only
     record_field(record, "from")
     for name, fields in _ROW_FIELDS.items():
         rows = record_field(record, name)
@@ -207,9 +207,9 @@ def validate_legacy_migration_record(entry: ConfigEntry) -> None:
         try:
             n = int(row["n"])
         except TypeError, ValueError:
-            raise LegacyMigrationRecordError("plan[].n", "invalid") from None  # noqa: EM101  # field name
+            raise LegacyMigrationRecordError("plan[].n", "invalid") from None  # noqa: EM101 -- literal field name only
         if new_unique_id("key", row["kind"], n) is None:
-            raise LegacyMigrationRecordError("plan[].kind", "unmappable")  # noqa: EM101  # field name
+            raise LegacyMigrationRecordError("plan[].kind", "unmappable")  # noqa: EM101 -- literal field name only
 
 
 def legacy_migration_pending(entry: ConfigEntry) -> bool:
@@ -384,7 +384,7 @@ def ambiguous_keepers(hass: HomeAssistant, entry: ConfigEntry) -> list[KeeperCho
             groups.setdefault((row.domain, row.kind, row.n), []).append(row)
     choices: list[KeeperChoice] = []
     for group in groups.values():
-        if len(group) < 2:  # noqa: PLR2004  # a duplicate needs two rows
+        if len(group) < 2:  # noqa: PLR2004 -- duplicate requires two rows minimum
             continue
         group.sort(key=lambda row: base_count[row.base], reverse=True)
         keep, *extra = group
@@ -836,7 +836,7 @@ def async_apply_legacy_migration(
             # Not a conflict: a registry write failed and was fully undone.
             # The error text can carry identifiers: never shown or logged.
             write_failed = True
-            _LOGGER.error(  # noqa: TRY400  # a traceback would carry identifiers
+            _LOGGER.error(  # noqa: TRY400 -- traceback would carry registry identifiers
                 "Elke27 upgrade: a registry write failed, all %d planned "
                 "change(s) undone; reload to retry",
                 len(plan.changes),

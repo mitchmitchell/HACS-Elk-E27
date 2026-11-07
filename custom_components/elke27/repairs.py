@@ -76,7 +76,7 @@ class RetryFlow(_EntryFlow):
 
     async def async_step_init(
         self,
-        user_input: dict[str, Any] | None = None,  # noqa: ARG002  # issue data
+        user_input: dict[str, Any] | None = None,  # noqa: ARG002 -- Home Assistant repair flow signature
     ) -> RepairsFlowResult:
         """Start at the confirm step (init receives the issue data)."""
         return await self.async_step_confirm()
@@ -95,7 +95,7 @@ class RecordRebuildFlow(_EntryFlow):
 
     async def async_step_init(
         self,
-        user_input: dict[str, Any] | None = None,  # noqa: ARG002  # issue data
+        user_input: dict[str, Any] | None = None,  # noqa: ARG002 -- Home Assistant repair flow signature
     ) -> RepairsFlowResult:
         """Start at the confirm step (init receives the issue data)."""
         return await self.async_step_confirm()
@@ -143,7 +143,7 @@ class BlockedUpgradeFlow(_EntryFlow):
 
     async def async_step_init(
         self,
-        user_input: dict[str, Any] | None = None,  # noqa: ARG002  # issue data
+        user_input: dict[str, Any] | None = None,  # noqa: ARG002 -- Home Assistant repair flow signature
     ) -> RepairsFlowResult:
         """Route to the confirm step, or to a plain retry if nothing is ours."""
         entry = self._entry()
@@ -225,7 +225,7 @@ class BlockedUpgradeFlow(_EntryFlow):
 
 
 async def async_create_fix_flow(
-    hass: HomeAssistant,  # noqa: ARG001  # Home Assistant signature
+    hass: HomeAssistant,  # noqa: ARG001 -- required Home Assistant callback signature
     issue_id: str,
     data: dict[str, str | int | float | None] | None,
 ) -> RepairsFlow:
