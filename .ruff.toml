@@ -29,6 +29,10 @@ ignore = [
     "S105", # hardcoded-password-string; used for config key constants
 ]
 
+[lint.per-file-ignores]
+# Vendored elke27 d3b51d0 loopcheck tests; upstream pytest style uses asserts
+"tests/test_loopcheck.py" = ["ANN202", "ARG001", "D103", "PLR2004", "PT018", "S101", "TC003"]
+
 [lint.flake8-pytest-style]
 fixture-parentheses = false
 

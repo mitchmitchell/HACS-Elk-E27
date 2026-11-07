@@ -1,4 +1,3 @@
-# ruff: noqa: S101, D103, ANN202, ARG001, PT018, PLR2004, TC003
 """Tests for scripts/loopcheck.py against fixtures in tests/loopcheck."""
 
 from __future__ import annotations
