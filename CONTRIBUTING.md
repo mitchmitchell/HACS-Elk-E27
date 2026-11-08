@@ -44,7 +44,7 @@ People *love* thorough bug reports. I'm not even kidding.
 
 ## Use a Consistent Coding Style
 
-Use [Ruff](https://docs.astral.sh/ruff/) to make sure the code follows the style. Run `scripts/lint` (it runs `ruff format` and `ruff check --fix`) before opening a pull request.
+Use [Ruff](https://docs.astral.sh/ruff/) to make sure the code follows the style. Run `scripts/lint` (it runs `ruff format`, `ruff check --fix`, `mypy custom_components/elke27`, and `scripts/loopcheck.py` on that package) before opening a pull request.
 
 ## Test your code modification
 

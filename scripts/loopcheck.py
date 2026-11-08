@@ -1,4 +1,5 @@
 # https://github.com/mitchmitchell/elke27/blob/d3b51d0b9726da86f16b5293ec71cf71b9a9c107/devtools/loopcheck.py
+# vendored from elke27 d3b51d0; do not local-edit
 """Report blocking calls in event-loop modules (ELK001-005, ELK101-110).
 
 A file is a *loop* file when its name ends in ``_loop.py``, when it is listed in
