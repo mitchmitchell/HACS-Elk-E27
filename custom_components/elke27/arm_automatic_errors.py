@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from elke27_lib import PanelSnapshot, ZoneState  # noqa: TC002 -- HA entity paths use library snapshot types
@@ -24,6 +23,8 @@ from .errors import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 ARM_NOT_SENT_REASON = "the arm command was not sent (the panel is not connected)"
@@ -50,13 +51,17 @@ def _zone_placeholders(zone: ZonePhrase) -> dict[str, str]:
 
 
 def _translated_error(key: str, placeholders: dict[str, str]) -> HomeAssistantError:
-    return homeassistant_error(key, translation_placeholders=placeholders)
+    return homeassistant_error(
+        translation_key=key, translation_placeholders=placeholders
+    )
 
 
 def _translated_validation_error(
     key: str, placeholders: dict[str, str]
 ) -> ServiceValidationError:
-    return service_validation_error(key, translation_placeholders=placeholders)
+    return service_validation_error(
+        translation_key=key, translation_placeholders=placeholders
+    )
 
 
 def arm_automatic_not_armed_error(

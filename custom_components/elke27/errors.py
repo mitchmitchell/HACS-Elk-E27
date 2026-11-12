@@ -88,9 +88,8 @@ _PIN_REQUIRED: dict[PinAction, str] = {
 
 
 def homeassistant_error(
-    translation_key: str,
-    /,
     *,
+    translation_key: str,
     translation_placeholders: dict[str, str] | None = None,
 ) -> HomeAssistantError:
     """Build a translated HomeAssistantError for this integration."""
@@ -104,9 +103,8 @@ def homeassistant_error(
 
 
 def service_validation_error(
-    translation_key: str,
-    /,
     *,
+    translation_key: str,
     translation_placeholders: dict[str, str] | None = None,
 ) -> ServiceValidationError:
     """Build a translated ServiceValidationError for this integration."""
@@ -122,28 +120,28 @@ def service_validation_error(
 def pin_required_error(action: PinAction | None = None) -> ServiceValidationError:
     """Return the error when the panel requires a user code for an action."""
     if action is not None:
-        return service_validation_error(_PIN_REQUIRED[action])
-    return service_validation_error("pin_required_fallback")
+        return service_validation_error(translation_key=_PIN_REQUIRED[action])
+    return service_validation_error(translation_key="pin_required_fallback")
 
 
 def code_not_numeric_error() -> ServiceValidationError:
     """Return the error for a non-numeric user code."""
-    return service_validation_error("code_not_numeric")
+    return service_validation_error(translation_key="code_not_numeric")
 
 
 def code_all_zero_error() -> ServiceValidationError:
     """Return the error for an all-zero user code."""
-    return service_validation_error("code_all_zero")
+    return service_validation_error(translation_key="code_all_zero")
 
 
 def arm_mode_not_supported_error() -> HomeAssistantError:
     """Return the error for an unsupported arming mode."""
-    return homeassistant_error("arm_mode_not_supported")
+    return homeassistant_error(translation_key="arm_mode_not_supported")
 
 
 def arm_mode_not_supported_validation() -> ServiceValidationError:
     """Return the service validation error for an unsupported arming mode."""
-    return service_validation_error("arm_mode_not_supported")
+    return service_validation_error(translation_key="arm_mode_not_supported")
 
 
 def panel_error_code(err: BaseException | None) -> int | None:
@@ -187,10 +185,10 @@ def is_connection_error(err: BaseException) -> bool:
 def command_homeassistant_error(err: BaseException) -> HomeAssistantError:
     """Return a translated HomeAssistantError for a failed panel command."""
     if is_timeout_error(err):
-        return homeassistant_error("command_timeout")
+        return homeassistant_error(translation_key="command_timeout")
     if is_connection_error(err):
-        return homeassistant_error("command_connection_lost")
-    return homeassistant_error("panel_error")
+        return homeassistant_error(translation_key="command_connection_lost")
+    return homeassistant_error(translation_key="panel_error")
 
 
 def command_error(err: BaseException) -> HomeAssistantError | ServiceValidationError:
@@ -204,7 +202,7 @@ def command_error(err: BaseException) -> HomeAssistantError | ServiceValidationE
     """
     key = user_refusal_key(err)
     if key is not None:
-        return service_validation_error(key)
+        return service_validation_error(translation_key=key)
     return command_homeassistant_error(err)
 
 

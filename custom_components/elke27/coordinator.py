@@ -587,7 +587,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """
         client = self._client
         if client is None:
-            raise homeassistant_error("barrier_not_connected")
+            raise homeassistant_error(translation_key="barrier_not_connected")
         try:
             await client.async_set_barrier(barrier_id, open=open_)
         except AUTH_ERRORS as err:
@@ -599,9 +599,13 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._note_command_error(err)
             if _is_outcome_unknown(err):
                 await self.async_refresh_barrier(barrier_id)
-                raise homeassistant_error("barrier_outcome_unknown") from err
+                raise homeassistant_error(
+                    translation_key="barrier_outcome_unknown"
+                ) from err
             if _is_permission_error(err):
-                raise homeassistant_error("barrier_permission_denied") from err
+                raise homeassistant_error(
+                    translation_key="barrier_permission_denied"
+                ) from err
             raise command_homeassistant_error(err) from err
         await self.async_refresh_barrier(barrier_id)
 
@@ -951,7 +955,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 _LOGGER.warning("Command %s failed: %s", command_key, result.error)
                 raise command_homeassistant_error(result.error) from result.error
             _LOGGER.warning("Command %s was not accepted by the panel", command_key)
-            raise homeassistant_error(NOT_ACCEPTED_TRANSLATION_KEY)
+            raise homeassistant_error(translation_key=NOT_ACCEPTED_TRANSLATION_KEY)
         return True
 
     def _note_command_error(self, err: BaseException) -> None:
@@ -976,7 +980,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Return the connected client or raise."""
         client = self._client
         if client is None:
-            raise homeassistant_error(NOT_CONNECTED_TRANSLATION_KEY)
+            raise homeassistant_error(translation_key=NOT_CONNECTED_TRANSLATION_KEY)
         return client
 
     async def async_arm_area(

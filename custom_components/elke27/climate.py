@@ -218,7 +218,7 @@ class Elke27Thermostat(
         """Set a new HVAC mode."""
         mode = _HVAC_TO_TSTAT_MODE.get(hvac_mode)
         if mode is None:
-            raise homeassistant_error("hvac_mode_not_supported")
+            raise homeassistant_error(translation_key="hvac_mode_not_supported")
         try:
             sent = await self.coordinator.async_set_tstat_status(
                 self._tstat_id, mode=mode
@@ -232,7 +232,7 @@ class Elke27Thermostat(
         """Set a new fan mode."""
         value = _FAN_TO_TSTAT_MODE.get(fan_mode)
         if value is None:
-            raise homeassistant_error("fan_mode_not_supported")
+            raise homeassistant_error(translation_key="fan_mode_not_supported")
         try:
             sent = await self.coordinator.async_set_tstat_status(
                 self._tstat_id, fan_mode=value
@@ -258,7 +258,7 @@ class Elke27Thermostat(
                 cool_setpoint = float(high)
 
         if heat_setpoint is None and cool_setpoint is None:
-            raise homeassistant_error("temperature_required")
+            raise homeassistant_error(translation_key="temperature_required")
 
         try:
             sent = await self.coordinator.async_set_tstat_status(

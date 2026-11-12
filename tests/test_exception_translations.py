@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import ast
 from collections import defaultdict
-from collections.abc import Callable
 import dataclasses
 import json
 from pathlib import Path
 import re
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from elke27_lib import AreaState, PanelSnapshot, ZoneState
 import pytest
@@ -24,6 +24,9 @@ from custom_components.elke27.arm_automatic_errors import (
     arm_automatic_uncertain_error,
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "elke27"
@@ -108,11 +111,15 @@ def _literal_translation_key(node: ast.expr | None) -> str | None:
         return None
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
-    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-        if node.value.id == "errors" and hasattr(errors, node.attr):
-            value = getattr(errors, node.attr)
-            if isinstance(value, str):
-                return value
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "errors"
+        and hasattr(errors, node.attr)
+    ):
+        value = getattr(errors, node.attr)
+        if isinstance(value, str):
+            return value
     return None
 
 
@@ -129,6 +136,13 @@ def _allowed_translation_key_arg(node: ast.expr | None) -> bool:
     if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
         return node.value.id == "_ENTITY_INVALID_KEY"
     return False
+
+
+def _translation_key_keyword(call: ast.Call) -> ast.expr | None:
+    for kw in call.keywords:
+        if kw.arg == "translation_key":
+            return kw.value
+    return None
 
 
 def _placeholder_keys_from_dict(node: ast.expr | None) -> set[str] | None:
@@ -153,12 +167,15 @@ def _collect_literal_helper_calls(
         if not isinstance(node, ast.Call):
             continue
         name = _call_name(node)
-        if name not in HELPER_NAMES or not node.args:
+        if name not in HELPER_NAMES:
             continue
-        key_arg = node.args[0]
+        key_arg = _translation_key_keyword(node)
+        if key_arg is None:
+            continue
         if isinstance(key_arg, ast.Subscript):
-            for entity_key in ENTITY_INVALID_KEYS:
-                sites.append((node.lineno, entity_key, set()))
+            sites.extend(
+                (node.lineno, entity_key, set()) for entity_key in ENTITY_INVALID_KEYS
+            )
             continue
         if isinstance(key_arg, ast.Name) and key_arg.id in ALLOWED_KEY_NAMES:
             key = getattr(errors, key_arg.id)
@@ -208,10 +225,16 @@ def _collect_non_literal_helper_violations(path: Path) -> list[str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if _call_name(node) not in HELPER_NAMES or not node.args:
+        if _call_name(node) not in HELPER_NAMES:
             continue
-        arg = node.args[0]
-        if _allowed_translation_key_arg(arg):
+        if node.args:
+            violations.append(f"{path}:{node.lineno} positional helper arguments")
+            continue
+        key_arg = _translation_key_keyword(node)
+        if key_arg is None:
+            violations.append(f"{path}:{node.lineno} missing translation_key")
+            continue
+        if _allowed_translation_key_arg(key_arg):
             continue
         violations.append(f"{path}:{node.lineno} non-literal translation key")
     return violations
@@ -297,27 +320,6 @@ def arm_automatic_translation_samples() -> list[
         z1, z2, z3 = snap.zones[1], snap.zones[2], snap.zones[3]
         entity_name = "House" if named_area else None
 
-        def add(
-            *,
-            reason: str,
-            zone: ZoneState | None,
-            rolled_back: list[ZoneState],
-            still: list[ZoneState],
-            pin_required: bool,
-        ) -> None:
-            samples.append(
-                arm_automatic_not_armed_error(
-                    1,
-                    snap,
-                    entity_name=entity_name,
-                    reason=reason,
-                    zone=zone,
-                    rolled_back_zones=rolled_back,
-                    still_bypassed_zones=still,
-                    pin_required=pin_required,
-                )
-            )
-
         for case in (
             (ARM_NOT_SENT_REASON, None, [z1], [z2], False),
             (ARM_NOT_SENT_REASON, None, [], [z2], False),
@@ -347,12 +349,17 @@ def arm_automatic_translation_samples() -> list[
             ("pin", None, [], [], True),
         ):
             reason, zone, rolled_back, still, pin_required = case
-            add(
-                reason=reason,
-                zone=zone,
-                rolled_back=rolled_back,
-                still=still,
-                pin_required=pin_required,
+            samples.append(
+                arm_automatic_not_armed_error(
+                    1,
+                    snap,
+                    entity_name=entity_name,
+                    reason=reason,
+                    zone=zone,
+                    rolled_back_zones=rolled_back,
+                    still_bypassed_zones=still,
+                    pin_required=pin_required,
+                )
             )
 
         samples.append(
@@ -498,11 +505,11 @@ def test_exception_catalog_placeholder_parity() -> None:
         )
     for key, observed_sets in sorted(by_key.items()):
         expected = _placeholders_in_message(catalog[key]["message"])
-        for observed in observed_sets:
-            if set(observed) != expected:
-                mismatches.append(
-                    f"key={key} catalog={sorted(expected)} code={sorted(observed)}"
-                )
+        mismatches.extend(
+            f"key={key} catalog={sorted(expected)} code={sorted(observed)}"
+            for observed in observed_sets
+            if set(observed) != expected
+        )
     assert not mismatches, "\n".join(mismatches)
 
 
@@ -515,9 +522,9 @@ def test_exception_catalog_placeholder_parity() -> None:
     ],
 )
 def test_error_helpers_set_translation_metadata(
-    factory: Callable[[str], HomeAssistantError | ServiceValidationError], key: str
+    factory: Callable[..., HomeAssistantError | ServiceValidationError], key: str
 ) -> None:
     """Factory helpers attach domain and key."""
-    err = factory(key)
+    err = factory(translation_key=key)
     assert err.translation_domain == "elke27"
     assert err.translation_key == key

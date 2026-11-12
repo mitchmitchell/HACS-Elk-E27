@@ -284,5 +284,5 @@ def raise_if_not_sent(*, sent: bool, coordinator: Elke27DataUpdateCoordinator) -
     if sent:
         return
     if coordinator.client is None:
-        raise homeassistant_error(NOT_CONNECTED_TRANSLATION_KEY)
-    raise homeassistant_error(NOT_ACCEPTED_TRANSLATION_KEY)
+        raise homeassistant_error(translation_key=NOT_CONNECTED_TRANSLATION_KEY)
+    raise homeassistant_error(translation_key=NOT_ACCEPTED_TRANSLATION_KEY)
