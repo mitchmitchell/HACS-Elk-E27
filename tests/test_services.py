@@ -38,6 +38,7 @@ if _HAS_DEPS:
     )
     from test_commands import _hub, _snapshot, _two_area_snapshot
     from test_entities import _area_entity
+    from test_exception_translations import STRINGS_PATH, _exception_keys_from_strings
 
     from custom_components.elke27 import (
         arm_automatic_errors,
@@ -606,7 +607,9 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         names = ph.get("failed_area_names", "")
         assert "House" in names
         assert "Garage" in names
-        assert "not_ready" not in names
+        catalog_keys = _exception_keys_from_strings(STRINGS_PATH)
+        for key in catalog_keys:
+            assert key not in names
         assert "alarm_control_panel" not in names
         assert notes.call_count == 2
         assert hass.bus.async_fire.call_count == 2
