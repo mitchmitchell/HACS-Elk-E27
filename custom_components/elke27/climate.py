@@ -220,6 +220,23 @@ class Elke27Thermostat(
             return _TSTAT_TO_FAN_MODE.get(fan_mode.strip().upper())
         return None
 
+    if not _USE_NATIVE_CLIMATE_TEMPERATURES:
+
+        @property
+        def current_temperature(self) -> float | None:
+            """Return the current temperature."""
+            return self.native_current_temperature
+
+        @property
+        def target_temperature_low(self) -> float | None:
+            """Return the current low setpoint."""
+            return self.native_target_temperature_low
+
+        @property
+        def target_temperature_high(self) -> float | None:
+            """Return the current high setpoint."""
+            return self.native_target_temperature_high
+
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set a new HVAC mode."""
         mode = _HVAC_TO_TSTAT_MODE.get(hvac_mode)
@@ -283,16 +300,6 @@ class Elke27Thermostat(
             return
         self._missing_logged = True
         _LOGGER.debug("Thermostat %s missing from snapshot", self._tstat_id)
-
-
-if not _USE_NATIVE_CLIMATE_TEMPERATURES:
-    Elke27Thermostat.current_temperature = Elke27Thermostat.native_current_temperature
-    Elke27Thermostat.target_temperature_low = (
-        Elke27Thermostat.native_target_temperature_low
-    )
-    Elke27Thermostat.target_temperature_high = (
-        Elke27Thermostat.native_target_temperature_high
-    )
 
 
 def _get_tstat(snapshot: PanelSnapshot, tstat_id: int) -> ThermostatState | None:
