@@ -33,8 +33,9 @@ from tests.conftest import (
 
 ALARM = "alarm_control_panel.house"
 CODE = "1234"
-MISSING = "alarm_control_panel.does_not_exist"
-NON_ELKE27 = "alarm_control_panel.demo_alarm"
+# Bad targets must sort after the valid panel entity_id; the service sorts targets.
+MISSING = "alarm_control_panel.zzz_does_not_exist"
+NON_ELKE27 = "alarm_control_panel.zzz_demo_alarm"
 
 
 def _no_bypass_or_arm(client: FakeClient) -> None:
@@ -103,7 +104,7 @@ async def test_rejects_non_elke27_entity_with_valid_area(
         "alarm_control_panel",
         "demo",
         "demo:test",
-        suggested_object_id="demo_alarm",
+        suggested_object_id="zzz_demo_alarm",
     )
     two_area_client.calls.clear()
     with pytest.raises(ServiceValidationError) as err:
