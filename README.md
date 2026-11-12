@@ -221,8 +221,8 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
-| 0.3.1 | [0.5.0](https://pypi.org/project/elke27/0.5.0/) | Hardware: pending (RC); CI: 2026.10.4 (minimum 2026.10.0) | pending (RC) |
-| 0.3.0 | [0.4.0](https://pypi.org/project/elke27/0.4.0/) | Hardware: TEST HA Core 2026.10.2; CI: 2026.10.4 (minimum 2026.10.0) | Pre-release facts from PR #146 at 049fd71, not a release test of 0.3.0 (release-candidate test at the 0.3.0 commit still pending): TEST E27 panel, disarmed state verified on hardware; arm, vacation, night and triggered states verified in tests and simulator only; garage doors not hardware-tested |
+| 0.3.1 | [0.5.0](https://pypi.org/project/elke27/0.5.0/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors not hardware-tested) |
+| 0.3.0 | [0.4.0](https://pypi.org/project/elke27/0.4.0/) | Hardware: TEST HA Core 2026.10.2; CI: 2026.10.4 (minimum 2026.10.0) | Release-candidate test at `48ee195`: TEST E27 panel, disarmed state verified on hardware; arm, vacation, night and triggered states verified in tests and simulator only; garage doors waived (not hardware-tested) |
 | 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | Hardware: 2026.10.2; CI: 2026.10.2 (minimum 2026.10.0) | Tested: E27 panel, model 260, firmware 2.6.1; garage doors not hardware-tested |
 | 0.2.0 | [0.3.14](https://pypi.org/project/elke27/0.3.14/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.9 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
@@ -995,24 +995,24 @@ whole °F, so setpoints you set in °C are rounded.
 
 ### To 0.3.1
 
-Update in HACS and restart Home Assistant. No re-link, no delete and re-add. Entity IDs,
-registry IDs, areas, automations, dashboards and history are kept. Requires
-[elke27 0.5.0](https://pypi.org/project/elke27/0.5.0/), which Home Assistant installs
-for you.
+Update in HACS and restart Home Assistant. No re-link, no delete and re-add. Entity IDs
+stay the same. This release installs `elke27` 0.5.0 automatically.
+
+If you set debug logging on a library sub-logger by name (for example
+`elke27_lib.session`), use the new module names (`elke27_lib.session_thread`, and so
+on). `elke27_lib: debug` still covers all library loggers.
 
 ### To 0.3.0
 
-Update in HACS and restart Home Assistant. No re-link, no delete and re-add. Requires
-[elke27 0.4.0](https://pypi.org/project/elke27/0.4.0/), which Home Assistant installs
-for you.
+Update in HACS and restart Home Assistant. No re-link, no delete and re-add. Entity IDs
+stay the same. This release installs `elke27` 0.4.0 automatically.
 
-**Check automations that test for `disarmed`.** An area can now show `unknown` (the panel
-did not report an arm mode) or `armed_vacation` where 0.2.1 showed `disarmed`. See
-[Alarm control panel (areas)](#alarm-control-panel-areas).
+Check automations that test for `disarmed`. An area can now show `unknown` (the panel
+did not report an arm mode) or `armed_vacation` (armed in Vacation mode at the panel)
+where 0.2.1 showed `disarmed`. See [Alarm control panel (areas)](#alarm-control-panel-areas).
 
-The reconfigure flow uses the same wording as the button that opens it ("Reconfigure panel"
-instead of "Relink panel"). Failed link or relink logs one WARNING with a clear reason
-without host, port, access code or passphrase; the form keeps the access code for retry.
+Upgrading from 0.1.x still follows the 0.2.1 path first (one re-link). This release does
+not change that path.
 
 ### To 0.2.1
 

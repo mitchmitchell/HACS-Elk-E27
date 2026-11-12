@@ -10,30 +10,34 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   IDs, registry IDs, areas, automations, dashboards and history are kept. Minimum Home
   Assistant is unchanged (2026.10.0).
 - Requires `elke27` 0.5.0, which HACS installs with the update.
+- **Garage doors:** added in 0.2.1 but not yet tested on hardware; see
+  [Garage doors](README.md#garage-doors).
 
 ### Changed
 - Uses [`elke27` 0.5.0](https://github.com/mitchmitchell/elke27/releases/tag/v0.5.0) (was
   0.4.0) ([#157](https://github.com/mitchmitchell/HACS-Elk-E27/pull/157)).
-- Diagnostic downloads and library DEBUG logs redact more fields (for example access,
-  coordinates, cloud URLs and password-like keys) via the library's wider
-  `redact_for_diagnostics` ([#126](https://github.com/mitchmitchell/elke27/issues/126) in
-  elke27).
-- The library's submodule logger names changed (for example `elke27_lib.session_thread`
-  instead of `elke27_lib.session`). The integration manifest still registers `elke27_lib`;
-  **`elke27_lib: debug` in logger configuration still enables DEBUG for all library
-  loggers** under that prefix.
+- Downloaded diagnostics redact more sensitive fields. DEBUG logs no longer show
+  identity values or session wire-log bytes.
+- If you set debug logging on a library sub-logger by name (for example
+  `elke27_lib.session`), use the new module names (`elke27_lib.session_thread`, and so
+  on). `elke27_lib: debug` still covers all library loggers.
 
 ### Fixed
-- Library session teardown and reconnect after a drop ([#121](https://github.com/mitchmitchell/elke27/issues/121) in elke27).
+- Session close no longer blocks the library event loop, and a stale close cannot clear
+  a newer connection after reconnect.
 
 ### Development
-- Vendor elke27 loopcheck into `scripts/lint` ([#153](https://github.com/mitchmitchell/HACS-Elk-E27/pull/153));
-  document lint steps and vendored checker policy in CONTRIBUTING
+- Lint now runs a vendored loopcheck on `custom_components/elke27`
+  ([#153](https://github.com/mitchmitchell/HACS-Elk-E27/pull/153)). The lint steps are
+  documented in CONTRIBUTING
   ([#155](https://github.com/mitchmitchell/HACS-Elk-E27/pull/155)).
-- Dependabot: ruff 0.17.3 ([#141](https://github.com/mitchmitchell/HACS-Elk-E27/pull/141)),
-  0.17.4 ([#156](https://github.com/mitchmitchell/HACS-Elk-E27/pull/156)); mypy ≥2.4.1
-  ([#143](https://github.com/mitchmitchell/HACS-Elk-E27/pull/143)); pip ≥26.3
-  ([#152](https://github.com/mitchmitchell/HACS-Elk-E27/pull/152)).
+- Product `# noqa` comments now include a reason
+  ([#153](https://github.com/mitchmitchell/HACS-Elk-E27/pull/153)).
+- Development tools: ruff 0.17.4, mypy ≥2.4.1, pip ≥26.3
+  ([#141](https://github.com/mitchmitchell/HACS-Elk-E27/pull/141),
+  [#143](https://github.com/mitchmitchell/HACS-Elk-E27/pull/143),
+  [#152](https://github.com/mitchmitchell/HACS-Elk-E27/pull/152),
+  [#156](https://github.com/mitchmitchell/HACS-Elk-E27/pull/156)).
 
 ## [0.3.0] - 2026-11-04
 
