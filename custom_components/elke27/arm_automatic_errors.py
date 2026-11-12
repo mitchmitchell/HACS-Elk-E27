@@ -61,23 +61,59 @@ def arm_automatic_not_armed_error(
     pin_required: bool,
 ) -> HomeAssistantError | ServiceValidationError:
     """Return the translated error when automatic arming did not arm an area."""
-    if pin_required:
-        action: PinAction = "arm"
-        return pin_required_error(action)
-
     area = area_automatic_phrase(area_id, snapshot, entity_name=entity_name)
     zone_phrase = zone_automatic_phrase(zone) if zone is not None else None
     cleared = zone_number_list(list(rolled_back_zones))
     still = zone_number_list(list(still_bypassed_zones))
     placeholders = _area_placeholders(area)
 
+    if pin_required:
+        if still:
+            key = _arm_key(
+                "arm_automatic_not_armed_pin_required_still_bypassed", area, None
+            )
+            ph = {**placeholders, "still_bypassed_zone_numbers": still}
+            if cleared:
+                ph["cleared_zone_numbers"] = cleared
+            return _translated_error(key, ph)
+        action: PinAction = "arm"
+        return pin_required_error(action)
+
     if reason == ARM_NOT_SENT_REASON:
-        key = _arm_key("arm_automatic_not_armed_disconnected", area, None)
-        return _translated_error(key, placeholders)
+        if still and cleared:
+            key = _arm_key(
+                "arm_automatic_not_armed_disconnected_partial_rollback", area, None
+            )
+            ph = {
+                **placeholders,
+                "cleared_zone_numbers": cleared,
+                "still_bypassed_zone_numbers": still,
+            }
+        elif still:
+            key = _arm_key(
+                "arm_automatic_not_armed_disconnected_still_bypassed", area, None
+            )
+            ph = {**placeholders, "still_bypassed_zone_numbers": still}
+        elif cleared:
+            key = _arm_key(
+                "arm_automatic_not_armed_disconnected_rolled_back", area, None
+            )
+            ph = {**placeholders, "cleared_zone_numbers": cleared}
+        else:
+            key = _arm_key("arm_automatic_not_armed_disconnected", area, None)
+            ph = placeholders
+        return _translated_error(key, ph)
 
     if zone_phrase is not None and reason == "bypass was not acknowledged.":
-        key = _arm_key("arm_automatic_not_armed_bypass_unconfirmed", area, zone_phrase)
+        base = "arm_automatic_not_armed_bypass_unconfirmed"
+        if still:
+            base += "_still_bypassed"
+        key = _arm_key(base, area, zone_phrase)
         ph = {**placeholders, **_zone_placeholders(zone_phrase)}
+        if still:
+            ph["still_bypassed_zone_numbers"] = still
+        if cleared:
+            ph["cleared_zone_numbers"] = cleared
         return _translated_error(key, ph)
 
     if zone_phrase is not None:
