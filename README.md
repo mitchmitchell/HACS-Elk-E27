@@ -221,7 +221,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
-| 0.3.1 | [0.5.0](https://pypi.org/project/elke27/0.5.0/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors not hardware-tested) |
+| 0.3.1 | [0.5.0](https://pypi.org/project/elke27/0.5.0/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors waived, not hardware-tested) |
 | 0.3.0 | [0.4.0](https://pypi.org/project/elke27/0.4.0/) | Hardware: TEST HA Core 2026.10.2; CI: 2026.10.4 (minimum 2026.10.0) | Release-candidate test at `48ee195`: TEST E27 panel, disarmed state verified on hardware; arm, vacation, night and triggered states verified in tests and simulator only; garage doors waived (not hardware-tested) |
 | 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | Hardware: 2026.10.2; CI: 2026.10.2 (minimum 2026.10.0) | Tested: E27 panel, model 260, firmware 2.6.1; garage doors not hardware-tested |
 | 0.2.0 | [0.3.14](https://pypi.org/project/elke27/0.3.14/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |

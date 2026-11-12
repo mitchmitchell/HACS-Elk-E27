@@ -11,7 +11,8 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   Assistant is unchanged (2026.10.0).
 - Requires `elke27` 0.5.0, which HACS installs with the update.
 - **Garage doors:** added in 0.2.1 but not yet tested on hardware; see
-  [Garage doors](README.md#garage-doors).
+  [Garage doors](README.md#garage-doors). For this release the garage hardware test was
+  waived (not a pass).
 
 ### Changed
 - Uses [`elke27` 0.5.0](https://github.com/mitchmitchell/elke27/releases/tag/v0.5.0) (was
