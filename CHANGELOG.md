@@ -8,6 +8,44 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ### Added
 - Translated exception messages for panel commands and services (`exceptions` in `strings.json`).
 
+## [0.3.1] - 2026-11-12
+
+### Upgrade
+- **Update in HACS and restart Home Assistant.** No re-link, no delete and re-add. Entity
+  IDs, registry IDs, areas, automations, dashboards and history are kept. Minimum Home
+  Assistant is unchanged (2026.10.0).
+- Requires `elke27` 0.5.0, which HACS installs with the update.
+- **Garage doors:** added in 0.2.1 but not yet tested on hardware; see
+  [Garage doors](README.md#garage-doors). For this release the garage hardware test was
+  waived (not a pass).
+
+### Changed
+- Uses [`elke27` 0.5.0](https://github.com/mitchmitchell/elke27/releases/tag/v0.5.0) (was
+  0.4.0) ([#157](https://github.com/mitchmitchell/HACS-Elk-E27/pull/157)).
+- Downloaded diagnostics redact more sensitive fields. DEBUG logs no longer show
+  identity values or session wire-log bytes.
+- If you set debug logging on a library sub-logger by name (for example
+  `elke27_lib.session`), use the new module names (`elke27_lib.session_thread`, and so
+  on). `elke27_lib: debug` still covers all library loggers.
+
+### Fixed
+- Session close no longer blocks the library event loop, and a stale close cannot clear
+  a newer connection after reconnect.
+
+### Development
+- Lint now runs a vendored loopcheck on `custom_components/elke27`
+  ([#153](https://github.com/mitchmitchell/HACS-Elk-E27/pull/153)). The lint steps are
+  documented in CONTRIBUTING
+  ([#155](https://github.com/mitchmitchell/HACS-Elk-E27/pull/155)).
+- Product `# noqa` comments now include a reason
+  ([#153](https://github.com/mitchmitchell/HACS-Elk-E27/pull/153)).
+- Development tools: ruff 0.17.4, mypy ≥2.4.1, pip ≥26.3
+  ([#141](https://github.com/mitchmitchell/HACS-Elk-E27/pull/141),
+  [#143](https://github.com/mitchmitchell/HACS-Elk-E27/pull/143),
+  [#152](https://github.com/mitchmitchell/HACS-Elk-E27/pull/152),
+  [#156](https://github.com/mitchmitchell/HACS-Elk-E27/pull/156)).
+
+## [0.3.0] - 2026-11-04
 ## [0.3.0] - 2026-11-04
 
 ### Upgrade
