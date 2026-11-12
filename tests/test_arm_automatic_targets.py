@@ -1,5 +1,10 @@
 # ruff: noqa: S101, TC001, D107
-"""arm_automatic rejects bad targets before any panel command runs."""
+"""arm_automatic rejects bad targets before any panel command runs.
+
+Mixed-target tests list a valid panel with an invalid entity. Invalid ids use a
+``zzz_`` prefix so they sort after ``alarm_control_panel.house``; the handler
+sorts entity ids before validating every target and arming.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +38,6 @@ from tests.conftest import (
 
 ALARM = "alarm_control_panel.house"
 CODE = "1234"
-# Bad targets must sort after the valid panel entity_id; the service sorts targets.
 MISSING = "alarm_control_panel.zzz_does_not_exist"
 NON_ELKE27 = "alarm_control_panel.zzz_demo_alarm"
 
