@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 from importlib.metadata import version as package_version
+from pathlib import Path
 
 from elke27_lib import ArmMode, CommandResult
 from elke27_lib.client import Result
@@ -137,7 +139,11 @@ async def test_diagnostics_d5_fields_read_properties_only(
     assert result["fallback_refresh_count"] == 2
     assert result["last_fallback_at"] is not None
     assert result["stale_auto_refresh_count"] == 1
-    assert result["integration_version"] == "0.3.0"
+    manifest_path = (
+        Path(__file__).resolve().parents[1] / "custom_components" / "elke27" / "manifest.json"
+    )
+    expected_version = json.loads(manifest_path.read_text(encoding="utf-8"))["version"]
+    assert result["integration_version"] == expected_version
     assert result["elke27_version"] == package_version("elke27")
     assert result["area_device_count"] == len(mock_client.snapshot.areas)
 
