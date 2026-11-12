@@ -516,7 +516,8 @@ async def test_multi_area_mixed_user_refusals_combined_message(
     assert ph.get("failed_count") == "2"
     assert ph.get("total_count") == "2"
     names = ph.get("failed_area_names", "")
-    assert names
+    assert "House" in names
+    assert "Garage" in names
     assert "not_ready" not in names
     assert CODE not in str(err.value)
 
@@ -543,7 +544,8 @@ async def test_multi_area_rejected_code_and_not_ready_combined_message(
     assert ph.get("failed_count") == "2"
     assert ph.get("total_count") == "2"
     names = ph.get("failed_area_names", "")
-    assert names
+    assert "House" in names
+    assert "Garage" in names
     assert "code_rejected" not in names
     assert "not_ready" not in names
     assert CODE not in str(err.value)
