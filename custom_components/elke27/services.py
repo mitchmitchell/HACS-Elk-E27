@@ -151,7 +151,8 @@ async def _async_handle_alarm_arm_automatic(
     # does not stop the others, and areas armed earlier stay armed. Refusals
     # are never retried; within a failed area, its own bypasses are undone.
     failures: list[HomeAssistantError] = []
-    failed_ids: list[str] = []
+    failed_area_names: list[str] = []
+    registry = er.async_get(hass)
     for entity_id in entity_ids:
         try:
             await _async_arm_automatic_entity(
@@ -162,13 +163,30 @@ async def _async_handle_alarm_arm_automatic(
             )
         except HomeAssistantError as err:
             failures.append(err)
-            failed_ids.append(entity_id)
+            failed_area_names.append(
+                _arm_automatic_area_label(registry.async_get(entity_id), entity_id)
+            )
     if len(failures) == 1 or _same_user_refusal(failures):
         raise failures[0]
     if failures:
         raise arm_automatic_multi_failed_error(
-            failed_ids, failures, len(entity_ids)
+            failed_area_names,
+            len(failures),
+            len(entity_ids),
         ) from failures[0]
+
+
+def _arm_automatic_area_label(
+    entity_entry: er.RegistryEntry | None, entity_id: str
+) -> str:
+    """Return the user-facing label for an alarm area entity."""
+    if entity_entry is None:
+        return entity_id
+    if entity_entry.name:
+        return entity_entry.name
+    if entity_entry.original_name:
+        return entity_entry.original_name
+    return entity_id
 
 
 def _same_user_refusal(failures: list[HomeAssistantError]) -> bool:
