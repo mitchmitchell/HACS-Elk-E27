@@ -235,7 +235,12 @@ def area_is_armed(snapshot: PanelSnapshot | None, area_id: int) -> bool:
 
 
 def is_already_armed_refusal(err: BaseException) -> bool:
-    """Return True when the panel refused because the area is already armed."""
+    """
+    Return True when the panel refused because the area is already armed.
+
+    Panel code 11028 ends up here. Automatic arming must not roll bypasses back
+    on this path, because the area may already be armed after a stale snapshot.
+    """
     return panel_error_code(err) == PANEL_ERROR_ALREADY_ARMED
 
 

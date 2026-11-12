@@ -45,7 +45,12 @@ USER_REFUSAL_KEYS: frozenset[str] = frozenset(
 
 
 def user_refusal_key(err: BaseException | None) -> str | None:
-    """Return the translation key when the panel refused as a user error."""
+    """
+    Return the translation key when the panel refused as a user error.
+
+    Code 11028 maps to not_allowed_armed but stays out of USER_REFUSAL_KEYS;
+    automatic arming handles it through is_already_armed_refusal instead.
+    """
     code = panel_error_code(err)
     if code is None:
         return None

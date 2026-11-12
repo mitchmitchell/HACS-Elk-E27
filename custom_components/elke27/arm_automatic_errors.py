@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from elke27_lib import PanelSnapshot, ZoneState  # noqa: TC002 -- HA entity paths use library snapshot types
@@ -15,11 +16,14 @@ from .arming import (
     zone_automatic_phrase,
     zone_number_list,
 )
-from .errors import PinAction, homeassistant_error, pin_required_error
+from .errors import (
+    PinAction,
+    homeassistant_error,
+    pin_required_error,
+    service_validation_error,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 ARM_NOT_SENT_REASON = "the arm command was not sent (the panel is not connected)"
@@ -49,6 +53,12 @@ def _translated_error(key: str, placeholders: dict[str, str]) -> HomeAssistantEr
     return homeassistant_error(key, translation_placeholders=placeholders)
 
 
+def _translated_validation_error(
+    key: str, placeholders: dict[str, str]
+) -> ServiceValidationError:
+    return service_validation_error(key, translation_placeholders=placeholders)
+
+
 def arm_automatic_not_armed_error(
     area_id: int,
     snapshot: PanelSnapshot | None,
@@ -69,13 +79,23 @@ def arm_automatic_not_armed_error(
 
     if pin_required:
         if still:
-            key = _arm_key(
-                "arm_automatic_not_armed_pin_required_still_bypassed", area, None
-            )
-            ph = {**placeholders, "still_bypassed_zone_numbers": still}
             if cleared:
-                ph["cleared_zone_numbers"] = cleared
-            return _translated_error(key, ph)
+                key = _arm_key(
+                    "arm_automatic_not_armed_pin_required_still_bypassed_partial_rollback",
+                    area,
+                    None,
+                )
+                ph = {
+                    **placeholders,
+                    "cleared_zone_numbers": cleared,
+                    "still_bypassed_zone_numbers": still,
+                }
+            else:
+                key = _arm_key(
+                    "arm_automatic_not_armed_pin_required_still_bypassed", area, None
+                )
+                ph = {**placeholders, "still_bypassed_zone_numbers": still}
+            return _translated_validation_error(key, ph)
         action: PinAction = "arm"
         return pin_required_error(action)
 
@@ -105,15 +125,36 @@ def arm_automatic_not_armed_error(
         return _translated_error(key, ph)
 
     if zone_phrase is not None and reason == "bypass was not acknowledged.":
-        base = "arm_automatic_not_armed_bypass_unconfirmed"
-        if still:
-            base += "_still_bypassed"
-        key = _arm_key(base, area, zone_phrase)
-        ph = {**placeholders, **_zone_placeholders(zone_phrase)}
-        if still:
-            ph["still_bypassed_zone_numbers"] = still
-        if cleared:
-            ph["cleared_zone_numbers"] = cleared
+        if still and cleared:
+            key = _arm_key(
+                "arm_automatic_not_armed_bypass_unconfirmed_partial_rollback",
+                area,
+                zone_phrase,
+            )
+            ph = {
+                **placeholders,
+                **_zone_placeholders(zone_phrase),
+                "cleared_zone_numbers": cleared,
+                "still_bypassed_zone_numbers": still,
+            }
+        elif still:
+            key = _arm_key(
+                "arm_automatic_not_armed_bypass_unconfirmed_still_bypassed",
+                area,
+                zone_phrase,
+            )
+            ph = {
+                **placeholders,
+                **_zone_placeholders(zone_phrase),
+                "still_bypassed_zone_numbers": still,
+            }
+        else:
+            key = _arm_key(
+                "arm_automatic_not_armed_bypass_unconfirmed", area, zone_phrase
+            )
+            ph = {**placeholders, **_zone_placeholders(zone_phrase)}
+            if cleared:
+                ph["cleared_zone_numbers"] = cleared
         return _translated_error(key, ph)
 
     if zone_phrase is not None:
@@ -216,14 +257,30 @@ def arm_automatic_cancelled_error(
     return _translated_error(key, placeholders)
 
 
+def _multi_failure_detail(entity_id: str, err: HomeAssistantError) -> str:
+    key = err.translation_key
+    if key:
+        return f"{entity_id}: {key}"
+    if err.args:
+        return f"{entity_id}: {err.args[0]}"
+    return entity_id
+
+
 def arm_automatic_multi_failed_error(
-    failed_count: int, total_count: int
+    failed_ids: Sequence[str],
+    failures: Sequence[HomeAssistantError],
+    total_count: int,
 ) -> HomeAssistantError:
     """Return the translated error when several areas fail automatic arming."""
+    failure_details = "; ".join(
+        _multi_failure_detail(entity_id, err)
+        for entity_id, err in zip(failed_ids, failures, strict=True)
+    )
     key = "arm_automatic_multi_failed"
     placeholders = {
-        "failed_count": str(failed_count),
+        "failed_count": str(len(failures)),
         "total_count": str(total_count),
+        "failure_details": failure_details,
     }
     return _translated_error(key, placeholders)
 

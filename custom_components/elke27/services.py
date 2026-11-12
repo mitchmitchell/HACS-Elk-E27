@@ -145,8 +145,7 @@ async def _async_handle_alarm_arm_automatic(
 
     entity_ids = _entity_ids_from_service_call(hass, call, Platform.ALARM_CONTROL_PANEL)
     if not entity_ids:
-        msg = "no_alarm_panel_target"
-        raise service_validation_error(msg)
+        raise service_validation_error("no_alarm_panel_target")
 
     # Each area is handled on its own: a failure in one area is reported and
     # does not stop the others, and areas armed earlier stay armed. Refusals
@@ -168,7 +167,7 @@ async def _async_handle_alarm_arm_automatic(
         raise failures[0]
     if failures:
         raise arm_automatic_multi_failed_error(
-            len(failures), len(entity_ids)
+            failed_ids, failures, len(entity_ids)
         ) from failures[0]
 
 
@@ -185,8 +184,7 @@ def _config_entry_id(entity_entry: er.RegistryEntry) -> str:
     """Return the config entry id for an entity registry entry."""
     config_entry_id = entity_entry.config_entry_id
     if config_entry_id is None:
-        msg = "entity_not_linked"
-        raise service_validation_error(msg)
+        raise service_validation_error("entity_not_linked")
     return config_entry_id
 
 
@@ -597,11 +595,9 @@ def _entity_runtime_data(
 
     config_entry = hass.config_entries.async_get_entry(_config_entry_id(entity_entry))
     if config_entry is None:
-        msg = "entity_not_linked"
-        raise service_validation_error(msg)
+        raise service_validation_error("entity_not_linked")
     if config_entry.state is not ConfigEntryState.LOADED:
-        msg = "config_entry_not_loaded"
-        raise service_validation_error(msg)
+        raise service_validation_error("config_entry_not_loaded")
 
     return entity_entry, config_entry.runtime_data
 
@@ -613,8 +609,7 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
 
     entity_ids = _entity_ids_from_service_call(hass, call, Platform.BINARY_SENSOR)
     if not entity_ids:
-        msg = "no_zone_target"
-        raise service_validation_error(msg)
+        raise service_validation_error("no_zone_target")
 
     for entity_id in entity_ids:
         entity_entry, runtime_data = _entity_runtime_data(
@@ -635,8 +630,7 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                 zone_id, bypassed=bypass, pin=code
             )
         if not acknowledged:
-            msg = "zone_bypass_not_acknowledged"
-            raise homeassistant_error(msg)
+            raise homeassistant_error("zone_bypass_not_acknowledged")
 
 
 def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:
@@ -660,11 +654,14 @@ def _numeric_id_from_unique_id(unique_id: str, kind: str) -> int:
     The caller has already checked the entity's platform, so the kind
     (area or zone) is known; ``kind`` selects the invalid-entity message.
     """
-    invalid_key = "entity_invalid_area" if kind == "area" else "entity_invalid_zone"
     if ":" not in unique_id:
-        raise service_validation_error(invalid_key)
+        if kind == "area":
+            raise service_validation_error("entity_invalid_area")
+        raise service_validation_error("entity_invalid_zone")
     id_str = unique_id.rsplit(":", 1)[1]
     try:
         return int(id_str)
     except ValueError as err:
-        raise service_validation_error(invalid_key) from err
+        if kind == "area":
+            raise service_validation_error("entity_invalid_area")
+        raise service_validation_error("entity_invalid_zone") from err

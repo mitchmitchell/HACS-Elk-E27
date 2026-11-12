@@ -587,8 +587,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """
         client = self._client
         if client is None:
-            msg = "barrier_not_connected"
-            raise homeassistant_error(msg)
+            raise homeassistant_error("barrier_not_connected")
         try:
             await client.async_set_barrier(barrier_id, open=open_)
         except AUTH_ERRORS as err:
@@ -600,11 +599,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             self._note_command_error(err)
             if _is_outcome_unknown(err):
                 await self.async_refresh_barrier(barrier_id)
-                msg = "barrier_outcome_unknown"
-                raise homeassistant_error(msg) from err
+                raise homeassistant_error("barrier_outcome_unknown") from err
             if _is_permission_error(err):
-                msg = "barrier_permission_denied"
-                raise homeassistant_error(msg) from err
+                raise homeassistant_error("barrier_permission_denied") from err
             raise command_homeassistant_error(err) from err
         await self.async_refresh_barrier(barrier_id)
 
