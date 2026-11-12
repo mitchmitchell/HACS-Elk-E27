@@ -762,8 +762,10 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         assert (
             ctx.exception.translation_key
-            == "arm_automatic_not_armed_disconnected_named"
+            == "arm_automatic_not_armed_disconnected_rolled_back_named"
         )
+        ph = ctx.exception.translation_placeholders or {}
+        assert ph.get("cleared_zone_numbers") == "2, 1"
         assert runtime.coordinator.async_set_zone_bypass.await_args_list[2:] == [
             unittest.mock.call(2, bypassed=False, pin="1234"),
             unittest.mock.call(1, bypassed=False, pin="1234"),

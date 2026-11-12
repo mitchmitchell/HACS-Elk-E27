@@ -6,7 +6,7 @@ from __future__ import annotations
 import dataclasses
 from types import MappingProxyType
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from elke27_lib import PanelSnapshot
 from elke27_lib.errors import (
@@ -162,10 +162,24 @@ async def test_outcome_unknown_not_retried(
     mock_client.client.async_set_barrier.side_effect = (
         errors.Elke27CommandOutcomeUnknownError(("barrier", "set_status"))
     )
-    with pytest.raises(HomeAssistantError, match="check the door"):
+    with pytest.raises(HomeAssistantError) as ctx:
         await _call(hass, SERVICE_CLOSE_COVER)
+    assert ctx.value.translation_key == "barrier_outcome_unknown"
     mock_client.client.async_set_barrier.assert_awaited_once()
     mock_client.client.async_refresh_barrier.assert_awaited_once_with(1)
+
+
+async def test_barrier_not_connected_raises_translation_key(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """No client means a translated barrier_not_connected error, not a bare string."""
+    await _load(hass, mock_config_entry, mock_client, _barrier(1, "OPEN"))
+    mock_client.client.async_set_barrier = AsyncMock()
+    hub = mock_config_entry.runtime_data.coordinator
+    object.__setattr__(hub, "_client", None)
+    with pytest.raises(HomeAssistantError) as ctx:
+        await hub.async_set_barrier(1, open_=False)
+    assert ctx.value.translation_key == "barrier_not_connected"
 
 
 async def test_permission_refusal_message(
