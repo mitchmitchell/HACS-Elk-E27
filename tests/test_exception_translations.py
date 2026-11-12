@@ -1,4 +1,4 @@
-# ruff: noqa: S101
+# ruff: noqa: S101, TC001
 """Exception translation keys match strings.json and are used consistently."""
 
 from __future__ import annotations
@@ -33,7 +33,15 @@ COMPONENT = ROOT / "custom_components" / "elke27"
 STRINGS_PATH = COMPONENT / "strings.json"
 
 PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
-ARM_KEY_BASE_RE = re.compile(r'_arm_key\(\s*"([^"]+)"')
+ARM_KEY_BASE_RE = re.compile(r'_arm_key\(\s*"([^"]+)"', re.MULTILINE)
+WRAPPER_FUNCTION_NAMES = frozenset(
+    {
+        "homeassistant_error",
+        "service_validation_error",
+        "_translated_error",
+        "_translated_validation_error",
+    }
+)
 ENTITY_INVALID_KEYS = frozenset({"entity_invalid_area", "entity_invalid_zone"})
 TRANSLATED_EXCEPTION_CLASSES = frozenset(
     {
@@ -217,15 +225,34 @@ def _collect_translated_exception_sites(
     return sites
 
 
+def _attach_parents(tree: ast.AST) -> None:
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            child.parent = node  # type: ignore[attr-defined]
+
+
+def _in_wrapper_function(node: ast.AST) -> bool:
+    current: ast.AST | None = node
+    while current is not None:
+        if (
+            isinstance(current, ast.FunctionDef)
+            and current.name in WRAPPER_FUNCTION_NAMES
+        ):
+            return True
+        current = getattr(current, "parent", None)
+    return False
+
+
 def _collect_non_literal_helper_violations(path: Path) -> list[str]:
-    if path.name in {"arm_automatic_errors.py", "errors.py"}:
-        return []
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    _attach_parents(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         if _call_name(node) not in HELPER_NAMES:
+            continue
+        if _in_wrapper_function(node):
             continue
         if node.args:
             violations.append(f"{path}:{node.lineno} positional helper arguments")
@@ -244,10 +271,6 @@ def _arm_automatic_bases() -> set[str]:
     text = (COMPONENT / "arm_automatic_errors.py").read_text(encoding="utf-8")
     bases = set(ARM_KEY_BASE_RE.findall(text))
     bases.add("arm_automatic_multi_failed")
-    bases.add("arm_automatic_not_armed_bypass_unconfirmed")
-    bases.add("arm_automatic_not_armed_bypass_unconfirmed_still_bypassed")
-    bases.add("arm_automatic_not_armed_bypass_unconfirmed_partial_rollback")
-    bases.add("arm_automatic_not_armed_pin_required_still_bypassed_partial_rollback")
     return bases
 
 
@@ -330,9 +353,11 @@ def arm_automatic_translation_samples() -> list[
             ("nope", None, [z1], [], False),
             ("nope", None, [], [], False),
             ("bypass was not acknowledged.", z3, [z1], [z2], False),
+            ("bypass was not acknowledged.", z3, [z1], [], False),
             ("bypass was not acknowledged.", z3, [], [z2], False),
             ("bypass was not acknowledged.", z3, [], [], False),
             ("bypass was not acknowledged.", z2, [z1], [z2], False),
+            ("bypass was not acknowledged.", z2, [z1], [], False),
             ("bypass was not acknowledged.", z2, [], [z2], False),
             ("bypass was not acknowledged.", z2, [], [], False),
             ("zone", z3, [z1], [z2], False),
@@ -346,6 +371,7 @@ def arm_automatic_translation_samples() -> list[
             ("zone", z3, [], [z2], False),
             ("pin", None, [], [z2], True),
             ("pin", None, [z1], [z2], True),
+            ("pin", None, [z1], [], True),
             ("pin", None, [], [], True),
         ):
             reason, zone, rolled_back, still, pin_required = case
@@ -388,19 +414,7 @@ def arm_automatic_translation_samples() -> list[
             )
         )
 
-    samples.append(
-        arm_automatic_multi_failed_error(
-            ["alarm_control_panel.a", "alarm_control_panel.b"],
-            [
-                HomeAssistantError(
-                    translation_domain="elke27",
-                    translation_key="not_ready",
-                ),
-                HomeAssistantError("other"),
-            ],
-            2,
-        )
-    )
+    samples.append(arm_automatic_multi_failed_error(["House", "Garage"], 2, 3))
     return samples
 
 

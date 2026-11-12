@@ -119,8 +119,18 @@ def service_validation_error(
 
 def pin_required_error(action: PinAction | None = None) -> ServiceValidationError:
     """Return the error when the panel requires a user code for an action."""
-    if action is not None:
-        return service_validation_error(translation_key=_PIN_REQUIRED[action])
+    if action == "arm":
+        return service_validation_error(translation_key="pin_required_arm")
+    if action == "disarm":
+        return service_validation_error(translation_key="pin_required_disarm")
+    if action == "bypass":
+        return service_validation_error(translation_key="pin_required_bypass")
+    if action == "unlock":
+        return service_validation_error(translation_key="pin_required_unlock")
+    if action == "lock":
+        return service_validation_error(translation_key="pin_required_lock")
+    if action == "control":
+        return service_validation_error(translation_key="pin_required_control")
     return service_validation_error(translation_key="pin_required_fallback")
 
 
@@ -201,8 +211,16 @@ def command_error(err: BaseException) -> HomeAssistantError | ServiceValidationE
     HomeAssistantError. The message never includes the code.
     """
     key = user_refusal_key(err)
-    if key is not None:
-        return service_validation_error(translation_key=key)
+    if key == "code_rejected":
+        return service_validation_error(translation_key="code_rejected")
+    if key == "not_ready":
+        return service_validation_error(translation_key="not_ready")
+    if key == "not_bypassable":
+        return service_validation_error(translation_key="not_bypassable")
+    if key == "in_alarm":
+        return service_validation_error(translation_key="in_alarm")
+    if key == "not_allowed_armed":
+        return service_validation_error(translation_key="not_allowed_armed")
     return command_homeassistant_error(err)
 
 
