@@ -27,8 +27,7 @@ if _HAS_DEPS:
     )
 
     from custom_components.elke27 import _service_mode_to_arm_mode
-    from custom_components.elke27.errors import PANEL_ERROR_MESSAGE
-    from homeassistant.exceptions import HomeAssistantError
+    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
     from tests.conftest import make_coordinator
 
 
@@ -132,7 +131,7 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
         client.async_arm_area.assert_not_called()
 
     async def test_panel_rejection_reason_is_shown_and_logged(self) -> None:
-        """A panel rejection surfaces its reason and logs the panel error code."""
+        """A not-ready refusal is a translated user error; the code is logged."""
         client = _client()
         client.async_arm_area.side_effect = _PanelRejectionError()
         hub = _hub_with_client(client)
@@ -143,8 +142,8 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(HomeAssistantError) as ctx,
         ):
             await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
-        assert ctx.exception.translation_key == "panel_error"
-        assert str(ctx.exception) == PANEL_ERROR_MESSAGE
+        assert isinstance(ctx.exception, ServiceValidationError)
+        assert ctx.exception.translation_key == "not_ready"
         assert "panel error 11015" in logs.output[0]
         assert "1234" not in logs.output[0]
 
@@ -194,7 +193,6 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HomeAssistantError) as ctx:
             await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
         assert ctx.exception.translation_key == "panel_error"
-        assert str(ctx.exception) == PANEL_ERROR_MESSAGE
         client.async_execute.assert_not_called()
 
     async def test_disarm_uses_library_api(self) -> None:

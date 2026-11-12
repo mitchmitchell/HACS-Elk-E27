@@ -7,7 +7,7 @@ from collections.abc import Generator
 import dataclasses
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import create_autospec, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 from elke27_lib import LinkKeys
 from elke27_lib.client import Elke27Client
@@ -16,13 +16,16 @@ from elke27_lib.errors import (
     Elke27AuthError,
     Elke27ConnectionError,
     Elke27CryptoError,
+    Elke27Error,
+    Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27ProtocolError,
+    Elke27TimeoutError,
     InvalidCredentials,
 )
+import probatio
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-import voluptuous as vol
 
 from custom_components.elke27.config_flow import (
     CONF_ACCESS_CODE,
@@ -31,6 +34,7 @@ from custom_components.elke27.config_flow import (
     CONF_PASSPHRASE,
     CONF_RESCAN,
     CONF_SETUP_METHOD,
+    SETUP_METHOD_DISCOVER,
     SETUP_METHOD_MANUAL,
     Elke27ConfigFlow,
 )
@@ -530,6 +534,15 @@ async def test_manual_creates_entry_without_storing_codes(
     flow_client.async_disconnect.assert_awaited_once()
 
 
+def _link_slots_full() -> Elke27Error:
+    """Build the error elke27 0.3.15 raises when the client-link table is full."""
+    return Elke27Error(
+        "The panel has no free client slots.",
+        code="link_slots_full",
+        is_transient=False,
+    )
+
+
 @pytest.mark.parametrize(
     ("error", "reason"),
     [
@@ -538,6 +551,7 @@ async def test_manual_creates_entry_without_storing_codes(
         (Elke27ConnectionError("down"), "cannot_connect"),
         (Elke27LinkRequiredError("relink"), "link_required"),
         (Elke27ProtocolError("other"), "unknown"),
+        (_link_slots_full(), "no_link_slots"),
     ],
 )
 async def test_manual_errors_then_recover(
@@ -720,7 +734,7 @@ async def test_reauth_rejects_different_panel(
     assert dict(mock_config_entry.data) == old_data
 
 
-def _panel_select(schema: vol.Schema) -> SelectSelector:
+def _panel_select(schema: probatio.Schema) -> SelectSelector:
     for marker, field in schema.schema.items():
         if marker.schema == CONF_PANEL:
             assert isinstance(field, SelectSelector)
@@ -841,3 +855,296 @@ async def test_retry_after_failure_reuses_integration_id(
         for c in flow_client.async_link.await_args_list
     ]
     assert sns == ["314159265358", "314159265358"]
+
+
+def _schema_field_names(schema: probatio.Schema) -> set[str]:
+    return {marker.schema for marker in schema.schema}
+
+
+async def test_discover_empty_scan_redirects_to_manual_host(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Empty discovery skips credential-only discover and opens manual host setup."""
+    scanner = MagicMock()
+    scanner.async_scan = AsyncMock(return_value=[])
+    with patch(
+        "custom_components.elke27.config_flow.AIOELKDiscovery", return_value=scanner
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SETUP_METHOD: SETUP_METHOD_DISCOVER}
+        )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "manual"
+    assert result["errors"] == {"base": "no_panels_found"}
+    field_names = _schema_field_names(result["data_schema"])
+    assert CONF_HOST in field_names
+    assert CONF_PANEL not in field_names
+    flow_client.async_link.assert_not_awaited()
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_discover_rescan_still_empty_redirects_to_manual(
+    hass: HomeAssistant, flow_client: Any
+) -> None:
+    """Empty rescan opens manual setup and linking there can create the entry."""
+    panel_a = SimpleNamespace(
+        panel_host=HOST,
+        port=PORT,
+        panel_name="Kitchen",
+        panel_mac="2c:cf:67:ca:3b:20",
+    )
+    panel_b = SimpleNamespace(
+        panel_host=HOST_2,
+        port=PORT,
+        panel_name="Garage",
+        panel_mac="2c:cf:67:ca:3b:21",
+    )
+    scanner = MagicMock()
+    scanner.async_scan = AsyncMock(side_effect=[[panel_a, panel_b], []])
+    with patch(
+        "custom_components.elke27.config_flow.AIOELKDiscovery", return_value=scanner
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SETUP_METHOD: SETUP_METHOD_DISCOVER}
+        )
+        assert result["step_id"] == "discover"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_PANEL: CONF_RESCAN,
+                CONF_ACCESS_CODE: ACCESS_CODE,
+                CONF_PASSPHRASE: PASSPHRASE,
+            },
+        )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "manual"
+    assert result["errors"] == {"base": "no_panels_found"}
+    flow_client.async_link.assert_not_awaited()
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_HOST: HOST, CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_HOST] == HOST
+    flow_client.async_link.assert_awaited_once()
+
+
+async def test_discover_no_link_slots(hass: HomeAssistant, flow_client: Any) -> None:
+    """The discovery step shows no_link_slots, then a retry creates the entry."""
+    panel = SimpleNamespace(
+        panel_host=HOST, port=PORT, panel_name="E27", panel_mac="2c:cf:67:ca:3b:20"
+    )
+    scanner = MagicMock()
+    scanner.async_scan = AsyncMock(return_value=[panel])
+    flow_client.async_link.side_effect = _link_slots_full()
+    with patch(
+        "custom_components.elke27.config_flow.AIOELKDiscovery", return_value=scanner
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SETUP_METHOD: "discover"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "discover"
+        assert result["errors"] == {"base": "no_link_slots"}
+
+        flow_client.async_link.side_effect = None
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_reauth_no_link_slots(
+    hass: HomeAssistant, flow_client: Any, mock_config_entry: MockConfigEntry
+) -> None:
+    """Relink (reauth) shows no_link_slots, then a retry succeeds."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    flow_client.async_link.side_effect = _link_slots_full()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "no_link_slots"}
+
+    flow_client.async_link.side_effect = None
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+
+
+async def _finish_reauth(hass: HomeAssistant, flow_client: Any, flow_id: str) -> None:
+    flow_client.async_link.side_effect = None
+    flow_client.wait_ready.return_value = True
+    result = await hass.config_entries.flow.async_configure(
+        flow_id, {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+
+
+def _suggested_value(schema: probatio.Schema, name: str) -> Any:
+    for key in schema.schema:
+        if key == name:
+            return (key.description or {}).get("suggested_value")
+    raise AssertionError(name)
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "error", "reason"),
+    [
+        (Elke27AuthError("rejected"), "invalid_auth", "panel rejected the credentials"),
+        (
+            Elke27TimeoutError("slow"),
+            "cannot_connect",
+            "timed out waiting for the panel",
+        ),
+        (TimeoutError(), "cannot_connect", "timed out waiting for the panel"),
+        (Elke27ConnectionError("refused"), "cannot_connect", "connection error"),
+        (OSError("unreachable"), "cannot_connect", "connection error"),
+        (Elke27LinkRequiredError("link"), "link_required", "panel requires a new link"),
+    ],
+)
+async def test_reauth_failure_logs_reason_and_keeps_access_code(
+    hass: HomeAssistant,
+    flow_client: Any,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    side_effect: BaseException,
+    error: str,
+    reason: str,
+) -> None:
+    """A failed relink logs one reason line and re-shows the access code."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    flow_client.async_link.side_effect = side_effect
+    caplog.clear()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": error}
+    schema = result["data_schema"]
+    assert _suggested_value(schema, CONF_ACCESS_CODE) == ACCESS_CODE
+    assert _suggested_value(schema, CONF_PASSPHRASE) is None
+    lines = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "custom_components.elke27.config_flow"
+    ]
+    assert lines == [f"Elke27 link (reauth_confirm) failed: {reason}"]
+    assert all(
+        r.levelname == "WARNING"
+        for r in caplog.records
+        if r.name.startswith("custom_components.elke27")
+    )
+    assert ACCESS_CODE not in caplog.text
+    assert PASSPHRASE not in caplog.text
+    await _finish_reauth(hass, flow_client, result["flow_id"])
+
+
+async def test_reauth_not_ready_logs_reason(
+    hass: HomeAssistant,
+    flow_client: Any,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A relink whose session never becomes ready logs why."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    flow_client.wait_ready.return_value = False
+    caplog.clear()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert _suggested_value(result["data_schema"], CONF_ACCESS_CODE) == ACCESS_CODE
+    assert [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "custom_components.elke27.config_flow"
+    ] == ["Elke27 link (reauth_confirm) failed: panel did not become ready"]
+    await _finish_reauth(hass, flow_client, result["flow_id"])
+
+
+@pytest.mark.usefixtures("flow_client")
+async def test_reauth_success_logs_no_warning(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A successful relink logs no link-failure warning."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    caplog.clear()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert "Elke27 link" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "side_effect",
+    [
+        Elke27ProtocolError("panel 10.0.0.9:2101 said no"),
+        Elke27InvalidArgument("client identity rejected for 10.0.0.9"),
+    ],
+)
+async def test_reauth_unexpected_error_logs_type_only(
+    hass: HomeAssistant,
+    flow_client: Any,
+    mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    side_effect: BaseException,
+) -> None:
+    """The fallback branch logs only the exception type, never its message."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    flow_client.async_link.side_effect = side_effect
+    caplog.clear()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_ACCESS_CODE: ACCESS_CODE, CONF_PASSPHRASE: PASSPHRASE},
+    )
+    assert result["type"] is FlowResultType.FORM
+    records = [
+        r for r in caplog.records if r.name == "custom_components.elke27.config_flow"
+    ]
+    assert [r.getMessage() for r in records] == [
+        f"Elke27 link (reauth_confirm) failed: {type(side_effect).__name__}"
+    ]
+    assert records[0].levelname == "WARNING"
+    assert "10.0.0.9" not in caplog.text
+    assert ACCESS_CODE not in caplog.text
+    assert PASSPHRASE not in caplog.text
+    await _finish_reauth(hass, flow_client, result["flow_id"])

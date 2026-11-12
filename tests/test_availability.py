@@ -12,8 +12,10 @@ from elke27_lib.client import Result
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.elke27.entity import NOT_CONNECTED_MESSAGE
-from custom_components.elke27.errors import NOT_ACCEPTED_MESSAGE
+from custom_components.elke27.errors import (
+    NOT_ACCEPTED_TRANSLATION_KEY,
+    NOT_CONNECTED_TRANSLATION_KEY,
+)
 from homeassistant.const import ATTR_CODE, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -84,8 +86,7 @@ async def test_command_while_disconnected_raises(
             await getattr(entity, f"async_{service}")(code=data[ATTR_CODE])
         else:
             await getattr(entity, f"async_{service}")()
-    assert err.value.translation_key == "not_connected"
-    assert str(err.value) == NOT_CONNECTED_MESSAGE
+    assert err.value.translation_key == NOT_CONNECTED_TRANSLATION_KEY
     mock_client.client.async_arm_area.assert_not_awaited()
     mock_client.client.async_disarm_area.assert_not_awaited()
     mock_client.client.async_set_output.assert_not_awaited()
@@ -101,8 +102,7 @@ async def test_not_sent_with_client_says_not_accepted(
     entity = hass.data["entity_components"]["switch"].get_entity(SWITCH)
     with pytest.raises(HomeAssistantError) as err:
         await entity.async_turn_on()
-    assert err.value.translation_key == "not_accepted"
-    assert str(err.value) == NOT_ACCEPTED_MESSAGE
+    assert err.value.translation_key == NOT_ACCEPTED_TRANSLATION_KEY
 
 
 @pytest.mark.usefixtures("loaded")
@@ -114,5 +114,4 @@ async def test_execute_not_ok_without_error_raises_not_accepted(
     entity = hass.data["entity_components"]["lock"].get_entity(LOCK)
     with pytest.raises(HomeAssistantError) as err:
         await entity.async_lock()
-    assert err.value.translation_key == "not_accepted"
-    assert str(err.value) == NOT_ACCEPTED_MESSAGE
+    assert err.value.translation_key == NOT_ACCEPTED_TRANSLATION_KEY

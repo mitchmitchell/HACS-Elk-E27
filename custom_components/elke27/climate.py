@@ -103,13 +103,13 @@ class Elke27Thermostat(
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE_RANGE | ClimateEntityFeature.FAN_MODE
     )
-    _attr_hvac_modes = [  # noqa: RUF012
+    _attr_hvac_modes = [  # noqa: RUF012 -- class level HVAC modes list
         HVACMode.OFF,
         HVACMode.HEAT,
         HVACMode.COOL,
         HVACMode.HEAT_COOL,
     ]
-    _attr_fan_modes = [FAN_AUTO, FAN_ON]  # noqa: RUF012
+    _attr_fan_modes = [FAN_AUTO, FAN_ON]  # noqa: RUF012 -- class level fan modes list
     _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
     _attr_min_temp = 40
     _attr_max_temp = 99
@@ -219,9 +219,7 @@ class Elke27Thermostat(
         mode = _HVAC_TO_TSTAT_MODE.get(hvac_mode)
         if mode is None:
             msg = "hvac_mode_not_supported"
-            raise homeassistant_error(
-                msg, "This thermostat doesn't support that HVAC mode."
-            )
+            raise homeassistant_error(msg)
         try:
             sent = await self.coordinator.async_set_tstat_status(
                 self._tstat_id, mode=mode
@@ -236,9 +234,7 @@ class Elke27Thermostat(
         value = _FAN_TO_TSTAT_MODE.get(fan_mode)
         if value is None:
             msg = "fan_mode_not_supported"
-            raise homeassistant_error(
-                msg, "This thermostat doesn't support that fan mode."
-            )
+            raise homeassistant_error(msg)
         try:
             sent = await self.coordinator.async_set_tstat_status(
                 self._tstat_id, fan_mode=value
@@ -265,7 +261,7 @@ class Elke27Thermostat(
 
         if heat_setpoint is None and cool_setpoint is None:
             msg = "temperature_required"
-            raise homeassistant_error(msg, "Set a target temperature.")
+            raise homeassistant_error(msg)
 
         try:
             sent = await self.coordinator.async_set_tstat_status(

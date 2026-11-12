@@ -27,52 +27,31 @@ from homeassistant.exceptions import (
 
 from .const import DOMAIN
 
-NOT_ACCEPTED_MESSAGE = (
-    "The panel didn't accept the command. Check that the area is ready, then try again."
-)
+NOT_ACCEPTED_TRANSLATION_KEY = "not_accepted"
+NOT_CONNECTED_TRANSLATION_KEY = "not_connected"
 
+PANEL_ERROR_CODES_REJECTED: frozenset[int] = frozenset({11004, 11008, 11037, 11038})
 
-PANEL_ERROR_CODE_REJECTED = 11008
-
-
-CODE_REJECTED_MESSAGE = (
-    "The panel rejected your user code. Check the user code and that it's allowed "
-    "for this area."
-)
-
-
-TIMEOUT_MESSAGE = (
-    "The panel didn't respond in time. Check the panel to see if the command worked."
-)
-
-
-CONNECTION_MESSAGE = (
-    "The connection to the panel dropped. Check the panel to see if the command worked."
-)
-
-
-NOT_CONNECTED_MESSAGE = (
-    "The panel isn't connected. The command wasn't sent. "
-    "Check its network connection, then try again."
-)
-
-
-PANEL_ERROR_MESSAGE = (
-    "The panel couldn't complete the command. Try again. "
-    "If it keeps happening, check the panel."
-)
-
-
-PinAction = Literal["arm", "disarm", "bypass", "unlock", "lock", "control"]
-
-_PIN_REQUIRED: dict[PinAction, tuple[str, str]] = {
-    "arm": ("pin_required_arm", "Enter your user code to arm this area."),
-    "disarm": ("pin_required_disarm", "Enter your user code to disarm this area."),
-    "bypass": ("pin_required_bypass", "Enter your user code to bypass this zone."),
-    "unlock": ("pin_required_unlock", "Enter your user code to unlock this lock."),
-    "lock": ("pin_required_lock", "Enter your user code to lock this lock."),
-    "control": ("pin_required_control", "Enter your user code to control this device."),
+PANEL_ERROR_CODES_USER_CONDITION: dict[int, str] = {
+    11015: "not_ready",
+    11023: "not_bypassable",
+    11027: "in_alarm",
+    11028: "not_allowed_armed",
 }
+
+USER_REFUSAL_KEYS: frozenset[str] = frozenset(
+    {"code_rejected", "not_ready", "not_bypassable", "in_alarm"}
+)
+
+
+def user_refusal_key(err: BaseException | None) -> str | None:
+    """Return the translation key when the panel refused as a user error."""
+    code = panel_error_code(err)
+    if code is None:
+        return None
+    if code in PANEL_ERROR_CODES_REJECTED:
+        return "code_rejected"
+    return PANEL_ERROR_CODES_USER_CONDITION.get(code)
 
 
 COMMAND_ERRORS: tuple[type[Exception], ...] = (
@@ -91,9 +70,20 @@ AUTH_ERRORS: tuple[type[Exception], ...] = (
 )
 
 
+PinAction = Literal["arm", "disarm", "bypass", "unlock", "lock", "control"]
+
+_PIN_REQUIRED: dict[PinAction, str] = {
+    "arm": "pin_required_arm",
+    "disarm": "pin_required_disarm",
+    "bypass": "pin_required_bypass",
+    "unlock": "pin_required_unlock",
+    "lock": "pin_required_lock",
+    "control": "pin_required_control",
+}
+
+
 def homeassistant_error(
     translation_key: str,
-    message: str,
     /,
     *,
     translation_placeholders: dict[str, str] | None = None,
@@ -105,12 +95,11 @@ def homeassistant_error(
     }
     if translation_placeholders is not None:
         kwargs["translation_placeholders"] = translation_placeholders
-    return HomeAssistantError(message, **kwargs)
+    return HomeAssistantError(**kwargs)
 
 
 def service_validation_error(
     translation_key: str,
-    message: str,
     /,
     *,
     translation_placeholders: dict[str, str] | None = None,
@@ -122,46 +111,34 @@ def service_validation_error(
     }
     if translation_placeholders is not None:
         kwargs["translation_placeholders"] = translation_placeholders
-    return ServiceValidationError(message, **kwargs)
+    return ServiceValidationError(**kwargs)
 
 
 def pin_required_error(action: PinAction | None = None) -> ServiceValidationError:
     """Return the error when the panel requires a user code for an action."""
     if action is not None:
-        key, message = _PIN_REQUIRED[action]
-        return service_validation_error(key, message)
-    message = "Enter your user code and try again."
-    return service_validation_error("pin_required_fallback", message)
+        return service_validation_error(_PIN_REQUIRED[action])
+    return service_validation_error("pin_required_fallback")
 
 
 def code_not_numeric_error() -> ServiceValidationError:
     """Return the error for a non-numeric user code."""
-    return service_validation_error(
-        "code_not_numeric", "Your user code can only contain numbers."
-    )
+    return service_validation_error("code_not_numeric")
 
 
 def code_all_zero_error() -> ServiceValidationError:
     """Return the error for an all-zero user code."""
-    return service_validation_error(
-        "code_all_zero", "Your user code can't be all zeros."
-    )
+    return service_validation_error("code_all_zero")
 
 
 def arm_mode_not_supported_error() -> HomeAssistantError:
     """Return the error for an unsupported arming mode."""
-    return homeassistant_error(
-        "arm_mode_not_supported",
-        "This panel doesn't support that arming mode.",
-    )
+    return homeassistant_error("arm_mode_not_supported")
 
 
 def arm_mode_not_supported_validation() -> ServiceValidationError:
     """Return the service validation error for an unsupported arming mode."""
-    return service_validation_error(
-        "arm_mode_not_supported",
-        "This panel doesn't support that arming mode.",
-    )
+    return service_validation_error("arm_mode_not_supported")
 
 
 def panel_error_code(err: BaseException | None) -> int | None:
@@ -205,41 +182,45 @@ def is_connection_error(err: BaseException) -> bool:
 def command_homeassistant_error(err: BaseException) -> HomeAssistantError:
     """Return a translated HomeAssistantError for a failed panel command."""
     if is_timeout_error(err):
-        return homeassistant_error("command_timeout", TIMEOUT_MESSAGE)
+        return homeassistant_error("command_timeout")
     if is_connection_error(err):
-        return homeassistant_error("command_connection_lost", CONNECTION_MESSAGE)
-    return homeassistant_error("panel_error", PANEL_ERROR_MESSAGE)
+        return homeassistant_error("command_connection_lost")
+    return homeassistant_error("panel_error")
 
 
 def command_error(err: BaseException) -> HomeAssistantError | ServiceValidationError:
     """
     Return the Home Assistant error to raise for a failed code command.
 
-    A code the panel refused is a user error, so it becomes a translated
-    ServiceValidationError; anything else stays a HomeAssistantError. The
-    message never includes the code.
+    A code the panel refused, or an action refused because of the area or
+    zone condition (not ready, in alarm, ...), is a user error, so it becomes a
+    translated ServiceValidationError; anything else stays a
+    HomeAssistantError. The message never includes the code.
     """
-    if panel_error_code(err) == PANEL_ERROR_CODE_REJECTED:
-        return service_validation_error("code_rejected", CODE_REJECTED_MESSAGE)
+    key = user_refusal_key(err)
+    if key is not None:
+        return service_validation_error(key)
     return command_homeassistant_error(err)
 
 
 def code_rejected_error(err: BaseException) -> ServiceValidationError | None:
     """
-    Return the code_rejected error to re-raise unchanged, or None.
+    Return the user-refusal error to re-raise unchanged, or None.
 
-    Walks the cause chain: an existing code_rejected ServiceValidationError is
-    returned as is; a bare 11008 panel refusal gets one built by command_error.
+    A user refusal is a rejected code or a user-condition refusal (not ready,
+    in alarm, ...). Walks the cause chain: an existing user-refusal
+    ServiceValidationError is returned as is; a bare panel refusal gets one
+    built by command_error.
     """
     seen: BaseException | None = err
     while seen is not None:
         if (
             isinstance(seen, ServiceValidationError)
-            and seen.translation_key == "code_rejected"
+            and seen.translation_key in USER_REFUSAL_KEYS
         ):
             return seen
         seen = seen.__cause__
-    if panel_error_code(err) == PANEL_ERROR_CODE_REJECTED:
+    if user_refusal_key(err) in USER_REFUSAL_KEYS:
         rejected = command_error(err)
         rejected.__cause__ = err
         if isinstance(rejected, ServiceValidationError):

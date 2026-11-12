@@ -12,6 +12,7 @@ import asyncio
 from typing import Any
 
 from elke27_lib import AreaState, ArmMode, ZoneState
+from elke27_lib.client import Elke27Client
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -42,7 +43,7 @@ def _area(**kw: Any) -> AreaState:
     ("area_kw", "expected"),
     [
         ({"arm_mode": ArmMode.DISARMED}, "disarmed"),
-        ({"arm_mode": None}, "disarmed"),
+        ({"arm_mode": None}, "unknown"),
         ({"arm_mode": ArmMode.ARMED_AWAY}, "armed_away"),
         ({"arm_mode": ArmMode.ARMED_STAY}, "armed_home"),
         ({"arm_mode": ArmMode.ARMED_NIGHT}, "armed_night"),
@@ -60,6 +61,48 @@ async def test_alarm_state_published_to_hass(
     coordinator.async_set_updated_data(snap)
     await hass.async_block_till_done()
     assert hass.states.get(ALARM).state == expected
+
+
+@pytest.mark.parametrize(
+    ("arm_state", "expected"),
+    [
+        ("DISARMED", "disarmed"),
+        ("ARMED_STAY", "armed_home"),
+        ("ARMED_AWAY", "armed_away"),
+        ("ARMED_STAY_INST", "armed_home"),
+        ("ARMED_VACATION", "armed_vacation"),
+        ("ALARM_MEM", "unknown"),
+        ("ARMED_SOMETHING_NEW", "unknown"),
+    ],
+)
+async def test_every_doc_arm_state_string_reaches_hass(
+    hass: HomeAssistant, setup: Setup, arm_state: str, expected: str
+) -> None:
+    """Each documented ``area_get_status`` arm_state, mapped by the real library."""
+    mode = Elke27Client.arm_mode_from_panel_string(arm_state)
+    client = FakeClient(command_result(refresh=True))
+    coordinator = await setup(client)
+    snap = snapshot_with(client.snapshot, areas={1: _area(arm_mode=mode)})
+    client.snapshot = snap
+    coordinator.async_set_updated_data(snap)
+    await hass.async_block_till_done()
+    assert hass.states.get(ALARM).state == expected
+
+
+@pytest.mark.parametrize("alarm_memory", [True, False, None])
+async def test_alarm_memory_not_exposed(
+    hass: HomeAssistant, setup: Setup, *, alarm_memory: bool | None
+) -> None:
+    client = FakeClient(command_result(refresh=True))
+    coordinator = await setup(client)
+    snap = snapshot_with(
+        client.snapshot,
+        areas={1: _area(arm_mode=ArmMode.DISARMED, alarm_memory=alarm_memory)},
+    )
+    client.snapshot = snap
+    coordinator.async_set_updated_data(snap)
+    await hass.async_block_till_done()
+    assert "alarm_memory" not in hass.states.get(ALARM).attributes
 
 
 # --- Arm custom bypass (not verified) ----------------------------------------

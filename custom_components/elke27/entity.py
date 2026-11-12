@@ -2,32 +2,32 @@
 
 from __future__ import annotations
 
-import inspect
 import re
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
+    ChildDeviceInfo,
     DeviceInfo,
     format_mac,
 )
 
 from .const import CONF_PANEL_MAC, CONF_PANEL_MAC_FILLED, DOMAIN
-from .errors import NOT_ACCEPTED_MESSAGE, NOT_CONNECTED_MESSAGE, homeassistant_error
+from .errors import (
+    NOT_ACCEPTED_TRANSLATION_KEY,
+    NOT_CONNECTED_TRANSLATION_KEY,
+    homeassistant_error,
+)
 from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
     from elke27_lib import AreaState, PanelSnapshot, ZoneState
 
+    from homeassistant.core import HomeAssistant
+
     from .coordinator import Elke27DataUpdateCoordinator
     from .models import Elke27ConfigEntry
-
-# HA 2026.8+ accepts via_device_id; the pinned HA only has the identifier form.
-SUPPORTS_VIA_DEVICE_ID = (
-    "via_device_id"
-    in inspect.signature(dr.DeviceRegistry.async_get_or_create).parameters
-)
 
 _NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9 _-]")
 
@@ -135,6 +135,25 @@ def area_device_name(area_id: int, area: AreaState | None) -> str:
     return name or f"Area {area_id}"
 
 
+def registry_is_child_area_device(
+    hass: HomeAssistant, config_entry_id: str, identifier: str
+) -> bool:
+    """
+    Return True when 0.2.0 registered this area device as a child device.
+
+    0.2.0 on HA 2026.10 created area devices as child devices, and the same
+    identifiers can't be registered again as a regular device. Checked from
+    the registry each time, so areas the panel reports after setup get the
+    right layout too.
+    """
+    return (
+        dr.async_get(hass).async_get_child_device_by_identifier(
+            (DOMAIN, identifier), config_entry_id
+        )
+        is not None
+    )
+
+
 def zone_entity_name(zone_name: str, area_name: str | None) -> str:
     """
     Return the zone entity name shown under its device.
@@ -152,37 +171,33 @@ def area_device_info(
     entry: Elke27ConfigEntry,
     area_id: int,
     area: AreaState | None,
-) -> DeviceInfo:
+) -> DeviceInfo | ChildDeviceInfo:
     """
     Build device info for an area device; entity registration creates it.
 
     The panel device is registered once in async_setup_entry and its id kept on
-    the coordinator. Newer Home Assistant gets a ChildDeviceInfo (the area is a
-    logical part of the panel), else DeviceInfo with via_device_id. The pinned
-    Home Assistant has neither, so it gets the identifier form of via_device
-    (deprecated, removed in HA 2027.8, but the only option there).
+    the coordinator; the area device links to it with via_device_id. Areas that
+    0.2.0 already registered as child devices keep a ChildDeviceInfo.
     """
     key = entry_identity_key(coordinator, entry)
-    identifiers = {(DOMAIN, area_device_identifier(key, area_id))}
+    identifier = area_device_identifier(key, area_id)
+    identifiers = {(DOMAIN, identifier)}
     name = area_device_name(area_id, area)
     panel_device_id = coordinator.panel_device_id
-    child_info = getattr(dr, "ChildDeviceInfo", None)
-    if child_info is not None:
-        return child_info(  # type: ignore[no-any-return]
+    if registry_is_child_area_device(coordinator.hass, entry.entry_id, identifier):
+        # Only areas 0.2.0 already created stay child devices, so their device
+        # and entity IDs are kept; every other area uses via_device_id below.
+        return ChildDeviceInfo(
             identifiers=identifiers, name=name, parent_device_id=panel_device_id
         )
-    if SUPPORTS_VIA_DEVICE_ID:
-        return DeviceInfo(  # type: ignore[typeddict-unknown-key]
-            identifiers=identifiers,
-            name=name,
-            model=AREA_DEVICE_MODEL,
-            via_device_id=panel_device_id,
-        )
+    # via_device_id, not ChildDeviceInfo: entity IDs must stay stable
+    # (alarm_control_panel.<area>, binary_sensor.<area>_<zone>). A child device
+    # would prefix every entity ID with the panel name.
     return DeviceInfo(
         identifiers=identifiers,
         name=name,
         model=AREA_DEVICE_MODEL,
-        via_device=(DOMAIN, key),
+        via_device_id=panel_device_id,
     )
 
 
@@ -190,7 +205,7 @@ def device_info_for_zone(
     coordinator: Elke27DataUpdateCoordinator,
     entry: Elke27ConfigEntry,
     zone: ZoneState,
-) -> DeviceInfo:
+) -> DeviceInfo | ChildDeviceInfo:
     """Return the zone's area device, or the panel device when it has none."""
     snapshot = coordinator.data
     area_id = zone.area_id
@@ -259,10 +274,6 @@ def panel_display_name(
     return get_panel_field(snapshot, coordinator.panel_name, "name") or entry.title
 
 
-NOT_CONNECTED_TRANSLATION_KEY = "not_connected"
-NOT_ACCEPTED_TRANSLATION_KEY = "not_accepted"
-
-
 def raise_if_not_sent(*, sent: bool, coordinator: Elke27DataUpdateCoordinator) -> None:
     """
     Raise when the coordinator reports a command did not go through.
@@ -273,5 +284,5 @@ def raise_if_not_sent(*, sent: bool, coordinator: Elke27DataUpdateCoordinator) -
     if sent:
         return
     if coordinator.client is None:
-        raise homeassistant_error(NOT_CONNECTED_TRANSLATION_KEY, NOT_CONNECTED_MESSAGE)
-    raise homeassistant_error(NOT_ACCEPTED_TRANSLATION_KEY, NOT_ACCEPTED_MESSAGE)
+        raise homeassistant_error(NOT_CONNECTED_TRANSLATION_KEY)
+    raise homeassistant_error(NOT_ACCEPTED_TRANSLATION_KEY)

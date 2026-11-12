@@ -243,12 +243,22 @@ def _get_area(snapshot: PanelSnapshot, area_id: int) -> AreaState | None:
 
 
 def _area_state_to_ha(area: AreaState) -> AlarmControlPanelState | None:
+    """
+    Map an area snapshot to an HA alarm state.
+
+    An unknown arm mode (``None``) returns None so HA shows ``unknown``; it is never
+    reported as disarmed (https://github.com/mitchmitchell/HACS-Elk-E27/issues/145).
+    """
     if area.alarm_active:
         return AlarmControlPanelState.TRIGGERED
     if area.arming:
         return AlarmControlPanelState.ARMING
-    if area.arm_mode is None or area.arm_mode is ArmMode.DISARMED:
+    if area.arm_mode is None:
+        return None
+    if area.arm_mode is ArmMode.DISARMED:
         return AlarmControlPanelState.DISARMED
+    if area.arm_mode is ArmMode.ARMED_VACATION:
+        return AlarmControlPanelState.ARMED_VACATION
     if area.arm_mode is ArmMode.ARMED_STAY:
         return AlarmControlPanelState.ARMED_HOME
     if area.arm_mode is ArmMode.ARMED_NIGHT:

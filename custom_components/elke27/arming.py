@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from elke27_lib import ArmMode, PanelSnapshot, ZoneState
+from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
     Elke27AuthError,
     Elke27InvalidArgument,
@@ -65,7 +66,14 @@ class ZoneBypassFailedError(HomeAssistantError):
 PANEL_ERROR_ALREADY_ARMED = 11028
 
 
-_ARMED_MODES = frozenset({ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY, ArmMode.ARMED_NIGHT})
+_ARMED_MODES = frozenset(
+    {
+        ArmMode.ARMED_AWAY,
+        ArmMode.ARMED_STAY,
+        ArmMode.ARMED_NIGHT,
+        ArmMode.ARMED_VACATION,
+    }
+)
 
 
 _ZONE_STATUS_BYPASSED = frozenset("DEF")
@@ -83,19 +91,10 @@ def _strict_int(value: object) -> int | None:
 
 
 def _arm_mode_from_text(value: Any) -> ArmMode | None:
-    """Map a panel arm_state string to an ArmMode (as elke27 does)."""
+    """Map a panel arm_state string to an ArmMode with elke27's own mapping (#145)."""
     if not isinstance(value, str):
         return None
-    lowered = value.lower()
-    if "disarm" in lowered:
-        return ArmMode.DISARMED
-    if "stay" in lowered:
-        return ArmMode.ARMED_STAY
-    if "away" in lowered:
-        return ArmMode.ARMED_AWAY
-    if "night" in lowered:
-        return ArmMode.ARMED_NIGHT
-    return None
+    return Elke27Client.arm_mode_from_panel_string(value)
 
 
 def _zone_with_status_char(zone: ZoneState, ch: str) -> ZoneState:
@@ -200,7 +199,7 @@ def area_arming_from_status_reply(area_payload: Mapping[str, Any]) -> bool:
     if not isinstance(cmd_raw, str):
         return False
     cmd_mode = _arm_mode_from_text(cmd_raw)
-    if cmd_mode not in (ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY):
+    if cmd_mode not in (ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY, ArmMode.ARMED_VACATION):
         return False
     ee_timer = area_payload.get("ee_timer")
     if type(ee_timer) is not int or ee_timer <= 0:

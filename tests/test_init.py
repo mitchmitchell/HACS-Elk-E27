@@ -127,7 +127,7 @@ async def test_two_macless_entries_have_separate_devices_and_entity_ids(
     device_registry = dr.async_get(hass)
     elke27_devices = [
         device
-        for device in device_registry.devices.values()
+        for device in device_registry.devices
         if device.identifiers
         and any(identifier[0] == DOMAIN for identifier in device.identifiers)
         and device.via_device_id is None
@@ -136,7 +136,7 @@ async def test_two_macless_entries_have_separate_devices_and_entity_ids(
     # E2: each panel also has one area device linked to it.
     assert {
         device.via_device_id
-        for device in device_registry.devices.values()
+        for device in device_registry.devices
         if device.via_device_id is not None
     } == {device.id for device in elke27_devices}
     device_keys = {next(iter(device.identifiers))[1] for device in elke27_devices}
@@ -215,7 +215,7 @@ async def test_two_panels_without_mac_or_serial_use_entry_id_identity(
     device_registry = dr.async_get(hass)
     elke27_devices = [
         device
-        for device in device_registry.devices.values()
+        for device in device_registry.devices
         if device.identifiers
         and any(identifier[0] == DOMAIN for identifier in device.identifiers)
         and device.via_device_id is None
@@ -224,7 +224,7 @@ async def test_two_panels_without_mac_or_serial_use_entry_id_identity(
     # E2: each panel also has one area device linked to it.
     assert {
         device.via_device_id
-        for device in device_registry.devices.values()
+        for device in device_registry.devices
         if device.via_device_id is not None
     } == {device.id for device in elke27_devices}
     device_keys = {next(iter(device.identifiers))[1] for device in elke27_devices}
@@ -265,6 +265,8 @@ async def test_setup_and_unload(
     mock_client.client.async_disconnect.assert_awaited_once()
 
 
+# The failed unload leaves the coordinator running, stale-check timer included.
+@pytest.mark.parametrize("expected_lingering_timers", [True])
 async def test_unload_platform_failure_keeps_client(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
 ) -> None:

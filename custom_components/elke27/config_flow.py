@@ -17,11 +17,12 @@ from elke27_lib.errors import (
     Elke27CryptoError,
     Elke27DisconnectedError,
     Elke27Error,
+    Elke27InvalidArgument,
     Elke27LinkRequiredError,
     Elke27TimeoutError,
     InvalidCredentials,
 )
-import voluptuous as vol
+import probatio
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
@@ -52,6 +53,7 @@ from .identity import (
     panel_mac_from_info,
     panel_serial_tier,
 )
+from .migration import legacy_migration_pending, legacy_reauth_data_updates
 from .panel_mac import (
     async_discover_panel_mac,
     async_reauth_mac_fill,
@@ -64,6 +66,22 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Elke27LinkSlotsFullError.code (elke27 0.3.15+): the panel has no free client slot.
+LINK_SLOTS_FULL_CODE = "link_slots_full"
+
+
+def _link_error_base(err: Elke27Error) -> str:
+    """
+    Map a remaining library error to a form error.
+
+    elke27 0.3.15 (the pinned version) raises Elke27LinkSlotsFullError (code
+    "link_slots_full") when the panel's client-link table is full. This still
+    matches on the public error code; a follow-up can replace it with an
+    ``except Elke27LinkSlotsFullError`` and drop this helper and the constant.
+    """
+    return "no_link_slots" if err.code == LINK_SLOTS_FULL_CODE else "unknown"
+
+
 CONF_ACCESS_CODE = "access_code"
 CONF_PASSPHRASE = "passphrase"
 CONF_PANEL_INFO = "panel_info"
@@ -73,26 +91,26 @@ CONF_SETUP_METHOD = "setup_method"
 SETUP_METHOD_DISCOVER = "discover"
 SETUP_METHOD_MANUAL = "manual"
 
-STEP_MANUAL_DATA_SCHEMA = vol.Schema(
+STEP_MANUAL_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_HOST): cv.string,
-        vol.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
-        vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_HOST): cv.string,
+        probatio.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
     }
 )
 
-STEP_LINK_DATA_SCHEMA = vol.Schema(
+STEP_LINK_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
-        vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_ACCESS_CODE): selector({"text": {"type": "password"}}),
+        probatio.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
     }
 )
 
 STEP_REAUTH_DATA_SCHEMA = STEP_LINK_DATA_SCHEMA
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
+STEP_USER_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_SETUP_METHOD, default=SETUP_METHOD_DISCOVER): selector(
+        probatio.Required(CONF_SETUP_METHOD, default=SETUP_METHOD_DISCOVER): selector(
             {
                 "select": {
                     "options": [SETUP_METHOD_DISCOVER, SETUP_METHOD_MANUAL],
@@ -145,7 +163,9 @@ def _async_try_backfill_config_entry_unique_id(
 class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Elke27."""
 
-    VERSION = 1
+    # 2: 0.2.x identity; 0.1.x (VERSION 1) entries are migrated in place, and an
+    # older release refuses to load a VERSION 2 entry instead of mis-reading it.
+    VERSION = 2
     MINOR_VERSION = 1
 
     def __init__(self) -> None:
@@ -156,6 +176,16 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         # Drawn once per flow, so a retried link reuses the same client sn.
         self._integration_id: str | None = None
         self._discovered_panels: list[Any] | None = None
+        self._manual_bootstrap_errors: dict[str, str] | None = None
+
+    async def _async_enter_manual_from_empty_discovery(self) -> ConfigFlowResult:
+        """Leave discover when no panel target exists; manual host entry is next."""
+        self._manual_bootstrap_errors = {"base": "no_panels_found"}
+        self._discovered_panels = []
+        self._selected_panel = None
+        self._selected_host = None
+        self._selected_port = None
+        return await self.async_step_manual()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -191,6 +221,10 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 data_schema=STEP_MANUAL_DATA_SCHEMA,
             )
 
+        if self._manual_bootstrap_errors:
+            errors = {**self._manual_bootstrap_errors}
+            self._manual_bootstrap_errors = None
+
         return self.async_show_form(
             step_id="manual",
             data_schema=STEP_MANUAL_DATA_SCHEMA,
@@ -213,36 +247,21 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not self._discovered_panels or panel_idx >= len(
                     self._discovered_panels
                 ):
-                    errors["base"] = "no_panels_found"
-                    return self.async_show_form(
-                        step_id="discover",
-                        data_schema=await self._async_discovery_schema(),
-                        errors=errors,
-                    )
+                    return await self._async_enter_manual_from_empty_discovery()
                 panel = self._discovered_panels[panel_idx]
                 host = getattr(panel, "panel_host", None) or getattr(
                     panel, "host", None
                 )
                 port = getattr(panel, "port", None) or DEFAULT_PORT
                 if not host:
-                    errors["base"] = "no_panels_found"
-                    return self.async_show_form(
-                        step_id="discover",
-                        data_schema=await self._async_discovery_schema(),
-                        errors=errors,
-                    )
+                    return await self._async_enter_manual_from_empty_discovery()
                 self._selected_host = host
                 self._selected_port = int(port)
                 self._selected_panel = panel
             else:
                 data_schema = STEP_LINK_DATA_SCHEMA
             if self._selected_panel is None:
-                errors["base"] = "no_panels_found"
-                return self.async_show_form(
-                    step_id="discover",
-                    data_schema=data_schema,
-                    errors=errors,
-                )
+                return await self._async_enter_manual_from_empty_discovery()
             if self._is_panel_configured(self._selected_panel):
                 return self.async_abort(reason="already_configured")
             return await self._async_link_and_create_entry(
@@ -257,8 +276,8 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             discovery = AIOELKDiscovery()
             self._discovered_panels = self._dedupe_panels(await discovery.async_scan())
         if not self._discovered_panels:
-            errors["base"] = "no_panels_found"
-        if self._discovered_panels and len(self._discovered_panels) == 1:
+            return await self._async_enter_manual_from_empty_discovery()
+        if len(self._discovered_panels) == 1:
             panel = self._discovered_panels[0]
             self._selected_panel = panel
             self._selected_host = getattr(panel, "panel_host", None) or getattr(
@@ -289,7 +308,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         fallback = "Rescan for panels"
         return translations.get(key, fallback)
 
-    async def _async_discovery_schema(self) -> vol.Schema:
+    async def _async_discovery_schema(self) -> probatio.Schema:
         """Build the discover-step schema with a translated rescan option."""
         return self._discovery_schema(await self._async_rescan_option_label())
 
@@ -339,19 +358,30 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             self._integration_id = generate_integration_id()
         return self._integration_id
 
+    def _schema_keeping_access_code(
+        self, data_schema: probatio.Schema, access_code: str
+    ) -> probatio.Schema:
+        """Re-show the link form with the access code kept and the passphrase blank."""
+        return self.add_suggested_values_to_schema(
+            data_schema, {CONF_ACCESS_CODE: access_code}
+        )
+
     async def _async_link_and_create_entry(
         self,
         access_code: str,
         passphrase: str,
         errors: dict[str, str],
         step_id: str,
-        data_schema: vol.Schema,
+        data_schema: probatio.Schema,
         entry: ConfigEntry | None = None,
     ) -> ConfigFlowResult:
         """Link, connect, fetch snapshots, and create/update the entry."""
         host = self._selected_host
         port = self._selected_port
         if host is None or port is None:
+            _LOGGER.warning(
+                "Elke27 link (%s) not started: entry has no host/port", step_id
+            )
             errors["base"] = "unknown"
             return self.async_show_form(
                 step_id=step_id,
@@ -377,25 +407,33 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             ready = await client.wait_ready(timeout_s=READY_TIMEOUT)
             if not ready:
                 errors["base"] = "cannot_connect"
+                _log_link_failure(step_id, "panel did not become ready")
                 return self.async_show_form(
                     step_id=step_id,
-                    data_schema=data_schema,
+                    data_schema=self._schema_keeping_access_code(
+                        data_schema, access_code
+                    ),
                     errors=errors,
                 )
 
             snapshot = client.get_snapshot()
             panel_info = asdict(snapshot.panel)
             table_info = asdict(snapshot.table_info)
-        except (InvalidCredentials, Elke27AuthError, Elke27CryptoError):
+        except InvalidCredentials, Elke27AuthError, Elke27CryptoError:
             errors["base"] = "invalid_auth"
-        except (Elke27ConnectionError, Elke27TimeoutError, Elke27DisconnectedError):
+            _log_link_failure(step_id, "panel rejected the credentials")
+        except Elke27TimeoutError, TimeoutError:
             errors["base"] = "cannot_connect"
-        except (OSError, TimeoutError, E27Error):
+            _log_link_failure(step_id, "timed out waiting for the panel")
+        except Elke27ConnectionError, Elke27DisconnectedError, OSError, E27Error:
             errors["base"] = "cannot_connect"
+            _log_link_failure(step_id, "connection error")
         except Elke27LinkRequiredError:
             errors["base"] = "link_required"
-        except Elke27Error:
-            errors["base"] = "unknown"
+            _log_link_failure(step_id, "panel requires a new link")
+        except (Elke27Error, Elke27InvalidArgument) as err:
+            errors["base"] = _unexpected_link_error_base(err)
+            _log_link_failure(step_id, type(err).__name__)
         finally:
             with contextlib.suppress(OSError, TimeoutError, E27Error, Elke27Error):
                 await client.async_disconnect()
@@ -403,7 +441,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
         if errors or link_keys is None:
             return self.async_show_form(
                 step_id=step_id,
-                data_schema=data_schema,
+                data_schema=self._schema_keeping_access_code(data_schema, access_code),
                 errors=errors,
             )
 
@@ -446,6 +484,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 mac_fill = async_reauth_mac_fill(self.hass, entry, panel_mac)
                 mac_refused = not mac_fill
                 data.update(mac_fill)
+            data.update(legacy_reauth_data_updates(entry, data, stored_mac))
             panel_unique_id = config_entry_unique_id(panel_info)
             if entry.unique_id is None:
                 if (
@@ -473,6 +512,11 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                 entry,
                 data_updates=data,
                 options={**entry.options, **options},
+                reason=(
+                    "reauth_successful_upgrade"
+                    if legacy_migration_pending(entry)
+                    else "reauth_successful"
+                ),
             )
 
         unique_id = config_entry_unique_id(panel_info)
@@ -493,7 +537,7 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             result["title"] = title
         return result
 
-    def _discovery_schema(self, rescan_label: str) -> vol.Schema:
+    def _discovery_schema(self, rescan_label: str) -> probatio.Schema:
         options = [
             {
                 "value": str(idx),
@@ -507,9 +551,9 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             options.insert(0, {"value": CONF_RESCAN, "label": rescan_label})
         else:
             options = [{"value": CONF_RESCAN, "label": rescan_label}]
-        return vol.Schema(
+        return probatio.Schema(
             {
-                vol.Required(CONF_PANEL): selector(
+                probatio.Required(CONF_PANEL): selector(
                     {
                         "select": {
                             "options": options,
@@ -517,10 +561,12 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
                         }
                     }
                 ),
-                vol.Required(CONF_ACCESS_CODE): selector(
+                probatio.Required(CONF_ACCESS_CODE): selector(
                     {"text": {"type": "password"}}
                 ),
-                vol.Required(CONF_PASSPHRASE): selector({"text": {"type": "password"}}),
+                probatio.Required(CONF_PASSPHRASE): selector(
+                    {"text": {"type": "password"}}
+                ),
             }
         )
 
@@ -588,6 +634,25 @@ class Elke27ConfigFlow(ConfigFlow, domain=DOMAIN):
             ):
                 return True
         return False
+
+
+def _log_link_failure(step_id: str, reason: str) -> None:
+    """Log why a link attempt failed, without host, port, or credentials."""
+    _LOGGER.warning("Elke27 link (%s) failed: %s", step_id, reason)
+
+
+def _unexpected_link_error_base(err: Elke27Error | Elke27InvalidArgument) -> str:
+    """
+    Map any other library error from a link attempt to a form error.
+
+    The catch stays broad on purpose: host/port are checked before linking, but
+    the library also raises Elke27InvalidArgument for an empty access code or
+    passphrase or a rejected client identity, and other Elke27Error subclasses
+    can surface from connect or snapshot. Catching them keeps the form usable
+    instead of a 500. Only the exception type is logged, because its message can
+    carry host, port, or panel fields.
+    """
+    return _link_error_base(err) if isinstance(err, Elke27Error) else "unknown"
 
 
 def _create_client() -> Elke27Client:

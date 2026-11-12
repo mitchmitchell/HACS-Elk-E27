@@ -67,8 +67,8 @@ from .const import (
 from .errors import (
     AUTH_ERRORS,
     COMMAND_ERRORS,
-    NOT_ACCEPTED_MESSAGE,
-    NOT_CONNECTED_MESSAGE,
+    NOT_ACCEPTED_TRANSLATION_KEY,
+    NOT_CONNECTED_TRANSLATION_KEY,
     code_rejected_error,
     command_error,
     command_homeassistant_error,
@@ -101,7 +101,9 @@ STALE_CHECK_INTERVAL = timedelta(seconds=10)
 _monotonic = time.monotonic
 
 # Domains whose config is read during setup.
-PRIMED_DOMAINS = ("light", "lock", "tstat")
+# Barriers, like lights and locks, keep their device list outside the CSM,
+# so without this snapshot.barriers stays empty and no covers are created.
+PRIMED_DOMAINS = ("barrier", "light", "lock", "tstat")
 
 
 REFRESH_AFTER_CONNECT_ERRORS: tuple[type[Exception], ...] = (
@@ -252,7 +254,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if self._unsubscribe is not None:
             try:
                 self._unsubscribe()
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:  # noqa: BLE001 -- must catch unsubscribe failures
                 _LOGGER.debug("Event unsubscribe failed: %s", err)
             self._unsubscribe = None
         for task in (
@@ -401,7 +403,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 if self._connection_unsubscribe is not None:
                     try:
                         self._connection_unsubscribe()
-                    except Exception as err:  # noqa: BLE001
+                    except Exception as err:  # noqa: BLE001 -- must catch unsubscribe failures
                         _LOGGER.debug("Connection unsubscribe failed: %s", err)
                     self._connection_unsubscribe = None
                 await self._async_disconnect_client(client)
@@ -413,7 +415,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if self._connection_unsubscribe is not None:
             try:
                 self._connection_unsubscribe()
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:  # noqa: BLE001 -- must catch unsubscribe failures
                 _LOGGER.debug("Connection unsubscribe failed: %s", err)
             self._connection_unsubscribe = None
         client = self._client
@@ -575,6 +577,49 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             raise command_homeassistant_error(err) from err
         return True
 
+    async def async_set_barrier(self, barrier_id: int, *, open_: bool) -> None:
+        """
+        Open or close a garage door (barrier). Sent at most once, never retried.
+
+        An unknown outcome raises a HomeAssistantError telling the user to check
+        the door, then one status read resyncs the state. A panel refusal says
+        the configured user may lack automation authority.
+        """
+        client = self._client
+        if client is None:
+            msg = "barrier_not_connected"
+            raise homeassistant_error(msg)
+        try:
+            await client.async_set_barrier(barrier_id, open=open_)
+        except AUTH_ERRORS as err:
+            self.start_reauth_once()
+            _log_command_failure("Barrier", barrier_id, "set", err)
+            raise command_homeassistant_error(err) from err
+        except COMMAND_ERRORS as err:
+            _log_command_failure("Barrier", barrier_id, "set", err)
+            self._note_command_error(err)
+            if _is_outcome_unknown(err):
+                await self.async_refresh_barrier(barrier_id)
+                msg = "barrier_outcome_unknown"
+                raise homeassistant_error(msg) from err
+            if _is_permission_error(err):
+                msg = "barrier_permission_denied"
+                raise homeassistant_error(msg) from err
+            raise command_homeassistant_error(err) from err
+        await self.async_refresh_barrier(barrier_id)
+
+    async def async_refresh_barrier(self, barrier_id: int) -> None:
+        """Read one barrier's status and push the snapshot; failures are logged."""
+        client = self._client
+        if client is None:
+            return
+        try:
+            await client.async_refresh_barrier(barrier_id)
+        except COMMAND_ERRORS as err:
+            _LOGGER.debug("Barrier %s status read failed: %s", barrier_id, err)
+            return
+        self._set_snapshot(client.get_snapshot())
+
     async def async_set_light(
         self, light_id: int, *, state: bool, level: int | None = None
     ) -> bool:
@@ -689,7 +734,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             except HomeAssistantError as err:
                 rejected = code_rejected_error(err)
                 if rejected is not None and raise_code_rejected:
-                    # A rejected code is a user error: undo, then re-raise as is.
+                    # A rejected code or user-condition refusal is a user
+                    # error: undo, then re-raise as is.
                     await self.async_raise_code_rejected(
                         rejected, bypassed, pin, gate=gate
                     )
@@ -800,7 +846,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 self.hass,
                 title="Elk E27 zones still bypassed",
                 message=(
-                    "The code was rejected and these zones could not be"
+                    "The panel refused the command and these zones could not be"
                     f" un-bypassed, so they are still bypassed: zones {zone_ids}."
                     " Clear them with the zone bypass service."
                 ),
@@ -908,8 +954,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 _LOGGER.warning("Command %s failed: %s", command_key, result.error)
                 raise command_homeassistant_error(result.error) from result.error
             _LOGGER.warning("Command %s was not accepted by the panel", command_key)
-            msg = "not_accepted"
-            raise homeassistant_error(msg, NOT_ACCEPTED_MESSAGE)
+            raise homeassistant_error(NOT_ACCEPTED_TRANSLATION_KEY)
         return True
 
     def _note_command_error(self, err: BaseException) -> None:
@@ -934,8 +979,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Return the connected client or raise."""
         client = self._client
         if client is None:
-            msg = "not_connected"
-            raise homeassistant_error(msg, NOT_CONNECTED_MESSAGE)
+            raise homeassistant_error(NOT_CONNECTED_TRANSLATION_KEY)
         return client
 
     async def async_arm_area(
@@ -995,7 +1039,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             if unsubscribe is not None:
                 try:
                     unsubscribe()
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:  # noqa: BLE001 -- must catch unsubscribe failures
                     _LOGGER.debug("Typed callback unsubscribe failed: %s", err)
             self._typed_callbacks[cb] = None
 
@@ -1040,7 +1084,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         return True
 
     # D4: the three writes call the elke27 public methods with
-    # return_result=True (elke27 0.3.14 CommandResult) and return its
+    # return_result=True (elke27 CommandResult, since 0.3.14) and return its
     # status_refresh_ok. Failures raise the library's public errors.
 
     async def _async_write_arm(
@@ -1483,6 +1527,18 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Update coordinator data and track snapshot version."""
         self._snapshot_seq += 1
         self.async_set_updated_data(snapshot or PanelSnapshot.empty())
+
+
+def _is_outcome_unknown(err: BaseException) -> bool:
+    """Return True for Elke27CommandOutcomeUnknownError (elke27 0.3.14+)."""
+    return any(
+        cls.__name__ == "Elke27CommandOutcomeUnknownError" for cls in type(err).__mro__
+    )
+
+
+def _is_permission_error(err: BaseException) -> bool:
+    """Return True for a panel permission refusal."""
+    return any(cls.__name__ == "Elke27PermissionError" for cls in type(err).__mro__)
 
 
 def _log_command_failure(

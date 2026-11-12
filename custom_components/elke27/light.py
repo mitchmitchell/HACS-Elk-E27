@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from elke27_lib.errors import Elke27PinRequiredError
 
-from homeassistant.components.light import ATTR_BRIGHTNESS, LightEntity
-from homeassistant.components.light.const import ColorMode
+from homeassistant.components.light import LightEntity
+from homeassistant.components.light.const import ATTR_BRIGHTNESS, ColorMode
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import Elke27DataUpdateCoordinator
@@ -71,7 +71,7 @@ class Elke27Light(CoordinatorEntity[Elke27DataUpdateCoordinator], LightEntity):
     """Representation of an Elke27 light."""
 
     _attr_color_mode = ColorMode.BRIGHTNESS
-    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}  # noqa: RUF012
+    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}  # noqa: RUF012 -- class level color modes set
     _attr_has_entity_name = True
     _attr_translation_key = "light"
 

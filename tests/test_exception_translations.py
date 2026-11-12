@@ -11,10 +11,10 @@ import re
 import pytest
 
 from custom_components.elke27 import errors
-from custom_components.elke27.arm_automatic_errors import ARM_AUTOMATIC_KEYS
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "elke27"
+STRINGS_PATH = COMPONENT / "strings.json"
 
 HELPER_KEY_PATTERN = re.compile(
     r"(?:homeassistant_error|service_validation_error)\(\s*[\"']([a-z_0-9]+)[\"']"
@@ -31,16 +31,22 @@ def _exception_keys_from_strings(path: Path) -> set[str]:
     return set(data["exceptions"])
 
 
+def _arm_automatic_keys() -> frozenset[str]:
+    data = json.loads(STRINGS_PATH.read_text(encoding="utf-8"))
+    return frozenset(k for k in data["exceptions"] if k.startswith("arm_automatic"))
+
+
 def _keys_referenced_in_code() -> set[str]:
     keys: set[str] = set()
     for path in COMPONENT.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         keys.update(HELPER_KEY_PATTERN.findall(text))
         keys.update(SETUP_EXCEPTION_PATTERN.findall(text))
-    keys.update(ARM_AUTOMATIC_KEYS)
-    keys.update({"not_connected", "not_accepted"})
+    keys.update(_arm_automatic_keys())
     keys.update(
         {
+            errors.NOT_CONNECTED_TRANSLATION_KEY,
+            errors.NOT_ACCEPTED_TRANSLATION_KEY,
             "code_rejected",
             "code_not_numeric",
             "code_all_zero",
@@ -55,6 +61,13 @@ def _keys_referenced_in_code() -> set[str]:
             "pin_required_lock",
             "pin_required_unlock",
             "arm_mode_not_supported",
+            "not_ready",
+            "not_bypassable",
+            "in_alarm",
+            "not_allowed_armed",
+            "barrier_not_connected",
+            "barrier_outcome_unknown",
+            "barrier_permission_denied",
         }
     )
     return keys
@@ -99,30 +112,15 @@ def test_no_untranslated_ha_raises_in_custom_components() -> None:
 
 
 @pytest.mark.parametrize(
-    ("helper", "key", "message"),
+    ("factory", "key"),
     [
-        (
-            "homeassistant_error",
-            "not_connected",
-            "The panel isn't connected. The command wasn't sent.",
-        ),
-        (
-            "homeassistant_error",
-            "not_accepted",
-            "The panel didn't accept the command.",
-        ),
-        (
-            "service_validation_error",
-            "code_rejected",
-            "The panel rejected your user code.",
-        ),
+        (errors.homeassistant_error, "not_connected"),
+        (errors.homeassistant_error, "not_accepted"),
+        (errors.service_validation_error, "code_rejected"),
     ],
 )
-def test_error_helpers_set_translation_metadata(
-    helper: str, key: str, message: str
-) -> None:
-    """Factory helpers attach domain, key, and optional placeholders."""
-    factory = getattr(errors, helper)
-    err = factory(key, message)
+def test_error_helpers_set_translation_metadata(factory: object, key: str) -> None:
+    """Factory helpers attach domain and key."""
+    err = factory(key)
     assert err.translation_domain == "elke27"
     assert err.translation_key == key

@@ -38,7 +38,8 @@ async def _setup(hass: HomeAssistant, entry: MockConfigEntry) -> None:
 
 
 def _device(hass: HomeAssistant, identifier: str) -> dr.DeviceEntry | None:
-    return dr.async_get(hass).async_get_device(identifiers={(DOMAIN, identifier)})
+    devices = dr.async_get(hass).async_get_devices(identifiers={(DOMAIN, identifier)})
+    return devices[0] if devices else None
 
 
 def _with_areas(
@@ -216,8 +217,9 @@ async def test_setup_keeps_unlisted_area_device(
     assert await async_remove_config_entry_device(hass, mock_config_entry, stale)
 
 
-def _coordinator(snapshot: object) -> MagicMock:
+def _coordinator(hass: HomeAssistant, snapshot: object) -> MagicMock:
     coordinator = MagicMock()
+    coordinator.hass = hass
     coordinator.data = snapshot
     coordinator.panel_name = None
     return coordinator
@@ -231,34 +233,34 @@ def _bare_entry(entry_id: str = "entry-1") -> MagicMock:
     return entry
 
 
-def test_area_device_info_entry_id_tier() -> None:
+async def test_area_device_info_entry_id_tier(hass: HomeAssistant) -> None:
     """With no MAC or serial, area devices hang off the entry id identity."""
     snapshot = dataclasses.replace(
         panel_snapshot(), panel=dataclasses.replace(panel_snapshot().panel, mac=None)
     )
-    coordinator = _coordinator(snapshot)
+    coordinator = _coordinator(hass, snapshot)
     entry = _bare_entry()
     assert entry_identity_key(coordinator, entry) == "entry-1"
     info = area_device_info(coordinator, entry, 3, AreaState(area_id=3, name=None))
     assert info["identifiers"] == {(DOMAIN, "entry-1:area:3")}
-    assert info["via_device"] == (DOMAIN, "entry-1")
+    assert info["via_device_id"] == coordinator.panel_device_id
     assert info["name"] == "Area 3"
 
 
-def test_area_device_info_mac_tier() -> None:
-    """MAC tier key for the identifier; identifier via_device on older HA."""
-    coordinator = _coordinator(panel_snapshot())
+async def test_area_device_info_mac_tier(hass: HomeAssistant) -> None:
+    """MAC tier key for the identifier; linked by panel device id."""
+    coordinator = _coordinator(hass, panel_snapshot())
     info = area_device_info(
         coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
     )
     assert info["identifiers"] == {(DOMAIN, f"{KEY}:area:1")}
-    assert info["via_device"] == (DOMAIN, KEY)
+    assert info["via_device_id"] == coordinator.panel_device_id
     assert info["name"] == "House"
 
 
-def test_zone_device_fallbacks() -> None:
+async def test_zone_device_fallbacks(hass: HomeAssistant) -> None:
     """Zones without a known area use the panel device."""
-    coordinator = _coordinator(panel_snapshot())
+    coordinator = _coordinator(hass, panel_snapshot())
     entry = _bare_entry()
     for area_id in (None, 0, 42):
         zone = ZoneState(zone_id=1, name="Z", area_id=area_id)
@@ -355,46 +357,12 @@ async def test_cleanup_and_delete_route_through_area_has_device(
     assert calls == [1]
 
 
-def test_area_device_info_uses_via_device_id_when_supported(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """On HA with via_device_id, area devices link by the panel device id."""
-    from custom_components.elke27 import entity as entity_mod  # noqa: PLC0415
-
-    monkeypatch.setattr(entity_mod, "SUPPORTS_VIA_DEVICE_ID", True)
-    monkeypatch.delattr(entity_mod.dr, "ChildDeviceInfo", raising=False)
-    coordinator = _coordinator(panel_snapshot())
+async def test_area_device_info_links_by_panel_device_id(hass: HomeAssistant) -> None:
+    """Area devices link by the panel device id."""
+    coordinator = _coordinator(hass, panel_snapshot())
     coordinator.panel_device_id = "panel-device-id"
     info = area_device_info(
         coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
     )
     assert info["via_device_id"] == "panel-device-id"
-    assert "via_device" not in info
-
-
-def test_area_device_info_prefers_child_device_info(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When HA has ChildDeviceInfo, the area is a child of the panel device."""
-    from custom_components.elke27 import entity as entity_mod  # noqa: PLC0415
-
-    calls: list[dict[str, object]] = []
-
-    def _child(**kwargs: object) -> dict[str, object]:
-        calls.append(kwargs)
-        return dict(kwargs)
-
-    monkeypatch.setattr(entity_mod.dr, "ChildDeviceInfo", _child, raising=False)
-    coordinator = _coordinator(panel_snapshot())
-    coordinator.panel_device_id = "panel-device-id"
-    info = area_device_info(
-        coordinator, _bare_entry(), 1, AreaState(area_id=1, name="House")
-    )
-    assert calls == [
-        {
-            "identifiers": {(DOMAIN, f"{KEY}:area:1")},
-            "name": "House",
-            "parent_device_id": "panel-device-id",
-        }
-    ]
     assert "via_device" not in info

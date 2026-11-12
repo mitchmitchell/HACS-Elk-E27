@@ -1,11 +1,18 @@
 # The contents of this file is based on https://github.com/home-assistant/core/blob/dev/pyproject.toml
 
-target-version = "py313"
+target-version = "py314"
+
+extend-exclude = [
+    "scripts/loopcheck.py", # vendored from elke27 d3b51d0; do not local-edit
+    "tests/loopcheck", # intentional loopcheck rule fixtures, not product code
+]
 
 [lint]
 select = [
     "ALL",
 ]
+
+external = ["ELK"]
 
 ignore = [
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
@@ -21,6 +28,10 @@ ignore = [
     "PLR0917", # too-many-positional-arguments; same reasoning as PLR0913 above
     "S105", # hardcoded-password-string; used for config key constants
 ]
+
+[lint.per-file-ignores]
+# Vendored elke27 d3b51d0 loopcheck tests; upstream pytest style uses asserts
+"tests/test_loopcheck.py" = ["ANN202", "ARG001", "D103", "PLR2004", "PT018", "S101", "TC003"]
 
 [lint.flake8-pytest-style]
 fixture-parentheses = false

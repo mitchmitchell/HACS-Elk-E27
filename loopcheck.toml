@@ -1,0 +1,2 @@
+[tool.elke27.loopcheck]
+loop_paths = ["custom_components/elke27"]

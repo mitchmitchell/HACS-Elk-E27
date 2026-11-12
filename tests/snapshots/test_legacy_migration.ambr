@@ -1,0 +1,74 @@
+# serializer version: 1
+# name: test_diagnostics_redact_old_unique_id_base
+  dict({
+    'done_at': None,
+    'duplicates': list([
+    ]),
+    'from': '0.1.x',
+    'plan': list([
+      dict({
+        'domain': 'alarm_control_panel',
+        'kind': 'area',
+        'n': 1,
+        'old_unique_id': '**REDACTED**:area:1',
+      }),
+      dict({
+        'domain': 'binary_sensor',
+        'kind': 'zone',
+        'n': 1,
+        'old_unique_id': '**REDACTED**:zone:1',
+      }),
+      dict({
+        'domain': 'binary_sensor',
+        'kind': 'zone',
+        'n': 2,
+        'old_unique_id': '**REDACTED**:zone:2',
+      }),
+      dict({
+        'domain': 'binary_sensor',
+        'kind': 'zone',
+        'n': 3,
+        'old_unique_id': '**REDACTED**:zone:3',
+      }),
+      dict({
+        'domain': 'binary_sensor',
+        'kind': 'zone',
+        'n': 4,
+        'old_unique_id': '**REDACTED**:zone:4',
+      }),
+      dict({
+        'domain': 'binary_sensor',
+        'kind': 'zone',
+        'n': 5,
+        'old_unique_id': '**REDACTED**:zone:5',
+      }),
+      dict({
+        'domain': 'binary_sensor',
+        'kind': 'zone',
+        'n': 40,
+        'old_unique_id': '**REDACTED**:zone:40',
+      }),
+      dict({
+        'domain': 'sensor',
+        'kind': 'panel',
+        'n': 1,
+        'old_unique_id': '**REDACTED**:panel:1',
+      }),
+      dict({
+        'domain': 'sensor',
+        'kind': 'panel',
+        'n': 2,
+        'old_unique_id': '**REDACTED**:panel:2',
+      }),
+      dict({
+        'domain': 'switch',
+        'kind': 'output',
+        'n': 1,
+        'old_unique_id': '**REDACTED**:output:1',
+      }),
+    ]),
+    'skipped': list([
+    ]),
+    'state': 'pending',
+  })
+# ---

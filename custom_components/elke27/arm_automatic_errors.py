@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from elke27_lib import PanelSnapshot, ZoneState  # noqa: TC002
+from elke27_lib import PanelSnapshot, ZoneState  # noqa: TC002 -- HA entity paths use library snapshot types
 
 from .arming import (
     PIN_REQUIRED_REASON,
@@ -24,12 +22,7 @@ if TYPE_CHECKING:
 
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
-# Internal reason strings stored on failure events (not shown in translated raises).
 ARM_NOT_SENT_REASON = "the arm command was not sent (the panel is not connected)"
-
-_EXCEPTIONS: dict[str, dict[str, str]] = json.loads(
-    (Path(__file__).parent / "strings.json").read_text(encoding="utf-8")
-)["exceptions"]
 
 
 def _arm_key(base: str, area: AreaPhrase, zone: ZonePhrase | None) -> str:
@@ -53,8 +46,7 @@ def _zone_placeholders(zone: ZonePhrase) -> dict[str, str]:
 
 
 def _translated_error(key: str, placeholders: dict[str, str]) -> HomeAssistantError:
-    message = _EXCEPTIONS[key]["message"].format(**placeholders)
-    return homeassistant_error(key, message, translation_placeholders=placeholders)
+    return homeassistant_error(key, translation_placeholders=placeholders)
 
 
 def arm_automatic_not_armed_error(
@@ -69,7 +61,7 @@ def arm_automatic_not_armed_error(
     pin_required: bool,
 ) -> HomeAssistantError | ServiceValidationError:
     """Return the translated error when automatic arming did not arm an area."""
-    if pin_required or reason == PIN_REQUIRED_REASON:
+    if pin_required:
         action: PinAction = "arm"
         return pin_required_error(action)
 
@@ -83,15 +75,12 @@ def arm_automatic_not_armed_error(
         key = _arm_key("arm_automatic_not_armed_disconnected", area, None)
         return _translated_error(key, placeholders)
 
-    if zone is not None and reason == "bypass was not acknowledged.":
-        if zone_phrase is None:
-            msg = "internal error: zone state missing for bypass unconfirmed"
-            raise RuntimeError(msg)
+    if zone_phrase is not None and reason == "bypass was not acknowledged.":
         key = _arm_key("arm_automatic_not_armed_bypass_unconfirmed", area, zone_phrase)
         ph = {**placeholders, **_zone_placeholders(zone_phrase)}
         return _translated_error(key, ph)
 
-    if zone is not None and zone_phrase is not None:
+    if zone_phrase is not None:
         if still and cleared:
             key = _arm_key(
                 "arm_automatic_not_armed_zone_partial_rollback", area, zone_phrase
@@ -206,8 +195,3 @@ def arm_automatic_multi_failed_error(
 def zone_bypass_failed_pin_required(err: ZoneBypassFailedError) -> bool:
     """Return True when a bypass failure is missing a user code."""
     return err.pin_required or err.reason == PIN_REQUIRED_REASON
-
-
-ARM_AUTOMATIC_KEYS = frozenset(
-    key for key in _EXCEPTIONS if key.startswith("arm_automatic")
-)
