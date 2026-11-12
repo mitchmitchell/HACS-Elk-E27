@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 from importlib.metadata import version as package_version
+import json
 from pathlib import Path
 
 from elke27_lib import ArmMode, CommandResult
@@ -37,6 +37,10 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 from tests.conftest import ClientHarness
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_MANIFEST_PATH = _REPO_ROOT / "custom_components" / "elke27" / "manifest.json"
+_INTEGRATION_VERSION = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))["version"]
 
 
 async def test_diagnostics_without_secrets(
@@ -139,11 +143,7 @@ async def test_diagnostics_d5_fields_read_properties_only(
     assert result["fallback_refresh_count"] == 2
     assert result["last_fallback_at"] is not None
     assert result["stale_auto_refresh_count"] == 1
-    manifest_path = (
-        Path(__file__).resolve().parents[1] / "custom_components" / "elke27" / "manifest.json"
-    )
-    expected_version = json.loads(manifest_path.read_text(encoding="utf-8"))["version"]
-    assert result["integration_version"] == expected_version
+    assert result["integration_version"] == _INTEGRATION_VERSION
     assert result["elke27_version"] == package_version("elke27")
     assert result["area_device_count"] == len(mock_client.snapshot.areas)
 
