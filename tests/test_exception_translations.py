@@ -273,6 +273,7 @@ def _arm_automatic_bases() -> set[str]:
     text = (COMPONENT / "arm_automatic_errors.py").read_text(encoding="utf-8")
     bases = set(ARM_KEY_BASE_RE.findall(text))
     bases.add("arm_automatic_multi_failed")
+    bases.add("arm_automatic_multi_failed_area_unnamed")
     return bases
 
 
@@ -285,7 +286,10 @@ def _arm_base_uses_zone_variants(base: str) -> bool:
 def _expected_arm_automatic_keys() -> set[str]:
     keys: set[str] = set()
     for base in _arm_automatic_bases():
-        if base == "arm_automatic_multi_failed":
+        if base in (
+            "arm_automatic_multi_failed",
+            "arm_automatic_multi_failed_area_unnamed",
+        ):
             keys.add(base)
             continue
         if _arm_base_uses_zone_variants(base):

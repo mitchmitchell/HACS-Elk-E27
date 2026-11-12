@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from elke27_lib import PanelSnapshot, ZoneState  # noqa: TC002 -- HA entity paths use library snapshot types
 
+from homeassistant.helpers import translation
+
 from .arming import (
     PIN_REQUIRED_REASON,
     AreaPhrase,
@@ -15,6 +17,7 @@ from .arming import (
     zone_automatic_phrase,
     zone_number_list,
 )
+from .const import DOMAIN
 from .errors import (
     PinAction,
     homeassistant_error,
@@ -25,9 +28,12 @@ from .errors import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from homeassistant.core import HomeAssistant
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 ARM_NOT_SENT_REASON = "the arm command was not sent (the panel is not connected)"
+
+ARM_AUTOMATIC_MULTI_FAILED_AREA_UNNAMED = "arm_automatic_multi_failed_area_unnamed"
 
 
 def _arm_key(base: str, area: AreaPhrase, zone: ZonePhrase | None) -> str:
@@ -276,6 +282,26 @@ def arm_automatic_cancelled_error(
         return _translated_error(key, placeholders)
     key = _arm_key("arm_automatic_cancelled_bypasses", area, None)
     return _translated_error(key, placeholders)
+
+
+async def async_arm_automatic_multi_failed_area_label(
+    hass: HomeAssistant,
+    area: AreaPhrase,
+) -> str:
+    """Return one area label for the combined multi-failure summary."""
+    if area.named:
+        return area.name
+    translations = await translation.async_get_translations(
+        hass,
+        hass.config.language,
+        "exceptions",
+        integrations=[DOMAIN],
+    )
+    localize_key = (
+        f"component.{DOMAIN}.exceptions.{ARM_AUTOMATIC_MULTI_FAILED_AREA_UNNAMED}.message"
+    )
+    message = translations[localize_key]
+    return message.format(**_area_placeholders(area))
 
 
 def arm_automatic_multi_failed_error(

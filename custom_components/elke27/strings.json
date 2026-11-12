@@ -146,6 +146,9 @@
     "arm_automatic_multi_failed": {
       "message": "Automatic arming failed for {failed_count} of {total_count} areas: {failed_area_names}."
     },
+    "arm_automatic_multi_failed_area_unnamed": {
+      "message": "Area {area_number}"
+    },
     "arm_automatic_not_armed_bypass_unconfirmed_named_zone_named": {
       "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Check the zone's status, then try again."
     },

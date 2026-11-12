@@ -28,6 +28,7 @@ from .arm_automatic_errors import (
     arm_automatic_multi_failed_error,
     arm_automatic_not_armed_error,
     arm_automatic_uncertain_error,
+    async_arm_automatic_multi_failed_area_label,
     zone_bypass_failed_pin_required,
 )
 from .arming import (
@@ -165,7 +166,9 @@ async def _async_handle_alarm_arm_automatic(
             )
         except HomeAssistantError as err:
             failures.append(err)
-            failed_area_names.append(_arm_automatic_failed_area_name(hass, entity_id))
+            failed_area_names.append(
+                await _arm_automatic_failed_area_name(hass, entity_id)
+            )
     if len(failures) == 1 or _same_user_refusal(failures):
         raise failures[0]
     if failures:
@@ -184,7 +187,7 @@ def _validate_alarm_panel_targets(
         _entity_runtime_data(hass, entity_id, Platform.ALARM_CONTROL_PANEL)
 
 
-def _arm_automatic_failed_area_name(hass: HomeAssistant, entity_id: str) -> str:
+async def _arm_automatic_failed_area_name(hass: HomeAssistant, entity_id: str) -> str:
     """Return the panel area name for a multi-failure summary line."""
     try:
         entity_entry, runtime_data = _entity_runtime_data(
@@ -196,11 +199,9 @@ def _arm_automatic_failed_area_name(hass: HomeAssistant, entity_id: str) -> str:
     phrase = area_automatic_phrase(
         area_id,
         runtime_data.coordinator.get_snapshot(),
-        entity_name=None,
+        entity_name=entity_entry.name or entity_entry.original_name,
     )
-    if phrase.named:
-        return phrase.name
-    return f"Area {phrase.number}"
+    return await async_arm_automatic_multi_failed_area_label(hass, phrase)
 
 
 def _same_user_refusal(failures: list[HomeAssistantError]) -> bool:

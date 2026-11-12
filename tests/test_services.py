@@ -40,6 +40,7 @@ if _HAS_DEPS:
     from test_entities import _area_entity
 
     from custom_components.elke27 import (
+        arm_automatic_errors,
         coordinator as elke27_hub,
         services as integration,
     )
@@ -675,6 +676,59 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         assert "Garage" in names
         assert "code_rejected" not in names
         assert notes.call_count == 2
+
+    async def test_multi_failure_unnamed_areas_use_translated_labels(self) -> None:
+        """Unnamed areas in the multi-failure summary use the catalog, not Python."""
+        hass = MagicMock()
+        hass.config.language = "en"
+        snapshot = _snapshot(
+            areas={
+                1: AreaState(area_id=1, name="", ready=False),
+                2: AreaState(area_id=2, name="", ready=True),
+            },
+            zones=_two_area_snapshot().zones,
+        )
+        house = _alarm_runtime(snapshot)
+        garage = _alarm_runtime(snapshot)
+        house.coordinator.async_arm_area = AsyncMock(
+            side_effect=HomeAssistantError("busy")
+        )
+        garage.coordinator.async_arm_area = AsyncMock(
+            side_effect=HomeAssistantError("nope")
+        )
+        entities = {
+            "alarm_control_panel.a_house": (_entry("aa:bb:cc:dd:ee:ff:1"), house),
+            "alarm_control_panel.b_garage": (_entry("aa:bb:cc:dd:ee:ff:2"), garage),
+        }
+        localize = (
+            "component.elke27.exceptions."
+            "arm_automatic_multi_failed_area_unnamed.message"
+        )
+
+        async def _translations(
+            _hass: Any, _language: str, _category: str, integrations: Any = None
+        ) -> dict[str, str]:
+            return {localize: "Sector {area_number}"}
+
+        with (
+            patch.object(
+                arm_automatic_errors.translation,
+                "async_get_translations",
+                _translations,
+            ),
+            patch.object(integration.persistent_notification, "async_create"),
+            patch.object(
+                integration.er,
+                "async_get",
+                return_value=_entity_registry(entities),
+            ),
+            self.assertRaises(HomeAssistantError) as ctx,
+        ):
+            await self._run(hass, {"mode": "away", "code": "1234"}, entities)
+        names = (ctx.exception.translation_placeholders or {}).get(
+            "failed_area_names", ""
+        )
+        assert names == "Sector 1, Sector 2"
 
     def _refusal(self, panel_code: int) -> Any:
         return integration.code_rejected_error(Elke27PanelError(panel_code, "no"))
