@@ -225,13 +225,15 @@ def _collect_translated_exception_sites(
     return sites
 
 
-def _attach_parents(tree: ast.AST) -> None:
+def _parent_map(tree: ast.AST) -> dict[int, ast.AST]:
+    parents: dict[int, ast.AST] = {}
     for node in ast.walk(tree):
         for child in ast.iter_child_nodes(node):
-            child.parent = node  # type: ignore[attr-defined]
+            parents[id(child)] = node
+    return parents
 
 
-def _in_wrapper_function(node: ast.AST) -> bool:
+def _in_wrapper_function(node: ast.AST, parents: dict[int, ast.AST]) -> bool:
     current: ast.AST | None = node
     while current is not None:
         if (
@@ -239,20 +241,20 @@ def _in_wrapper_function(node: ast.AST) -> bool:
             and current.name in WRAPPER_FUNCTION_NAMES
         ):
             return True
-        current = getattr(current, "parent", None)
+        current = parents.get(id(current))
     return False
 
 
 def _collect_non_literal_helper_violations(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    _attach_parents(tree)
+    parents = _parent_map(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         if _call_name(node) not in HELPER_NAMES:
             continue
-        if _in_wrapper_function(node):
+        if _in_wrapper_function(node, parents):
             continue
         if node.args:
             violations.append(f"{path}:{node.lineno} positional helper arguments")
