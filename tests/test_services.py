@@ -62,10 +62,20 @@ _ENTITIES: contextvars.ContextVar[dict[str, tuple[Any, Any]]] = contextvars.Cont
 
 def _patch_entity_lookup(test: unittest.TestCase) -> None:
     """Patch the entity lookups for the whole test, reading _ENTITIES."""
+
+    def _validate_targets(_hass: Any, entity_ids: list[str]) -> None:
+        entities = _ENTITIES.get()
+        for entity_id in entity_ids:
+            entities[entity_id]
+
     for name, mock in (
         (
             "_entity_ids_from_service_call",
             MagicMock(side_effect=lambda *_args: sorted(_ENTITIES.get())),
+        ),
+        (
+            "_validate_alarm_panel_targets",
+            MagicMock(side_effect=_validate_targets),
         ),
         (
             "_entity_runtime_data",
@@ -584,14 +594,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             side_effect=HomeAssistantError("nope")
         )
         entities = {
-            "alarm_control_panel.a_house": (
-                _entry("aa:bb:cc:dd:ee:ff:1", name="House"),
-                house,
-            ),
-            "alarm_control_panel.b_garage": (
-                _entry("aa:bb:cc:dd:ee:ff:2", name="Garage"),
-                garage,
-            ),
+            "alarm_control_panel.a_house": (_entry("aa:bb:cc:dd:ee:ff:1"), house),
+            "alarm_control_panel.b_garage": (_entry("aa:bb:cc:dd:ee:ff:2"), garage),
         }
         with (
             patch.object(integration.persistent_notification, "async_create") as notes,
@@ -649,14 +653,8 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             side_effect=HomeAssistantError("nope")
         )
         entities = {
-            "alarm_control_panel.a_house": (
-                _entry("aa:bb:cc:dd:ee:ff:1", name="House"),
-                house,
-            ),
-            "alarm_control_panel.b_garage": (
-                _entry("aa:bb:cc:dd:ee:ff:2", name="Garage"),
-                garage,
-            ),
+            "alarm_control_panel.a_house": (_entry("aa:bb:cc:dd:ee:ff:1"), house),
+            "alarm_control_panel.b_garage": (_entry("aa:bb:cc:dd:ee:ff:2"), garage),
         }
         with (
             patch.object(integration.persistent_notification, "async_create") as notes,
