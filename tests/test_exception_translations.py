@@ -182,7 +182,8 @@ def _collect_literal_helper_calls(
             continue
         if isinstance(key_arg, ast.Subscript):
             sites.extend(
-                (node.lineno, entity_key, set()) for entity_key in ENTITY_INVALID_KEYS
+                (node.lineno, entity_key, {"entity_id"})
+                for entity_key in ENTITY_INVALID_KEYS
             )
             continue
         if isinstance(key_arg, ast.Name) and key_arg.id in ALLOWED_KEY_NAMES:
@@ -451,10 +452,14 @@ def _placeholder_observations() -> dict[str, set[frozenset[str]]]:
         COMMAND_ERROR_KEYS
         | PIN_ACTION_KEYS
         | STATIC_EXCEPTION_KEYS
-        | ENTITY_INVALID_KEYS
         | LEGACY_MIGRATION_EXCEPTION_KEYS
     ):
         record(key, set())
+    record("entity_invalid_area", {"entity_id"})
+    record("entity_invalid_zone", {"entity_id"})
+    record("entity_not_linked", {"entity_id"})
+    record("config_entry_not_loaded", {"entity_id"})
+    record("arm_automatic_multi_failed_area_unnamed", {"area_number"})
 
     return by_key
 

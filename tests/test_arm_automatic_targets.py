@@ -91,6 +91,7 @@ async def test_rejects_missing_entity_with_valid_area(
             blocking=True,
         )
     assert err.value.translation_key == "entity_invalid_area"
+    assert (err.value.translation_placeholders or {})["entity_id"] == MISSING
     _no_bypass_or_arm(two_area_client)
 
 
@@ -113,6 +114,7 @@ async def test_rejects_non_elke27_entity_with_valid_area(
             blocking=True,
         )
     assert err.value.translation_key == "entity_invalid_area"
+    assert (err.value.translation_placeholders or {})["entity_id"] == NON_ELKE27
     _no_bypass_or_arm(two_area_client)
 
 
@@ -157,4 +159,5 @@ async def test_rejects_unloaded_entry_with_valid_area(
             blocking=True,
         )
     assert err.value.translation_key == "config_entry_not_loaded"
+    assert (err.value.translation_placeholders or {})["entity_id"] == unloaded_panel
     _no_bypass_or_arm(two_area_client)

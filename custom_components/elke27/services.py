@@ -195,7 +195,7 @@ async def _arm_automatic_failed_area_name(hass: HomeAssistant, entity_id: str) -
         )
     except HomeAssistantError:
         return entity_id
-    area_id = _area_id_from_unique_id(entity_entry.unique_id)
+    area_id = _area_id_from_unique_id(entity_entry.unique_id, entity_id=entity_id)
     phrase = area_automatic_phrase(
         area_id,
         runtime_data.coordinator.get_snapshot(),
@@ -213,11 +213,14 @@ def _same_user_refusal(failures: list[HomeAssistantError]) -> bool:
     return len(keys) == 1 and None not in keys
 
 
-def _config_entry_id(entity_entry: er.RegistryEntry) -> str:
+def _config_entry_id(entity_entry: er.RegistryEntry, entity_id: str) -> str:
     """Return the config entry id for an entity registry entry."""
     config_entry_id = entity_entry.config_entry_id
     if config_entry_id is None:
-        raise service_validation_error(translation_key="entity_not_linked")
+        raise service_validation_error(
+            translation_key="entity_not_linked",
+            translation_placeholders={"entity_id": entity_id},
+        )
     return config_entry_id
 
 
@@ -253,7 +256,7 @@ async def _async_arm_automatic_entity(
     entity_entry, runtime_data = _entity_runtime_data(
         hass, entity_id, Platform.ALARM_CONTROL_PANEL
     )
-    area_id = _area_id_from_unique_id(entity_entry.unique_id)
+    area_id = _area_id_from_unique_id(entity_entry.unique_id, entity_id=entity_id)
     coordinator = runtime_data.coordinator
     attempted: list[ZoneState] = []
     arm_sent: list[bool] = []
@@ -298,7 +301,7 @@ async def _async_arm_automatic_entity(
             reason="cancelled by a disarm of this area",
             zone=None,
             bypassed_zones=attempted,
-            config_entry_id=_config_entry_id(entity_entry),
+            config_entry_id=_config_entry_id(entity_entry, entity_id),
             arm_sent=bool(arm_sent),
         )
         raise arm_automatic_cancelled_error(
@@ -355,7 +358,7 @@ async def _async_arm_automatic_locked(
             bypassed_zones=bypassed,
             rolled_back_zones=rolled_back,
             still_bypassed_zones=still_bypassed,
-            config_entry_id=_config_entry_id(entity_entry),
+            config_entry_id=_config_entry_id(entity_entry, entity_id),
         )
         rejected = code_rejected_error(cause) if cause is not None else None
         if rejected is not None:
@@ -395,7 +398,7 @@ async def _async_arm_automatic_locked(
             zone=None,
             bypassed_zones=bypassed,
             still_bypassed_zones=bypassed,
-            config_entry_id=_config_entry_id(entity_entry),
+            config_entry_id=_config_entry_id(entity_entry, entity_id),
         )
         raise arm_automatic_uncertain_error(
             area_id,
@@ -624,13 +627,24 @@ def _entity_runtime_data(
         or entity_entry.platform != DOMAIN
         or entity_entry.domain != platform
     ):
-        raise service_validation_error(translation_key=_ENTITY_INVALID_KEY[platform])
+        raise service_validation_error(
+            translation_key=_ENTITY_INVALID_KEY[platform],
+            translation_placeholders={"entity_id": entity_id},
+        )
 
-    config_entry = hass.config_entries.async_get_entry(_config_entry_id(entity_entry))
+    config_entry = hass.config_entries.async_get_entry(
+        _config_entry_id(entity_entry, entity_id)
+    )
     if config_entry is None:
-        raise service_validation_error(translation_key="entity_not_linked")
+        raise service_validation_error(
+            translation_key="entity_not_linked",
+            translation_placeholders={"entity_id": entity_id},
+        )
     if config_entry.state is not ConfigEntryState.LOADED:
-        raise service_validation_error(translation_key="config_entry_not_loaded")
+        raise service_validation_error(
+            translation_key="config_entry_not_loaded",
+            translation_placeholders={"entity_id": entity_id},
+        )
 
     return entity_entry, config_entry.runtime_data
 
@@ -648,7 +662,9 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
         entity_entry, runtime_data = _entity_runtime_data(
             hass, entity_id, Platform.BINARY_SENSOR
         )
-        zone_id = _numeric_id_from_unique_id(entity_entry.unique_id, "zone")
+        zone_id = _numeric_id_from_unique_id(
+            entity_entry.unique_id, "zone", entity_id=entity_id
+        )
         coordinator = runtime_data.coordinator
         snapshot = coordinator.get_snapshot()
         zone = snapshot.zones.get(zone_id) if snapshot is not None else None
@@ -675,28 +691,34 @@ def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:
     raise arm_mode_not_supported_validation()
 
 
-def _area_id_from_unique_id(unique_id: str) -> int:
+def _area_id_from_unique_id(unique_id: str, *, entity_id: str) -> int:
     """Extract an area ID from an Elke27 alarm entity unique ID."""
-    return _numeric_id_from_unique_id(unique_id, "area")
+    return _numeric_id_from_unique_id(unique_id, "area", entity_id=entity_id)
 
 
-def _numeric_id_from_unique_id(unique_id: str, kind: str) -> int:
+def _numeric_id_from_unique_id(
+    unique_id: str, kind: str, *, entity_id: str
+) -> int:
     """
     Extract the numeric ID from an Elke27 ``<base>:<id>`` unique ID.
 
     The caller has already checked the entity's platform, so the kind
     (area or zone) is known; ``kind`` selects the invalid-entity message.
     """
+    invalid = _ENTITY_INVALID_KEY[
+        Platform.ALARM_CONTROL_PANEL if kind == "area" else Platform.BINARY_SENSOR
+    ]
+    placeholders = {"entity_id": entity_id}
     if ":" not in unique_id:
-        if kind == "area":
-            raise service_validation_error(translation_key="entity_invalid_area")
-        raise service_validation_error(translation_key="entity_invalid_zone")
+        raise service_validation_error(
+            translation_key=invalid,
+            translation_placeholders=placeholders,
+        )
     id_str = unique_id.rsplit(":", 1)[1]
     try:
         return int(id_str)
     except ValueError as err:
-        if kind == "area":
-            raise service_validation_error(
-                translation_key="entity_invalid_area"
-            ) from err
-        raise service_validation_error(translation_key="entity_invalid_zone") from err
+        raise service_validation_error(
+            translation_key=invalid,
+            translation_placeholders=placeholders,
+        ) from err

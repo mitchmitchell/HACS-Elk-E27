@@ -357,16 +357,16 @@
       "message": "The panel didn't respond in time. Check the panel to see if the command worked."
     },
     "config_entry_not_loaded": {
-      "message": "The panel integration isn't ready yet. Try again in a moment."
+      "message": "{entity_id} isn't ready yet because its panel integration isn't loaded. Try again in a moment."
     },
     "entity_invalid_area": {
-      "message": "This isn't an Elk E27 alarm area. Pick a different one."
+      "message": "{entity_id} isn't an Elk E27 alarm area. Pick a different one."
     },
     "entity_invalid_zone": {
-      "message": "This isn't an Elk E27 zone. Pick a different one."
+      "message": "{entity_id} isn't an Elk E27 zone. Pick a different one."
     },
     "entity_not_linked": {
-      "message": "This entity isn't connected to an Elk E27 panel. Pick a different one."
+      "message": "{entity_id} isn't connected to an Elk E27 panel. Pick a different one."
     },
     "fan_mode_not_supported": {
       "message": "This thermostat doesn't support that fan mode."
