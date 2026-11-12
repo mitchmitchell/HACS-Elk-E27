@@ -175,7 +175,7 @@ async def test_barrier_not_connected_raises_translation_key(
     """No client means a translated barrier_not_connected error, not a bare string."""
     await _load(hass, mock_config_entry, mock_client, _barrier(1, "OPEN"))
     hub = mock_config_entry.runtime_data.coordinator
-    hub._client = None  # noqa: SLF001 -- exercise service path when client is gone
+    await hub.async_shutdown_client()
     with (
         patch.object(
             type(hub), "is_ready", new_callable=PropertyMock, return_value=True
