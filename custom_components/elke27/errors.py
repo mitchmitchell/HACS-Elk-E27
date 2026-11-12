@@ -77,15 +77,6 @@ AUTH_ERRORS: tuple[type[Exception], ...] = (
 
 PinAction = Literal["arm", "disarm", "bypass", "unlock", "lock", "control"]
 
-_PIN_REQUIRED: dict[PinAction, str] = {
-    "arm": "pin_required_arm",
-    "disarm": "pin_required_disarm",
-    "bypass": "pin_required_bypass",
-    "unlock": "pin_required_unlock",
-    "lock": "pin_required_lock",
-    "control": "pin_required_control",
-}
-
 
 def homeassistant_error(
     *,
