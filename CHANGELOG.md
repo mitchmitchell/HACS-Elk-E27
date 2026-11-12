@@ -46,7 +46,6 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   [#156](https://github.com/mitchmitchell/HACS-Elk-E27/pull/156)).
 
 ## [0.3.0] - 2026-11-04
-## [0.3.0] - 2026-11-04
 
 ### Upgrade
 - **Update in HACS and restart Home Assistant.** No re-link, no delete and re-add. Entity
