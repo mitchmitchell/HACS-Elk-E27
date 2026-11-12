@@ -35,7 +35,6 @@ if _HAS_DEPS:
         Elke27TimeoutError,
     )
 
-    from custom_components.elke27.errors import CONNECTION_MESSAGE, TIMEOUT_MESSAGE
     from custom_components.elke27.light import Elke27Light
     from custom_components.elke27.lock import Elke27Lock
     from custom_components.elke27.switch import Elke27OutputSwitch
@@ -114,7 +113,7 @@ class SwitchCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _switch(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_turn_on()
-        assert str(ctx.exception) == TIMEOUT_MESSAGE
+        assert ctx.exception.translation_key == "command_timeout"
         assert isinstance(ctx.exception.__cause__, Elke27TimeoutError)
         client.request_link_check.assert_called_once()
 
@@ -125,7 +124,7 @@ class SwitchCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _switch(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_turn_off()
-        assert str(ctx.exception) == CONNECTION_MESSAGE
+        assert ctx.exception.translation_key == "command_connection_lost"
         client.request_link_check.assert_not_called()
 
 
@@ -142,7 +141,7 @@ class LightCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _light(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_turn_on()
-        assert str(ctx.exception) == TIMEOUT_MESSAGE
+        assert ctx.exception.translation_key == "command_timeout"
         assert "seq=" not in str(ctx.exception)
         client.request_link_check.assert_called_once()
 
@@ -153,7 +152,7 @@ class LightCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _light(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_turn_off()
-        assert str(ctx.exception) == CONNECTION_MESSAGE
+        assert ctx.exception.translation_key == "command_connection_lost"
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
@@ -169,7 +168,7 @@ class LockCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _lock(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_unlock()
-        assert str(ctx.exception) == TIMEOUT_MESSAGE
+        assert ctx.exception.translation_key == "command_timeout"
         client.request_link_check.assert_called_once()
 
     async def test_raised_timeout_is_clean(self) -> None:
@@ -179,4 +178,4 @@ class LockCommandErrorTest(unittest.IsolatedAsyncioTestCase):
         entity = _lock(_hub(client))
         with self.assertRaises(HomeAssistantError) as ctx:
             await entity.async_lock()
-        assert str(ctx.exception) == TIMEOUT_MESSAGE
+        assert ctx.exception.translation_key == "command_timeout"

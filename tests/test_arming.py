@@ -192,7 +192,7 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
         hub = _hub_with_client(client)
         with self.assertRaises(HomeAssistantError) as ctx:
             await hub.async_arm_area(1, ArmMode.ARMED_AWAY, "1234")
-        assert "Authentication failed" in str(ctx.exception)
+        assert ctx.exception.translation_key == "panel_error"
         client.async_execute.assert_not_called()
 
     async def test_disarm_uses_library_api(self) -> None:

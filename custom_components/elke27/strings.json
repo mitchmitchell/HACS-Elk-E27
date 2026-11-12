@@ -4,8 +4,8 @@
       "already_configured": "This panel is already configured.",
       "missing_context": "Panel details are missing. Restart the flow.",
       "reauth_successful": "Panel reconfigured.",
-      "wrong_panel": "The credentials linked a different panel than the one configured for this entry.",
-      "reauth_successful_upgrade": "Panel reconfigured. The upgrade will finish when Elk E27 reloads."
+      "reauth_successful_upgrade": "Panel reconfigured. The upgrade will finish when Elk E27 reloads.",
+      "wrong_panel": "The credentials linked a different panel than the one configured for this entry."
     },
     "error": {
       "cannot_connect": "Unable to connect to the panel. Confirm the host is reachable and the panel is online.",
@@ -86,14 +86,14 @@
         "name": "Zone"
       }
     },
-    "cover": {
-      "garage_door": {
-        "name": "Garage door {barrier_id}"
-      }
-    },
     "climate": {
       "thermostat": {
         "name": "Thermostat"
+      }
+    },
+    "cover": {
+      "garage_door": {
+        "name": "Garage door {barrier_id}"
       }
     },
     "light": {
@@ -124,267 +124,543 @@
       }
     }
   },
-  "issues": {
-    "duplicate_unique_id": {
-      "title": "Duplicate panel configuration",
-      "description": "This entry could not be assigned identity {candidate} because another entry ({other_entry}) already uses it. Remove one of the duplicate Elk E27 entries under Settings → Devices & services."
-    },
-    "reconnect_failed": {
-      "title": "Panel connection keeps failing",
-      "description": "Home Assistant could not reconnect to {name}. Check that the panel is powered and reachable on the network. The integration will keep retrying."
-    },
-    "panel_mac_mismatch": {
-      "title": "Different panel at this address",
-      "description": "The panel at {host} reports MAC {discovered}, but this entry was set up for the panel with MAC {stored}. The existing identity was kept. If you replaced the panel, delete this entry and add the new panel; otherwise check the address of this entry."
-    },
-    "legacy_migration_blocked": {
-      "title": "Elk E27 upgrade blocked by leftover entities",
-      "fix_flow": {
-        "step": {
-          "retry": {
-            "title": "Retry the Elk E27 upgrade",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Leftover entities that already use the new names ({count}):{conflicts}\n\nRemove the leftover entities that block the upgrade of this Elk E27 entry by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
-          },
-          "confirm": {
-            "title": "Delete leftover entities",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities ({count}):{entities}\n\nSelect **Submit** to delete the listed entities and retry the upgrade. This removes their history link, so take a backup first. To keep them, close this and delete or rename them yourself under Settings → Devices & services → Entities."
-          },
-          "confirm_partial": {
-            "title": "Delete leftover entities",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities this can delete ({count}):{entities}\n\nListed entities this Elk E27 entry doesn't own, so this can't delete them ({kept_count}):{kept}\n\nRemove those by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services.\n\nSelect **Submit** to delete the entities this can delete and retry the upgrade. This removes their history link, so take a backup first. To keep any of them, close this and delete or rename them yourself under Settings → Devices & services → Entities."
-          },
-          "retry_manual": {
-            "title": "Remove leftover entities by hand",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. These leftover entities block the upgrade, but this Elk E27 entry doesn't own them, so this can't delete them ({count}):{entities}\n\nRemove them by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
-          }
-        },
-        "abort": {
-          "entry_missing": "This Elk E27 integration no longer exists."
-        }
-      }
-    },
-    "legacy_duplicates": {
-      "title": "Duplicate Elk E27 entities from the older version",
-      "description": "The upgrade kept one entity for each panel item. These older duplicates were left and stay unavailable:{entities}\n\nTo remove them: go to Settings → Devices & services → Entities, search for each entity ID above, open it, select the gear icon, then select **Delete**. Then reload Elk E27 (Settings → Devices & services → Elk E27 → ⋮ → **Reload**) and this notice clears."
-    },
-    "legacy_migration_partial": {
-      "title": "Elk E27 upgrade interrupted",
-      "fix_flow": {
-        "step": {
-          "confirm": {
-            "title": "Finish the Elk E27 upgrade",
-            "description": "The Elk E27 upgrade hit an error, and some changes couldn't be undone. Changes not undone: {count}. Affected entities:{conflicts}\n\nSelect **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept. If you made a backup before upgrading, you can restore it instead."
-          }
-        },
-        "abort": {
-          "entry_missing": "This Elk E27 integration no longer exists."
-        }
-      }
-    },
-    "legacy_migration_blocked_devices": {
-      "title": "Elk E27 upgrade blocked by a leftover device",
-      "fix_flow": {
-        "step": {
-          "retry": {
-            "title": "Retry the Elk E27 upgrade",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Leftover Elk E27 devices in the way: {count}.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**). Then select **Submit** to retry the upgrade."
-          },
-          "confirm": {
-            "title": "Delete leftover entities",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities ({count}):{entities}\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**).\n\nSelect **Submit** to delete the listed entities and retry the upgrade. This removes their history link, so take a backup first. To keep them, close this and delete or rename them yourself under Settings → Devices & services → Entities."
-          },
-          "confirm_partial": {
-            "title": "Delete leftover entities",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities this can delete ({count}):{entities}\n\nListed entities this Elk E27 entry doesn't own, so this can't delete them ({kept_count}):{kept}\n\nRemove those by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**).\n\nSelect **Submit** to delete the entities this can delete and retry the upgrade. This removes their history link, so take a backup first. To keep any of them, close this and delete or rename them yourself under Settings → Devices & services → Entities."
-          },
-          "retry_manual": {
-            "title": "Remove leftover entities by hand",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. These leftover entities block the upgrade, but this Elk E27 entry doesn't own them, so this can't delete them ({count}):{entities}\n\nRemove them by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**). Then select **Submit** to retry the upgrade."
-          }
-        },
-        "abort": {
-          "entry_missing": "This Elk E27 integration no longer exists."
-        }
-      }
-    },
-    "legacy_migration_blocked_mixed": {
-      "title": "Elk E27 upgrade blocked by leftover items",
-      "fix_flow": {
-        "step": {
-          "retry": {
-            "title": "Retry the Elk E27 upgrade",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Leftover items in the way: {count}, of which devices: {other}. Leftover entities:{conflicts}\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**). Remove any remaining leftover entities by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services. Then select **Submit** to retry the upgrade."
-          },
-          "confirm": {
-            "title": "Delete leftover entities",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities ({count}):{entities}\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**).\n\nSelect **Submit** to delete the listed entities and retry the upgrade. This removes their history link, so take a backup first. To keep them, close this and delete or rename them yourself under Settings → Devices & services → Entities."
-          },
-          "confirm_partial": {
-            "title": "Delete leftover entities",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities this can delete ({count}):{entities}\n\nListed entities this Elk E27 entry doesn't own, so this can't delete them ({kept_count}):{kept}\n\nRemove those by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**).\n\nSelect **Submit** to delete the entities this can delete and retry the upgrade. This removes their history link, so take a backup first. To keep any of them, close this and delete or rename them yourself under Settings → Devices & services → Entities."
-          },
-          "retry_manual": {
-            "title": "Remove leftover entities by hand",
-            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. These leftover entities block the upgrade, but this Elk E27 entry doesn't own them, so this can't delete them ({count}):{entities}\n\nRemove them by hand under Settings → Devices & services → Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings → Devices & services.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings → Devices & services → Devices (open it, ⋮ → **Delete**). Then select **Submit** to retry the upgrade."
-          }
-        },
-        "abort": {
-          "entry_missing": "This Elk E27 integration no longer exists."
-        }
-      }
-    },
-    "legacy_migration_partial_devices": {
-      "title": "Elk E27 upgrade interrupted",
-      "fix_flow": {
-        "step": {
-          "confirm": {
-            "title": "Finish the Elk E27 upgrade",
-            "description": "The Elk E27 upgrade hit an error, and some device changes couldn't be undone. Device changes not undone: {count}.\n\nSelect **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept. If you made a backup before upgrading, you can restore it instead."
-          }
-        },
-        "abort": {
-          "entry_missing": "This Elk E27 integration no longer exists."
-        }
-      }
-    },
-    "legacy_migration_partial_mixed": {
-      "title": "Elk E27 upgrade interrupted",
-      "fix_flow": {
-        "step": {
-          "confirm": {
-            "title": "Finish the Elk E27 upgrade",
-            "description": "The Elk E27 upgrade hit an error, and some changes couldn't be undone. Changes not undone: {count}, of which on the device: {other}. Affected entities:{conflicts}\n\nSelect **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept. If you made a backup before upgrading, you can restore it instead."
-          }
-        },
-        "abort": {
-          "entry_missing": "This Elk E27 integration no longer exists."
-        }
-      }
-    },
-    "legacy_migration_write_failed": {
-      "title": "Elk E27 upgrade couldn't save",
-      "fix_flow": {
-        "step": {
-          "confirm": {
-            "title": "Finish the Elk E27 upgrade",
-            "description": "Elk E27 couldn't save the upgrade, so it undid every change. Your entities are as they were. Select **Submit** to reload Elk E27 and run the upgrade again; it starts from the beginning. If you made a backup before upgrading, you can restore it instead."
-          }
-        },
-        "abort": {
-          "entry_missing": "This Elk E27 integration no longer exists."
-        }
-      }
-    },
-    "legacy_migration_record_malformed": {
-      "title": "Elk E27 upgrade notes can't be read",
-      "fix_flow": {
-        "step": {
-          "keepers": {
-            "title": "Confirm which entities to keep",
-            "description": "Some panel items have more than one older entity, and the choice rests on which was changed last. The upgrade will keep:{keep}\n\nand leave these unavailable:{leave}\n\nSelect **Submit** to continue. If this is wrong, close this and restore a backup from before the upgrade, if you made one."
-          },
-          "confirm": {
-            "title": "Rebuild the upgrade notes",
-            "description": "Elk E27 couldn't read the notes it saved when you upgraded from the older version (0.1), so it stopped before changing anything. Select **Submit** to rebuild the notes from your current entities and finish the upgrade. Your entity names and history are kept."
-          }
-        },
-        "abort": {
-          "entry_missing": "This Elk E27 integration no longer exists."
-        }
-      }
-    }
-  },
   "exceptions": {
+    "arm_automatic_cancelled_arm_sent_named": {
+      "message": "Automatic arming for {area_name} (area {area_number}) stopped because someone disarmed it. The arm had already been sent. If these zones are still bypassed, clear them with the zone bypass service: {bypassed_zone_numbers}."
+    },
+    "arm_automatic_cancelled_arm_sent_unnamed": {
+      "message": "Automatic arming for Area {area_number} stopped because someone disarmed it. The arm had already been sent. If these zones are still bypassed, clear them with the zone bypass service: {bypassed_zone_numbers}."
+    },
+    "arm_automatic_cancelled_bypasses_named": {
+      "message": "Automatic arming for {area_name} (area {area_number}) stopped because someone disarmed it. These zones may still be bypassed: {bypassed_zone_numbers}. If they are, clear them with the zone bypass service."
+    },
+    "arm_automatic_cancelled_bypasses_unnamed": {
+      "message": "Automatic arming for Area {area_number} stopped because someone disarmed it. These zones may still be bypassed: {bypassed_zone_numbers}. If they are, clear them with the zone bypass service."
+    },
+    "arm_automatic_cancelled_named": {
+      "message": "Automatic arming for {area_name} (area {area_number}) stopped because someone disarmed it."
+    },
+    "arm_automatic_cancelled_unnamed": {
+      "message": "Automatic arming for Area {area_number} stopped because someone disarmed it."
+    },
+    "arm_automatic_multi_failed": {
+      "message": "Automatic arming failed for {failed_count} of {total_count} areas: {failed_area_names}."
+    },
+    "arm_automatic_multi_failed_area_unnamed": {
+      "message": "Area {area_number}"
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Check the zone's status, then try again."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Check the zone's status, then try again."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_partial_rollback_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_partial_rollback_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_partial_rollback_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_partial_rollback_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_rolled_back_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_rolled_back_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_rolled_back_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_rolled_back_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_still_bypassed_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_still_bypassed_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_still_bypassed_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_still_bypassed_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Check the zone's status, then try again."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Check the zone's status, then try again."
+    },
+    "arm_automatic_not_armed_disconnected_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel isn't connected. Check its network connection, then try again."
+    },
+    "arm_automatic_not_armed_disconnected_partial_rollback_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel isn't connected. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_disconnected_partial_rollback_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel isn't connected. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_disconnected_rolled_back_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel isn't connected. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_disconnected_rolled_back_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel isn't connected. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_disconnected_still_bypassed_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel isn't connected. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_disconnected_still_bypassed_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel isn't connected. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_disconnected_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel isn't connected. Check its network connection, then try again."
+    },
+    "arm_automatic_not_armed_pin_required_rolled_back_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Enter your user code to arm this area. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_pin_required_rolled_back_unnamed": {
+      "message": "Area {area_number} wasn't armed. Enter your user code to arm this area. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_pin_required_still_bypassed_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Enter your user code to arm this area. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_pin_required_still_bypassed_partial_rollback_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Enter your user code to arm this area. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_pin_required_still_bypassed_partial_rollback_unnamed": {
+      "message": "Area {area_number} wasn't armed. Enter your user code to arm this area. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_pin_required_still_bypassed_unnamed": {
+      "message": "Area {area_number} wasn't armed. Enter your user code to arm this area. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_refused_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't accept the command. Check that the area is ready, then try again."
+    },
+    "arm_automatic_not_armed_refused_partial_rollback_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't accept the command. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_refused_partial_rollback_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't accept the command. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_refused_rolled_back_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't accept the command. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_refused_rolled_back_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't accept the command. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_refused_still_bypassed_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't accept the command. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_refused_still_bypassed_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't accept the command. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_refused_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't accept the command. Check that the area is ready, then try again."
+    },
+    "arm_automatic_not_armed_zone_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Close or bypass open zones, then try again."
+    },
+    "arm_automatic_not_armed_zone_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Zone {zone_number} couldn't be bypassed. Close or bypass open zones, then try again."
+    },
+    "arm_automatic_not_armed_zone_partial_rollback_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_partial_rollback_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Zone {zone_number} couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_partial_rollback_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_partial_rollback_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. Zone {zone_number} couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_rolled_back_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_zone_rolled_back_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Zone {zone_number} couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_zone_rolled_back_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_zone_rolled_back_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. Zone {zone_number} couldn't be bypassed. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_zone_still_bypassed_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_still_bypassed_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Zone {zone_number} couldn't be bypassed. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_still_bypassed_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_still_bypassed_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. Zone {zone_number} couldn't be bypassed. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_zone_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. {zone_name} (zone {zone_number}) couldn't be bypassed. Close or bypass open zones, then try again."
+    },
+    "arm_automatic_not_armed_zone_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. Zone {zone_number} couldn't be bypassed. Close or bypass open zones, then try again."
+    },
+    "arm_automatic_uncertain_named": {
+      "message": "{area_name} (area {area_number}) may or may not be armed. Check the area on the panel."
+    },
+    "arm_automatic_uncertain_unnamed": {
+      "message": "Area {area_number} may or may not be armed. Check the area on the panel."
+    },
+    "arm_automatic_uncertain_with_bypasses_named": {
+      "message": "{area_name} (area {area_number}) may or may not be armed. Check the area on the panel. These zones were left bypassed: {bypassed_zone_numbers}. If the area isn't armed, clear the bypasses with the zone bypass service."
+    },
+    "arm_automatic_uncertain_with_bypasses_unnamed": {
+      "message": "Area {area_number} may or may not be armed. Check the area on the panel. These zones were left bypassed: {bypassed_zone_numbers}. If the area isn't armed, clear the bypasses with the zone bypass service."
+    },
+    "arm_mode_not_supported": {
+      "message": "This panel doesn't support that arming mode."
+    },
     "auth_failed": {
       "message": "The panel no longer accepts the stored link. Select Reconfigure and enter the access code and passphrase."
+    },
+    "barrier_not_connected": {
+      "message": "The panel isn't connected. The garage door command wasn't sent."
+    },
+    "barrier_outcome_unknown": {
+      "message": "The garage door command may or may not have reached the panel. Check the door before retrying."
+    },
+    "barrier_permission_denied": {
+      "message": "The panel refused the garage door command. The configured Elk user may lack automation authority."
     },
     "cannot_connect": {
       "message": "Unable to connect to the panel at {host}:{port}."
     },
-    "not_ready": {
-      "message": "The area is not ready to arm. Close the open zones or bypass them, then try again."
-    },
-    "not_bypassable": {
-      "message": "This zone can not be bypassed."
-    },
-    "in_alarm": {
-      "message": "The area is in alarm. Disarm it to clear the alarm, then try again."
-    },
-    "not_allowed_armed": {
-      "message": "This is not allowed while the area is armed. Disarm it, then try again."
-    },
-    "code_rejected": {
-      "message": "The panel rejected the code. Check the user code and that it is allowed for this area."
+    "code_all_zero": {
+      "message": "The code can't be all zeros."
     },
     "code_not_numeric": {
       "message": "The code must be numeric."
     },
-    "code_all_zero": {
-      "message": "The code can't be all zeros."
+    "code_rejected": {
+      "message": "The panel rejected the code. Check the user code and that it is allowed for this area."
+    },
+    "command_connection_lost": {
+      "message": "The connection to the panel dropped. Check the panel to see if the command worked."
+    },
+    "command_timeout": {
+      "message": "The panel didn't respond in time. Check the panel to see if the command worked."
+    },
+    "config_entry_not_loaded": {
+      "message": "{entity_id} isn't ready yet because its panel integration isn't loaded. Try again in a moment."
+    },
+    "entity_invalid_area": {
+      "message": "{entity_id} isn't an Elk E27 alarm area. Pick a different one."
+    },
+    "entity_invalid_zone": {
+      "message": "{entity_id} isn't an Elk E27 zone. Pick a different one."
+    },
+    "entity_not_linked": {
+      "message": "{entity_id} isn't connected to an Elk E27 panel. Pick a different one."
+    },
+    "fan_mode_not_supported": {
+      "message": "This thermostat doesn't support that fan mode."
+    },
+    "hvac_mode_not_supported": {
+      "message": "This thermostat doesn't support that HVAC mode."
+    },
+    "in_alarm": {
+      "message": "The area is in alarm. Disarm it to clear the alarm, then try again."
     },
     "integration_id_invalid": {
-      "message": "This entry was created before the client ID existed, or its client ID is invalid. Delete the integration and add it again."
+      "message": "This panel was set up with an older version. Remove it and add it again."
     },
-    "panel_not_ready": {
-      "message": "The client did not become ready before timeout."
+    "legacy_migration_blocked": {
+      "message": "The upgrade is blocked by leftover entities. Open Settings \u2192 Repairs to fix it."
+    },
+    "legacy_migration_partial": {
+      "message": "The upgrade was interrupted. Open Settings \u2192 Repairs to finish it."
+    },
+    "legacy_migration_record_malformed": {
+      "message": "Elk E27 couldn't read its upgrade notes. Open Settings \u2192 Repairs to fix it."
+    },
+    "legacy_migration_write_failed": {
+      "message": "The upgrade couldn't save, and nothing was changed. Open Settings \u2192 Repairs to retry."
     },
     "legacy_relink_required": {
       "message": "Elk E27 was upgraded from the older version (0.1). Select Reconfigure and enter the access code and passphrase to finish; your entities are kept."
     },
+    "no_alarm_panel_target": {
+      "message": "No Elk E27 alarm area was selected. Select an alarm area and try again."
+    },
+    "no_zone_target": {
+      "message": "No Elk E27 zone was selected. Select a zone and try again."
+    },
+    "not_accepted": {
+      "message": "The panel didn't accept the command. Check the device, then try again."
+    },
+    "not_allowed_armed": {
+      "message": "This is not allowed while the area is armed. Disarm it, then try again."
+    },
+    "not_bypassable": {
+      "message": "This zone can not be bypassed."
+    },
+    "not_connected": {
+      "message": "The panel isn't connected. The command wasn't sent. Check its network connection, then try again."
+    },
+    "not_ready": {
+      "message": "The area is not ready to arm. Close the open zones or bypass them, then try again."
+    },
+    "panel_error": {
+      "message": "The panel couldn't complete the command. Try again. If it keeps happening, check the panel."
+    },
+    "panel_not_ready": {
+      "message": "The client did not become ready before timeout."
+    },
+    "pin_required_arm": {
+      "message": "Enter your user code to arm this area."
+    },
+    "pin_required_bypass": {
+      "message": "Enter your user code to bypass this zone."
+    },
+    "pin_required_control": {
+      "message": "Enter your user code to control this device."
+    },
+    "pin_required_disarm": {
+      "message": "Enter your user code to disarm this area."
+    },
+    "pin_required_fallback": {
+      "message": "Enter your user code and try again."
+    },
+    "pin_required_lock": {
+      "message": "Enter your user code to lock this lock."
+    },
+    "pin_required_unlock": {
+      "message": "Enter your user code to unlock this lock."
+    },
+    "temperature_required": {
+      "message": "Set a target temperature."
+    },
+    "zone_bypass_not_acknowledged": {
+      "message": "The panel didn't confirm the bypass. Check the zone's status, then try again."
+    }
+  },
+  "issues": {
+    "duplicate_unique_id": {
+      "description": "This entry could not be assigned identity {candidate} because another entry ({other_entry}) already uses it. Remove one of the duplicate Elk E27 entries under Settings \u2192 Devices & services.",
+      "title": "Duplicate panel configuration"
+    },
+    "legacy_duplicates": {
+      "description": "The upgrade kept one entity for each panel item. These older duplicates were left and stay unavailable:{entities}\n\nTo remove them: go to Settings \u2192 Devices & services \u2192 Entities, search for each entity ID above, open it, select the gear icon, then select **Delete**. Then reload Elk E27 (Settings \u2192 Devices & services \u2192 Elk E27 \u2192 \u22ee \u2192 **Reload**) and this notice clears.",
+      "title": "Duplicate Elk E27 entities from the older version"
+    },
     "legacy_migration_blocked": {
-      "message": "The upgrade is blocked by leftover entities. Open Settings → Repairs to fix it."
+      "fix_flow": {
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        },
+        "step": {
+          "confirm": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities ({count}):{entities}\n\nSelect **Submit** to delete the listed entities and retry the upgrade. This removes their history link, so take a backup first. To keep them, close this and delete or rename them yourself under Settings \u2192 Devices & services \u2192 Entities.",
+            "title": "Delete leftover entities"
+          },
+          "confirm_partial": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities this can delete ({count}):{entities}\n\nListed entities this Elk E27 entry doesn't own, so this can't delete them ({kept_count}):{kept}\n\nRemove those by hand under Settings \u2192 Devices & services \u2192 Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings \u2192 Devices & services.\n\nSelect **Submit** to delete the entities this can delete and retry the upgrade. This removes their history link, so take a backup first. To keep any of them, close this and delete or rename them yourself under Settings \u2192 Devices & services \u2192 Entities.",
+            "title": "Delete leftover entities"
+          },
+          "retry": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Leftover entities that already use the new names ({count}):{conflicts}\n\nRemove the leftover entities that block the upgrade of this Elk E27 entry by hand under Settings \u2192 Devices & services \u2192 Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings \u2192 Devices & services. Then select **Submit** to retry the upgrade.",
+            "title": "Retry the Elk E27 upgrade"
+          },
+          "retry_manual": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. These leftover entities block the upgrade, but this Elk E27 entry doesn't own them, so this can't delete them ({count}):{entities}\n\nRemove them by hand under Settings \u2192 Devices & services \u2192 Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings \u2192 Devices & services. Then select **Submit** to retry the upgrade.",
+            "title": "Remove leftover entities by hand"
+          }
+        }
+      },
+      "title": "Elk E27 upgrade blocked by leftover entities"
+    },
+    "legacy_migration_blocked_devices": {
+      "fix_flow": {
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        },
+        "step": {
+          "confirm": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities ({count}):{entities}\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings \u2192 Devices & services \u2192 Devices (open it, \u22ee \u2192 **Delete**).\n\nSelect **Submit** to delete the listed entities and retry the upgrade. This removes their history link, so take a backup first. To keep them, close this and delete or rename them yourself under Settings \u2192 Devices & services \u2192 Entities.",
+            "title": "Delete leftover entities"
+          },
+          "confirm_partial": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities this can delete ({count}):{entities}\n\nListed entities this Elk E27 entry doesn't own, so this can't delete them ({kept_count}):{kept}\n\nRemove those by hand under Settings \u2192 Devices & services \u2192 Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings \u2192 Devices & services.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings \u2192 Devices & services \u2192 Devices (open it, \u22ee \u2192 **Delete**).\n\nSelect **Submit** to delete the entities this can delete and retry the upgrade. This removes their history link, so take a backup first. To keep any of them, close this and delete or rename them yourself under Settings \u2192 Devices & services \u2192 Entities.",
+            "title": "Delete leftover entities"
+          },
+          "retry": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Leftover Elk E27 devices in the way: {count}.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings \u2192 Devices & services \u2192 Devices (open it, \u22ee \u2192 **Delete**). Then select **Submit** to retry the upgrade.",
+            "title": "Retry the Elk E27 upgrade"
+          },
+          "retry_manual": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. These leftover entities block the upgrade, but this Elk E27 entry doesn't own them, so this can't delete them ({count}):{entities}\n\nRemove them by hand under Settings \u2192 Devices & services \u2192 Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings \u2192 Devices & services.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings \u2192 Devices & services \u2192 Devices (open it, \u22ee \u2192 **Delete**). Then select **Submit** to retry the upgrade.",
+            "title": "Remove leftover entities by hand"
+          }
+        }
+      },
+      "title": "Elk E27 upgrade blocked by a leftover device"
+    },
+    "legacy_migration_blocked_mixed": {
+      "fix_flow": {
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        },
+        "step": {
+          "confirm": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities ({count}):{entities}\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings \u2192 Devices & services \u2192 Devices (open it, \u22ee \u2192 **Delete**).\n\nSelect **Submit** to delete the listed entities and retry the upgrade. This removes their history link, so take a backup first. To keep them, close this and delete or rename them yourself under Settings \u2192 Devices & services \u2192 Entities.",
+            "title": "Delete leftover entities"
+          },
+          "confirm_partial": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Entities left over from an earlier version (for example a 0.2.0 trial) block the upgrade. Leftover entities this can delete ({count}):{entities}\n\nListed entities this Elk E27 entry doesn't own, so this can't delete them ({kept_count}):{kept}\n\nRemove those by hand under Settings \u2192 Devices & services \u2192 Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings \u2192 Devices & services.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings \u2192 Devices & services \u2192 Devices (open it, \u22ee \u2192 **Delete**).\n\nSelect **Submit** to delete the entities this can delete and retry the upgrade. This removes their history link, so take a backup first. To keep any of them, close this and delete or rename them yourself under Settings \u2192 Devices & services \u2192 Entities.",
+            "title": "Delete leftover entities"
+          },
+          "retry": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. Leftover items in the way: {count}, of which devices: {other}. Leftover entities:{conflicts}\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings \u2192 Devices & services \u2192 Devices (open it, \u22ee \u2192 **Delete**). Remove any remaining leftover entities by hand under Settings \u2192 Devices & services \u2192 Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings \u2192 Devices & services. Then select **Submit** to retry the upgrade.",
+            "title": "Retry the Elk E27 upgrade"
+          },
+          "retry_manual": {
+            "description": "Elk E27 couldn't finish upgrading from the older version (0.1), and nothing was changed. These leftover entities block the upgrade, but this Elk E27 entry doesn't own them, so this can't delete them ({count}):{entities}\n\nRemove them by hand under Settings \u2192 Devices & services \u2192 Entities, or, if another loaded Elk E27 entry provides them, delete or disable that entry under Settings \u2192 Devices & services.\n\nDelete any leftover Elk E27 device that blocks the upgrade by hand under Settings \u2192 Devices & services \u2192 Devices (open it, \u22ee \u2192 **Delete**). Then select **Submit** to retry the upgrade.",
+            "title": "Remove leftover entities by hand"
+          }
+        }
+      },
+      "title": "Elk E27 upgrade blocked by leftover items"
     },
     "legacy_migration_partial": {
-      "message": "The upgrade was interrupted. Open Settings → Repairs to finish it."
+      "fix_flow": {
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        },
+        "step": {
+          "confirm": {
+            "description": "The Elk E27 upgrade hit an error, and some changes couldn't be undone. Changes not undone: {count}. Affected entities:{conflicts}\n\nSelect **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept. If you made a backup before upgrading, you can restore it instead.",
+            "title": "Finish the Elk E27 upgrade"
+          }
+        }
+      },
+      "title": "Elk E27 upgrade interrupted"
+    },
+    "legacy_migration_partial_devices": {
+      "fix_flow": {
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        },
+        "step": {
+          "confirm": {
+            "description": "The Elk E27 upgrade hit an error, and some device changes couldn't be undone. Device changes not undone: {count}.\n\nSelect **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept. If you made a backup before upgrading, you can restore it instead.",
+            "title": "Finish the Elk E27 upgrade"
+          }
+        }
+      },
+      "title": "Elk E27 upgrade interrupted"
+    },
+    "legacy_migration_partial_mixed": {
+      "fix_flow": {
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        },
+        "step": {
+          "confirm": {
+            "description": "The Elk E27 upgrade hit an error, and some changes couldn't be undone. Changes not undone: {count}, of which on the device: {other}. Affected entities:{conflicts}\n\nSelect **Submit** to reload Elk E27 and finish the upgrade. Entities already converted are kept. If you made a backup before upgrading, you can restore it instead.",
+            "title": "Finish the Elk E27 upgrade"
+          }
+        }
+      },
+      "title": "Elk E27 upgrade interrupted"
     },
     "legacy_migration_record_malformed": {
-      "message": "Elk E27 couldn't read its upgrade notes. Open Settings → Repairs to fix it."
+      "fix_flow": {
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        },
+        "step": {
+          "confirm": {
+            "description": "Elk E27 couldn't read the notes it saved when you upgraded from the older version (0.1), so it stopped before changing anything. Select **Submit** to rebuild the notes from your current entities and finish the upgrade. Your entity names and history are kept.",
+            "title": "Rebuild the upgrade notes"
+          },
+          "keepers": {
+            "description": "Some panel items have more than one older entity, and the choice rests on which was changed last. The upgrade will keep:{keep}\n\nand leave these unavailable:{leave}\n\nSelect **Submit** to continue. If this is wrong, close this and restore a backup from before the upgrade, if you made one.",
+            "title": "Confirm which entities to keep"
+          }
+        }
+      },
+      "title": "Elk E27 upgrade notes can't be read"
     },
     "legacy_migration_write_failed": {
-      "message": "The upgrade couldn't save, and nothing was changed. Open Settings → Repairs to retry."
+      "fix_flow": {
+        "abort": {
+          "entry_missing": "This Elk E27 integration no longer exists."
+        },
+        "step": {
+          "confirm": {
+            "description": "Elk E27 couldn't save the upgrade, so it undid every change. Your entities are as they were. Select **Submit** to reload Elk E27 and run the upgrade again; it starts from the beginning. If you made a backup before upgrading, you can restore it instead.",
+            "title": "Finish the Elk E27 upgrade"
+          }
+        }
+      },
+      "title": "Elk E27 upgrade couldn't save"
+    },
+    "panel_mac_mismatch": {
+      "description": "The panel at {host} reports MAC {discovered}, but this entry was set up for the panel with MAC {stored}. The existing identity was kept. If you replaced the panel, delete this entry and add the new panel; otherwise check the address of this entry.",
+      "title": "Different panel at this address"
+    },
+    "reconnect_failed": {
+      "description": "Home Assistant could not reconnect to {name}. Check that the panel is powered and reachable on the network. The integration will keep retrying.",
+      "title": "Panel connection keeps failing"
     }
   },
   "selector": {
+    "panel": {
+      "options": {
+        "rescan": "Rescan for panels"
+      }
+    },
     "setup_method": {
       "options": {
         "discover": "Discover panels",
         "manual": "Manual setup"
       }
-    },
-    "panel": {
-      "options": {
-        "rescan": "Rescan for panels"
-      }
     }
   },
   "services": {
     "alarm_arm_automatic": {
-      "name": "Arm automatic",
       "description": "Arms Elk E27 areas from automations, such as geofence- or occupancy-based arming when everyone leaves. Open (faulted) zones in each targeted area are bypassed before arming; zones in other areas are not changed. It cancels auto-stay and the exit delay so the area arms immediately. Refusals are never retried; if a bypass or the arm is refused, the area is not armed and the bypasses it made are undone. If the arm result is unknown (for example a timeout), the bypasses are left in place and you are told to check the panel. An area that is already armed is left unchanged. A pending disarm of the area pauses a running call before its next command; if the panel accepts the disarm, the call is cancelled, sends nothing more and does not roll back.",
       "fields": {
-        "mode": {
-          "name": "Arming mode",
-          "description": "Arm away or arm home (stay)."
-        },
         "code": {
-          "name": "Code",
-          "description": "Numeric alarm user code used to arm the area."
+          "description": "Numeric alarm user code used to arm the area.",
+          "name": "Code"
+        },
+        "mode": {
+          "description": "Arm away or arm home (stay).",
+          "name": "Arming mode"
         }
-      }
+      },
+      "name": "Arm automatic"
     },
     "zone_bypass": {
-      "name": "Bypass zone",
       "description": "Bypasses Elk E27 zones so they are ignored while the area is armed, or removes the bypass. Disarming an armed area clears all bypasses; disarming an area that is already disarmed does not.",
       "fields": {
-        "code": {
-          "name": "Code",
-          "description": "Numeric alarm user code used to bypass the zone."
-        },
         "bypass": {
-          "name": "Bypass",
-          "description": "Turn on to bypass the zone, off to remove the bypass."
+          "description": "Turn on to bypass the zone, off to remove the bypass.",
+          "name": "Bypass"
+        },
+        "code": {
+          "description": "Numeric alarm user code used to bypass the zone.",
+          "name": "Code"
         }
-      }
+      },
+      "name": "Bypass zone"
     }
   }
 }

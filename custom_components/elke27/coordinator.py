@@ -67,10 +67,12 @@ from .const import (
 from .errors import (
     AUTH_ERRORS,
     COMMAND_ERRORS,
-    NOT_ACCEPTED_MESSAGE,
-    _error_message,
+    NOT_ACCEPTED_TRANSLATION_KEY,
+    NOT_CONNECTED_TRANSLATION_KEY,
     code_rejected_error,
     command_error,
+    command_homeassistant_error,
+    homeassistant_error,
     is_connection_error,
     is_timeout_error,
     panel_error_code,
@@ -572,7 +574,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Output", output_id, "set", err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         return True
 
     async def async_set_barrier(self, barrier_id: int, *, open_: bool) -> None:
@@ -585,22 +587,26 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """
         client = self._client
         if client is None:
-            raise HomeAssistantError(BARRIER_NOT_CONNECTED_MESSAGE)
+            raise homeassistant_error(translation_key="barrier_not_connected")
         try:
             await client.async_set_barrier(barrier_id, open=open_)
         except AUTH_ERRORS as err:
             self.start_reauth_once()
             _log_command_failure("Barrier", barrier_id, "set", err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Barrier", barrier_id, "set", err)
             self._note_command_error(err)
             if _is_outcome_unknown(err):
                 await self.async_refresh_barrier(barrier_id)
-                raise HomeAssistantError(BARRIER_OUTCOME_UNKNOWN_MESSAGE) from err
+                raise homeassistant_error(
+                    translation_key="barrier_outcome_unknown"
+                ) from err
             if _is_permission_error(err):
-                raise HomeAssistantError(BARRIER_PERMISSION_MESSAGE) from err
-            raise HomeAssistantError(_error_message(err)) from err
+                raise homeassistant_error(
+                    translation_key="barrier_permission_denied"
+                ) from err
+            raise command_homeassistant_error(err) from err
         await self.async_refresh_barrier(barrier_id)
 
     async def async_refresh_barrier(self, barrier_id: int) -> None:
@@ -843,7 +849,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 message=(
                     "The panel refused the command and these zones could not be"
                     f" un-bypassed, so they are still bypassed: zones {zone_ids}."
-                    " Clear them with elke27.zone_bypass and bypass: false."
+                    " Clear them with the zone bypass service."
                 ),
                 notification_id=(
                     f"elke27_code_rejected_bypass_{self.config_entry.entry_id}"
@@ -911,7 +917,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except AUTH_ERRORS as err:
             self.start_reauth_once()
             _log_command_failure("Zone", zone_id, "bypass", err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Zone", zone_id, "bypass", err)
             self._note_command_error(err)
@@ -933,11 +939,11 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except AUTH_ERRORS as err:
             self.start_reauth_once()
             _LOGGER.warning("Command %s failed: %s", command_key, err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         except COMMAND_ERRORS as err:
             _LOGGER.warning("Command %s failed: %s", command_key, err)
             self._note_command_error(err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         if not result.ok:
             if isinstance(result.error, Elke27PinRequiredError):
                 raise result.error
@@ -947,11 +953,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 else:
                     self._note_command_error(result.error)
                 _LOGGER.warning("Command %s failed: %s", command_key, result.error)
-                raise HomeAssistantError(_error_message(result.error)) from (
-                    result.error
-                )
+                raise command_homeassistant_error(result.error) from result.error
             _LOGGER.warning("Command %s was not accepted by the panel", command_key)
-            raise HomeAssistantError(NOT_ACCEPTED_MESSAGE)
+            raise homeassistant_error(translation_key=NOT_ACCEPTED_TRANSLATION_KEY)
         return True
 
     def _note_command_error(self, err: BaseException) -> None:
@@ -976,8 +980,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Return the connected client or raise."""
         client = self._client
         if client is None:
-            msg = "Client is not connected."
-            raise HomeAssistantError(msg)
+            raise homeassistant_error(translation_key=NOT_CONNECTED_TRANSLATION_KEY)
         return client
 
     async def async_arm_area(
@@ -1013,7 +1016,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except AUTH_ERRORS as err:
             self.start_reauth_once()
             _log_command_failure("Area", area_id, "arming", err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
@@ -1071,7 +1074,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except AUTH_ERRORS as err:
             self.start_reauth_once()
             _log_command_failure("Area", area_id, "disarm", err)
-            raise HomeAssistantError(_error_message(err)) from err
+            raise command_homeassistant_error(err) from err
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "disarm", err)
             self._note_command_error(err)
@@ -1525,19 +1528,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """Update coordinator data and track snapshot version."""
         self._snapshot_seq += 1
         self.async_set_updated_data(snapshot or PanelSnapshot.empty())
-
-
-BARRIER_NOT_CONNECTED_MESSAGE = (
-    "Not connected to the panel; the garage door command was not sent."
-)
-BARRIER_OUTCOME_UNKNOWN_MESSAGE = (
-    "Garage door command may or may not have reached the panel; "
-    "check the door before retrying"
-)
-BARRIER_PERMISSION_MESSAGE = (
-    "The panel refused the garage door command; the configured Elk user may "
-    "lack automation authority"
-)
 
 
 def _is_outcome_unknown(err: BaseException) -> bool:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from elke27_lib.errors import (
     E27Error,
     E27NotReady,
@@ -25,39 +27,30 @@ from homeassistant.exceptions import (
 
 from .const import DOMAIN
 
-NOT_ACCEPTED_MESSAGE = "The panel did not accept the command."
+NOT_ACCEPTED_TRANSLATION_KEY = "not_accepted"
+NOT_CONNECTED_TRANSLATION_KEY = "not_connected"
 
-
-# Panel error codes that mean the panel rejected the user code (a wrong code,
-# or a code not allowed for this action). Each is a user error.
 PANEL_ERROR_CODES_REJECTED: frozenset[int] = frozenset({11004, 11008, 11037, 11038})
 
-
-# Panel error codes that mean the panel refused the action because of the
-# current condition of the area or zone, mapped to their translation key. Each
-# is a user error, raised like a rejected code.
 PANEL_ERROR_CODES_USER_CONDITION: dict[int, str] = {
-    11015: "not_ready",  # area not ready to arm (a zone is open)
-    11023: "not_bypassable",  # zone can not be bypassed
-    11027: "in_alarm",  # area is in alarm
-    11028: "not_allowed_armed",  # not allowed while the area is armed
+    11015: "not_ready",
+    11023: "not_bypassable",
+    11027: "in_alarm",
+    11028: "not_allowed_armed",
 }
 
-# Translation keys of the panel refusals that get the same rollback, event and
-# notification handling as a rejected code.
-#
-# 11028 (not_allowed_armed) is excluded on purpose. That refusal means the area
-# is already armed, so the bypasses that went with it are meant to stay; rolling
-# them back would un-bypass zones in an armed system. It is still a translated
-# user error (see command_error); the arming code keeps its bypasses via
-# arming.is_already_armed_refusal.
 USER_REFUSAL_KEYS: frozenset[str] = frozenset(
     {"code_rejected", "not_ready", "not_bypassable", "in_alarm"}
 )
 
 
 def user_refusal_key(err: BaseException | None) -> str | None:
-    """Return the translation key when the panel refused as a user error."""
+    """
+    Return the translation key when the panel refused as a user error.
+
+    Code 11028 maps to not_allowed_armed but stays out of USER_REFUSAL_KEYS;
+    automatic arming handles it through is_already_armed_refusal instead.
+    """
     code = panel_error_code(err)
     if code is None:
         return None
@@ -66,18 +59,6 @@ def user_refusal_key(err: BaseException | None) -> str | None:
     return PANEL_ERROR_CODES_USER_CONDITION.get(code)
 
 
-TIMEOUT_MESSAGE = (
-    "The panel did not respond in time; the command may not have been applied."
-)
-
-
-CONNECTION_MESSAGE = (
-    "Lost connection to the panel; the command may not have been applied."
-)
-
-
-# Every library failure a command can surface: elke27's public errors, its
-# lower-level E27 errors (async_execute returns these), and raw timeouts/OS errors.
 COMMAND_ERRORS: tuple[type[Exception], ...] = (
     Elke27Error,
     Elke27InvalidArgument,
@@ -92,6 +73,76 @@ AUTH_ERRORS: tuple[type[Exception], ...] = (
     Elke27AuthError,
     Elke27CryptoError,
 )
+
+
+PinAction = Literal["arm", "disarm", "bypass", "unlock", "lock", "control"]
+
+
+def homeassistant_error(
+    *,
+    translation_key: str,
+    translation_placeholders: dict[str, str] | None = None,
+) -> HomeAssistantError:
+    """Build a translated HomeAssistantError for this integration."""
+    kwargs: dict[str, Any] = {
+        "translation_domain": DOMAIN,
+        "translation_key": translation_key,
+    }
+    if translation_placeholders is not None:
+        kwargs["translation_placeholders"] = translation_placeholders
+    return HomeAssistantError(**kwargs)
+
+
+def service_validation_error(
+    *,
+    translation_key: str,
+    translation_placeholders: dict[str, str] | None = None,
+) -> ServiceValidationError:
+    """Build a translated ServiceValidationError for this integration."""
+    kwargs: dict[str, Any] = {
+        "translation_domain": DOMAIN,
+        "translation_key": translation_key,
+    }
+    if translation_placeholders is not None:
+        kwargs["translation_placeholders"] = translation_placeholders
+    return ServiceValidationError(**kwargs)
+
+
+def pin_required_error(action: PinAction | None = None) -> ServiceValidationError:
+    """Return the error when the panel requires a user code for an action."""
+    if action == "arm":
+        return service_validation_error(translation_key="pin_required_arm")
+    if action == "disarm":
+        return service_validation_error(translation_key="pin_required_disarm")
+    if action == "bypass":
+        return service_validation_error(translation_key="pin_required_bypass")
+    if action == "unlock":
+        return service_validation_error(translation_key="pin_required_unlock")
+    if action == "lock":
+        return service_validation_error(translation_key="pin_required_lock")
+    if action == "control":
+        return service_validation_error(translation_key="pin_required_control")
+    return service_validation_error(translation_key="pin_required_fallback")
+
+
+def code_not_numeric_error() -> ServiceValidationError:
+    """Return the error for a non-numeric user code."""
+    return service_validation_error(translation_key="code_not_numeric")
+
+
+def code_all_zero_error() -> ServiceValidationError:
+    """Return the error for an all-zero user code."""
+    return service_validation_error(translation_key="code_all_zero")
+
+
+def arm_mode_not_supported_error() -> HomeAssistantError:
+    """Return the error for an unsupported arming mode."""
+    return homeassistant_error(translation_key="arm_mode_not_supported")
+
+
+def arm_mode_not_supported_validation() -> ServiceValidationError:
+    """Return the service validation error for an unsupported arming mode."""
+    return service_validation_error(translation_key="arm_mode_not_supported")
 
 
 def panel_error_code(err: BaseException | None) -> int | None:
@@ -132,16 +183,16 @@ def is_connection_error(err: BaseException) -> bool:
     )
 
 
-def _error_message(err: BaseException) -> str:
-    """Return a user-facing message for a library error."""
+def command_homeassistant_error(err: BaseException) -> HomeAssistantError:
+    """Return a translated HomeAssistantError for a failed panel command."""
     if is_timeout_error(err):
-        return TIMEOUT_MESSAGE
+        return homeassistant_error(translation_key="command_timeout")
     if is_connection_error(err):
-        return CONNECTION_MESSAGE
-    return str(err) or type(err).__name__
+        return homeassistant_error(translation_key="command_connection_lost")
+    return homeassistant_error(translation_key="panel_error")
 
 
-def command_error(err: BaseException) -> HomeAssistantError:
+def command_error(err: BaseException) -> HomeAssistantError | ServiceValidationError:
     """
     Return the Home Assistant error to raise for a failed code command.
 
@@ -151,12 +202,17 @@ def command_error(err: BaseException) -> HomeAssistantError:
     HomeAssistantError. The message never includes the code.
     """
     key = user_refusal_key(err)
-    if key is not None:
-        return ServiceValidationError(
-            translation_domain=DOMAIN,
-            translation_key=key,
-        )
-    return HomeAssistantError(_error_message(err))
+    if key == "code_rejected":
+        return service_validation_error(translation_key="code_rejected")
+    if key == "not_ready":
+        return service_validation_error(translation_key="not_ready")
+    if key == "not_bypassable":
+        return service_validation_error(translation_key="not_bypassable")
+    if key == "in_alarm":
+        return service_validation_error(translation_key="in_alarm")
+    if key == "not_allowed_armed":
+        return service_validation_error(translation_key="not_allowed_armed")
+    return command_homeassistant_error(err)
 
 
 def code_rejected_error(err: BaseException) -> ServiceValidationError | None:

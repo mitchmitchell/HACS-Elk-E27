@@ -12,8 +12,10 @@ from elke27_lib.client import Result
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.elke27.entity import NOT_CONNECTED_MESSAGE
-from custom_components.elke27.errors import NOT_ACCEPTED_MESSAGE
+from custom_components.elke27.errors import (
+    NOT_ACCEPTED_TRANSLATION_KEY,
+    NOT_CONNECTED_TRANSLATION_KEY,
+)
 from homeassistant.const import ATTR_CODE, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -79,11 +81,12 @@ async def test_command_while_disconnected_raises(
     # The client drops between the entity's availability check and the call.
     hub._client = None
     entity = hass.data["entity_components"][domain].get_entity(entity_id)
-    with pytest.raises(HomeAssistantError, match=NOT_CONNECTED_MESSAGE):
+    with pytest.raises(HomeAssistantError) as err:
         if domain == "alarm_control_panel":
             await getattr(entity, f"async_{service}")(code=data[ATTR_CODE])
         else:
             await getattr(entity, f"async_{service}")()
+    assert err.value.translation_key == NOT_CONNECTED_TRANSLATION_KEY
     mock_client.client.async_arm_area.assert_not_awaited()
     mock_client.client.async_disarm_area.assert_not_awaited()
     mock_client.client.async_set_output.assert_not_awaited()
@@ -97,8 +100,9 @@ async def test_not_sent_with_client_says_not_accepted(
     hub = loaded.runtime_data.coordinator
     hub.async_set_output = AsyncMock(return_value=False)
     entity = hass.data["entity_components"]["switch"].get_entity(SWITCH)
-    with pytest.raises(HomeAssistantError, match=NOT_ACCEPTED_MESSAGE):
+    with pytest.raises(HomeAssistantError) as err:
         await entity.async_turn_on()
+    assert err.value.translation_key == NOT_ACCEPTED_TRANSLATION_KEY
 
 
 @pytest.mark.usefixtures("loaded")
@@ -108,5 +112,6 @@ async def test_execute_not_ok_without_error_raises_not_accepted(
     """A lock command the panel answers without accepting raises."""
     mock_client.client.async_execute = AsyncMock(return_value=Result.failure(None))
     entity = hass.data["entity_components"]["lock"].get_entity(LOCK)
-    with pytest.raises(HomeAssistantError, match=NOT_ACCEPTED_MESSAGE):
+    with pytest.raises(HomeAssistantError) as err:
         await entity.async_lock()
+    assert err.value.translation_key == NOT_ACCEPTED_TRANSLATION_KEY

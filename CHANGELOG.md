@@ -5,6 +5,9 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 
 ## Unreleased
 
+### Added
+- Translated exception messages for panel commands and services (`exceptions` in `strings.json`).
+
 ### Fixed
 - Diagnostics no longer call `importlib.metadata` on the Home Assistant event loop
   ([#162](https://github.com/mitchmitchell/HACS-Elk-E27/issues/162)).
