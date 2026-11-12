@@ -101,6 +101,13 @@ def arm_automatic_not_armed_error(
                 )
                 ph = {**placeholders, "still_bypassed_zone_numbers": still}
             return _translated_validation_error(key, ph)
+        if cleared:
+            key = _arm_key(
+                "arm_automatic_not_armed_pin_required_rolled_back", area, None
+            )
+            return _translated_validation_error(
+                key, {**placeholders, "cleared_zone_numbers": cleared}
+            )
         action: PinAction = "arm"
         return pin_required_error(action)
 
@@ -153,13 +160,22 @@ def arm_automatic_not_armed_error(
                 **_zone_placeholders(zone_phrase),
                 "still_bypassed_zone_numbers": still,
             }
+        elif cleared:
+            key = _arm_key(
+                "arm_automatic_not_armed_bypass_unconfirmed_rolled_back",
+                area,
+                zone_phrase,
+            )
+            ph = {
+                **placeholders,
+                **_zone_placeholders(zone_phrase),
+                "cleared_zone_numbers": cleared,
+            }
         else:
             key = _arm_key(
                 "arm_automatic_not_armed_bypass_unconfirmed", area, zone_phrase
             )
             ph = {**placeholders, **_zone_placeholders(zone_phrase)}
-            if cleared:
-                ph["cleared_zone_numbers"] = cleared
         return _translated_error(key, ph)
 
     if zone_phrase is not None:
@@ -262,30 +278,17 @@ def arm_automatic_cancelled_error(
     return _translated_error(key, placeholders)
 
 
-def _multi_failure_detail(entity_id: str, err: HomeAssistantError) -> str:
-    key = err.translation_key
-    if key:
-        return f"{entity_id}: {key}"
-    if err.args:
-        return f"{entity_id}: {err.args[0]}"
-    return entity_id
-
-
 def arm_automatic_multi_failed_error(
-    failed_ids: Sequence[str],
-    failures: Sequence[HomeAssistantError],
+    failed_area_names: Sequence[str],
+    failed_count: int,
     total_count: int,
 ) -> HomeAssistantError:
     """Return the translated error when several areas fail automatic arming."""
-    failure_details = "; ".join(
-        _multi_failure_detail(entity_id, err)
-        for entity_id, err in zip(failed_ids, failures, strict=True)
-    )
     key = "arm_automatic_multi_failed"
     placeholders = {
-        "failed_count": str(len(failures)),
+        "failed_count": str(failed_count),
         "total_count": str(total_count),
-        "failure_details": failure_details,
+        "failed_area_names": ", ".join(failed_area_names),
     }
     return _translated_error(key, placeholders)
 

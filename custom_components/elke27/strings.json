@@ -144,7 +144,7 @@
       "message": "Automatic arming for Area {area_number} stopped because someone disarmed it."
     },
     "arm_automatic_multi_failed": {
-      "message": "Automatic arming failed for {failed_count} of {total_count} areas: {failure_details}"
+      "message": "Automatic arming failed for {failed_count} of {total_count} areas: {failed_area_names}."
     },
     "arm_automatic_not_armed_bypass_unconfirmed_named_zone_named": {
       "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Check the zone's status, then try again."
@@ -163,6 +163,18 @@
     },
     "arm_automatic_not_armed_bypass_unconfirmed_partial_rollback_unnamed_zone_unnamed": {
       "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Bypasses were cleared: zones {cleared_zone_numbers}. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_rolled_back_named_zone_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_rolled_back_named_zone_unnamed": {
+      "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_rolled_back_unnamed_zone_named": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_bypass_unconfirmed_rolled_back_unnamed_zone_unnamed": {
+      "message": "Area {area_number} wasn't armed. The panel didn't confirm the bypass for Zone {zone_number}. Bypasses were cleared: zones {cleared_zone_numbers}."
     },
     "arm_automatic_not_armed_bypass_unconfirmed_still_bypassed_named_zone_named": {
       "message": "{area_name} (area {area_number}) wasn't armed. The panel didn't confirm the bypass for {zone_name} (zone {zone_number}). These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
@@ -205,6 +217,12 @@
     },
     "arm_automatic_not_armed_disconnected_unnamed": {
       "message": "Area {area_number} wasn't armed. The panel isn't connected. Check its network connection, then try again."
+    },
+    "arm_automatic_not_armed_pin_required_rolled_back_named": {
+      "message": "{area_name} (area {area_number}) wasn't armed. Enter your user code to arm this area. Bypasses were cleared: zones {cleared_zone_numbers}."
+    },
+    "arm_automatic_not_armed_pin_required_rolled_back_unnamed": {
+      "message": "Area {area_number} wasn't armed. Enter your user code to arm this area. Bypasses were cleared: zones {cleared_zone_numbers}."
     },
     "arm_automatic_not_armed_pin_required_still_bypassed_named": {
       "message": "{area_name} (area {area_number}) wasn't armed. Enter your user code to arm this area. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
