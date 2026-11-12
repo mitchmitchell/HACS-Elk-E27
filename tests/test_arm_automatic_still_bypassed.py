@@ -12,6 +12,7 @@ from custom_components.elke27.arm_automatic_errors import (
     ARM_NOT_SENT_REASON,
     arm_automatic_not_armed_error,
 )
+from homeassistant.exceptions import ServiceValidationError
 
 
 def test_disconnected_reports_still_bypassed() -> None:
@@ -73,6 +74,32 @@ def test_bypass_unconfirmed_reports_still_bypassed() -> None:
     assert ph.get("still_bypassed_zone_numbers") == "2"
 
 
+def test_disconnected_still_bypassed_only() -> None:
+    """Panel disconnected with only still-bypassed zones lists them in the raise."""
+    snap = dataclasses.replace(
+        PanelSnapshot.empty(),
+        areas=MappingProxyType({1: AreaState(area_id=1, name="House", ready=True)}),
+        zones=MappingProxyType({2: ZoneState(zone_id=2, area_id=1, open=False)}),
+    )
+    err = arm_automatic_not_armed_error(
+        1,
+        snap,
+        entity_name="House",
+        reason=ARM_NOT_SENT_REASON,
+        zone=None,
+        rolled_back_zones=[],
+        still_bypassed_zones=[snap.zones[2]],
+        pin_required=False,
+    )
+    assert (
+        err.translation_key
+        == "arm_automatic_not_armed_disconnected_still_bypassed_named"
+    )
+    ph = err.translation_placeholders or {}
+    assert ph.get("still_bypassed_zone_numbers") == "2"
+    assert "cleared_zone_numbers" not in ph
+
+
 def test_pin_required_with_still_bypassed() -> None:
     """PIN required after partial bypass leaves still-bypassed zones in the raise."""
     snap = dataclasses.replace(
@@ -90,6 +117,7 @@ def test_pin_required_with_still_bypassed() -> None:
         still_bypassed_zones=[snap.zones[1]],
         pin_required=True,
     )
+    assert isinstance(err, ServiceValidationError)
     assert (
         err.translation_key
         == "arm_automatic_not_armed_pin_required_still_bypassed_named"

@@ -176,7 +176,7 @@ async def test_barrier_not_connected_raises_translation_key(
     await _load(hass, mock_config_entry, mock_client, _barrier(1, "OPEN"))
     mock_client.client.async_set_barrier = AsyncMock()
     hub = mock_config_entry.runtime_data.coordinator
-    object.__setattr__(hub, "_client", None)
+    await hub.async_shutdown_client()
     with pytest.raises(HomeAssistantError) as ctx:
         await hub.async_set_barrier(1, open_=False)
     assert ctx.value.translation_key == "barrier_not_connected"

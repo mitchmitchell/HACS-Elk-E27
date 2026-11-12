@@ -576,10 +576,11 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         ):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         assert ctx.exception.translation_key == "arm_automatic_multi_failed"
-        assert ctx.exception.translation_placeholders == {
-            "failed_count": "2",
-            "total_count": "2",
-        }
+        ph = ctx.exception.translation_placeholders or {}
+        assert ph.get("failed_count") == "2"
+        assert ph.get("total_count") == "2"
+        assert "alarm_control_panel.a_house:" in ph.get("failure_details", "")
+        assert "alarm_control_panel.b_garage:" in ph.get("failure_details", "")
         assert hass.bus.async_fire.call_count == 2
 
     def _rejected(self) -> Any:
@@ -626,6 +627,10 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             await self._run(hass, {"mode": "away", "code": "1234"}, entities)
         assert type(ctx.exception) is HomeAssistantError
         assert ctx.exception.translation_key == "arm_automatic_multi_failed"
+        ph = ctx.exception.translation_placeholders or {}
+        assert ph.get("failed_count") == "2"
+        assert "alarm_control_panel.a_house:" in ph.get("failure_details", "")
+        assert "alarm_control_panel.b_garage:" in ph.get("failure_details", "")
 
     def _refusal(self, panel_code: int) -> Any:
         return integration.code_rejected_error(Elke27PanelError(panel_code, "no"))
@@ -738,11 +743,14 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             unittest.mock.call(1, bypassed=False, pin="1234"),
         ]
         runtime.coordinator.async_arm_area.assert_awaited_once()
-        assert ctx.exception.translation_key in {
-            "not_ready",
-            "arm_automatic_not_armed_refused_rolled_back_named",
-            "arm_automatic_not_armed_refused_rolled_back_unnamed",
-        }
+        assert (
+            ctx.exception.translation_key
+            == "arm_automatic_not_armed_refused_rolled_back_named"
+        )
+        ph = ctx.exception.translation_placeholders or {}
+        assert ph.get("cleared_zone_numbers") == "2, 1"
+        assert ph.get("area_name") == "House"
+        assert ph.get("area_number") == "1"
         data = hass.bus.async_fire.call_args.args[1]
         assert data["rolled_back_zone_ids"] == [2, 1]
         assert data["still_bypassed_zone_ids"] == []

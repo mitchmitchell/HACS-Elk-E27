@@ -512,10 +512,10 @@ async def test_multi_area_mixed_user_refusals_combined_message(
             blocking=True,
         )
     assert err.value.translation_key == "arm_automatic_multi_failed"
-    assert err.value.translation_placeholders == {
-        "failed_count": "2",
-        "total_count": "2",
-    }
+    ph = err.value.translation_placeholders or {}
+    assert ph.get("failed_count") == "2"
+    assert ph.get("total_count") == "2"
+    assert ph.get("failure_details")
     assert CODE not in str(err.value)
 
 
@@ -537,10 +537,12 @@ async def test_multi_area_rejected_code_and_not_ready_combined_message(
             blocking=True,
         )
     assert err.value.translation_key == "arm_automatic_multi_failed"
-    assert err.value.translation_placeholders == {
-        "failed_count": "2",
-        "total_count": "2",
-    }
+    ph = err.value.translation_placeholders or {}
+    assert ph.get("failed_count") == "2"
+    assert ph.get("total_count") == "2"
+    assert "code_rejected" in ph.get("failure_details", "") or "not_ready" in ph.get(
+        "failure_details", ""
+    )
     assert CODE not in str(err.value)
 
 
