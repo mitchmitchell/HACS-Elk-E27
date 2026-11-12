@@ -33,6 +33,7 @@ from .arm_automatic_errors import (
 from .arming import (
     PIN_REQUIRED_REASON,
     ZoneBypassFailedError,
+    area_automatic_phrase,
     is_already_armed_refusal,
     is_definitive_refusal,
     zone_bypass_label,
@@ -147,12 +148,13 @@ async def _async_handle_alarm_arm_automatic(
     if not entity_ids:
         raise service_validation_error(translation_key="no_alarm_panel_target")
 
+    _validate_alarm_panel_targets(hass, entity_ids)
+
     # Each area is handled on its own: a failure in one area is reported and
     # does not stop the others, and areas armed earlier stay armed. Refusals
     # are never retried; within a failed area, its own bypasses are undone.
     failures: list[HomeAssistantError] = []
     failed_area_names: list[str] = []
-    registry = er.async_get(hass)
     for entity_id in entity_ids:
         try:
             await _async_arm_automatic_entity(
@@ -163,9 +165,7 @@ async def _async_handle_alarm_arm_automatic(
             )
         except HomeAssistantError as err:
             failures.append(err)
-            failed_area_names.append(
-                _arm_automatic_area_label(registry.async_get(entity_id), entity_id)
-            )
+            failed_area_names.append(_arm_automatic_failed_area_name(hass, entity_id))
     if len(failures) == 1 or _same_user_refusal(failures):
         raise failures[0]
     if failures:
@@ -176,17 +176,31 @@ async def _async_handle_alarm_arm_automatic(
         ) from failures[0]
 
 
-def _arm_automatic_area_label(
-    entity_entry: er.RegistryEntry | None, entity_id: str
-) -> str:
-    """Return the user-facing label for an alarm area entity."""
-    if entity_entry is None:
+def _validate_alarm_panel_targets(
+    hass: HomeAssistant, entity_ids: Sequence[str]
+) -> None:
+    """Reject the whole service call when any selected alarm area is invalid."""
+    for entity_id in entity_ids:
+        _entity_runtime_data(hass, entity_id, Platform.ALARM_CONTROL_PANEL)
+
+
+def _arm_automatic_failed_area_name(hass: HomeAssistant, entity_id: str) -> str:
+    """Return the panel area name for a multi-failure summary line."""
+    try:
+        entity_entry, runtime_data = _entity_runtime_data(
+            hass, entity_id, Platform.ALARM_CONTROL_PANEL
+        )
+    except HomeAssistantError:
         return entity_id
-    if entity_entry.name:
-        return entity_entry.name
-    if entity_entry.original_name:
-        return entity_entry.original_name
-    return entity_id
+    area_id = _area_id_from_unique_id(entity_entry.unique_id)
+    phrase = area_automatic_phrase(
+        area_id,
+        runtime_data.coordinator.get_snapshot(),
+        entity_name=None,
+    )
+    if phrase.named:
+        return phrase.name
+    return f"Area {phrase.number}"
 
 
 def _same_user_refusal(failures: list[HomeAssistantError]) -> bool:
