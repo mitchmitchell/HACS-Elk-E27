@@ -38,7 +38,6 @@ if _HAS_DEPS:
     )
     from test_commands import _hub, _snapshot, _two_area_snapshot
     from test_entities import _area_entity
-    from test_exception_translations import STRINGS_PATH, _exception_keys_from_strings
 
     from custom_components.elke27 import (
         arm_automatic_errors,
@@ -64,7 +63,6 @@ _ENTITIES: contextvars.ContextVar[dict[str, tuple[Any, Any]]] = contextvars.Cont
 
 def _patch_entity_lookup(test: unittest.TestCase) -> None:
     """Patch the entity lookups for the whole test, reading _ENTITIES."""
-
     for name, mock in (
         (
             "_entity_ids_from_service_call",
@@ -607,7 +605,11 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
         names = ph.get("failed_area_names", "")
         assert "House" in names
         assert "Garage" in names
-        catalog_keys = _exception_keys_from_strings(STRINGS_PATH)
+        catalog_keys = set(
+            json.loads((_COMPONENT / "strings.json").read_text(encoding="utf-8"))[
+                "exceptions"
+            ]
+        )
         for key in catalog_keys:
             assert key not in names
         assert "alarm_control_panel" not in names
@@ -699,9 +701,7 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             "arm_automatic_multi_failed_area_unnamed.message"
         )
 
-        async def _translations(
-            _hass: Any, _language: str, _category: str, integrations: Any = None
-        ) -> dict[str, str]:
+        async def _translations(*_args: Any, **_kwargs: Any) -> dict[str, str]:
             return {localize: "Sector {area_number}"}
 
         with (

@@ -155,7 +155,7 @@ async def _async_handle_alarm_arm_automatic(
     # does not stop the others, and areas armed earlier stay armed. Refusals
     # are never retried; within a failed area, its own bypasses are undone.
     failures: list[HomeAssistantError] = []
-    failed_area_names: list[str] = []
+    failed_entity_ids: list[str] = []
     for entity_id in entity_ids:
         try:
             await _async_arm_automatic_entity(
@@ -166,12 +166,14 @@ async def _async_handle_alarm_arm_automatic(
             )
         except HomeAssistantError as err:
             failures.append(err)
-            failed_area_names.append(
-                await _arm_automatic_failed_area_name(hass, entity_id)
-            )
+            failed_entity_ids.append(entity_id)
     if len(failures) == 1 or _same_user_refusal(failures):
         raise failures[0]
     if failures:
+        failed_area_names = [
+            await _arm_automatic_failed_area_name(hass, failed_id)
+            for failed_id in failed_entity_ids
+        ]
         raise arm_automatic_multi_failed_error(
             failed_area_names,
             len(failures),
@@ -696,29 +698,33 @@ def _area_id_from_unique_id(unique_id: str, *, entity_id: str) -> int:
     return _numeric_id_from_unique_id(unique_id, "area", entity_id=entity_id)
 
 
-def _numeric_id_from_unique_id(
-    unique_id: str, kind: str, *, entity_id: str
-) -> int:
+def _numeric_id_from_unique_id(unique_id: str, kind: str, *, entity_id: str) -> int:
     """
     Extract the numeric ID from an Elke27 ``<base>:<id>`` unique ID.
 
     The caller has already checked the entity's platform, so the kind
     (area or zone) is known; ``kind`` selects the invalid-entity message.
     """
-    invalid = _ENTITY_INVALID_KEY[
-        Platform.ALARM_CONTROL_PANEL if kind == "area" else Platform.BINARY_SENSOR
-    ]
-    placeholders = {"entity_id": entity_id}
     if ":" not in unique_id:
+        if kind == "area":
+            raise service_validation_error(
+                translation_key="entity_invalid_area",
+                translation_placeholders={"entity_id": entity_id},
+            )
         raise service_validation_error(
-            translation_key=invalid,
-            translation_placeholders=placeholders,
+            translation_key="entity_invalid_zone",
+            translation_placeholders={"entity_id": entity_id},
         )
     id_str = unique_id.rsplit(":", 1)[1]
     try:
         return int(id_str)
     except ValueError as err:
+        if kind == "area":
+            raise service_validation_error(
+                translation_key="entity_invalid_area",
+                translation_placeholders={"entity_id": entity_id},
+            ) from err
         raise service_validation_error(
-            translation_key=invalid,
-            translation_placeholders=placeholders,
+            translation_key="entity_invalid_zone",
+            translation_placeholders={"entity_id": entity_id},
         ) from err

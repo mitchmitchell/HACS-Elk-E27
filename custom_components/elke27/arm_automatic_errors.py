@@ -298,7 +298,8 @@ async def async_arm_automatic_multi_failed_area_label(
         integrations=[DOMAIN],
     )
     localize_key = (
-        f"component.{DOMAIN}.exceptions.{ARM_AUTOMATIC_MULTI_FAILED_AREA_UNNAMED}.message"
+        f"component.{DOMAIN}.exceptions."
+        f"{ARM_AUTOMATIC_MULTI_FAILED_AREA_UNNAMED}.message"
     )
     message = translations[localize_key]
     return message.format(**_area_placeholders(area))
