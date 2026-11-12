@@ -755,7 +755,20 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
                 garage,
             ),
         }
+        localize = (
+            "component.elke27.exceptions."
+            "arm_automatic_multi_failed_area_unnamed.message"
+        )
+
+        async def _translations(*_args: Any, **_kwargs: Any) -> dict[str, str]:
+            return {localize: "Area {area_number}"}
+
         with (
+            patch.object(
+                arm_automatic_errors.translation,
+                "async_get_translations",
+                _translations,
+            ),
             patch.object(integration.persistent_notification, "async_create"),
             patch.object(
                 integration.er,
