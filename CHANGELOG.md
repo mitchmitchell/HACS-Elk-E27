@@ -3,6 +3,38 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
+## [0.3.1] - 2026-11-12
+
+### Upgrade
+- **Update in HACS and restart Home Assistant.** No re-link, no delete and re-add. Entity
+  IDs, registry IDs, areas, automations, dashboards and history are kept. Minimum Home
+  Assistant is unchanged (2026.10.0).
+- Requires `elke27` 0.5.0, which HACS installs with the update.
+
+### Changed
+- Uses [`elke27` 0.5.0](https://github.com/mitchmitchell/elke27/releases/tag/v0.5.0) (was
+  0.4.0) ([#157](https://github.com/mitchmitchell/HACS-Elk-E27/pull/157)).
+- Diagnostic downloads and library DEBUG logs redact more fields (for example access,
+  coordinates, cloud URLs and password-like keys) via the library's wider
+  `redact_for_diagnostics` ([#126](https://github.com/mitchmitchell/elke27/issues/126) in
+  elke27).
+- The library's submodule logger names changed (for example `elke27_lib.session_thread`
+  instead of `elke27_lib.session`). The integration manifest still registers `elke27_lib`;
+  **`elke27_lib: debug` in logger configuration still enables DEBUG for all library
+  loggers** under that prefix.
+
+### Fixed
+- Library session teardown and reconnect after a drop ([#121](https://github.com/mitchmitchell/elke27/issues/121) in elke27).
+
+### Development
+- Vendor elke27 loopcheck into `scripts/lint` ([#153](https://github.com/mitchmitchell/HACS-Elk-E27/pull/153));
+  document lint steps and vendored checker policy in CONTRIBUTING
+  ([#155](https://github.com/mitchmitchell/HACS-Elk-E27/pull/155)).
+- Dependabot: ruff 0.17.3 ([#141](https://github.com/mitchmitchell/HACS-Elk-E27/pull/141)),
+  0.17.4 ([#156](https://github.com/mitchmitchell/HACS-Elk-E27/pull/156)); mypy ≥2.4.1
+  ([#143](https://github.com/mitchmitchell/HACS-Elk-E27/pull/143)); pip ≥26.3
+  ([#152](https://github.com/mitchmitchell/HACS-Elk-E27/pull/152)).
+
 ## [0.3.0] - 2026-11-04
 
 ### Upgrade
