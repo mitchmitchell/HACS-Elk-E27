@@ -3,6 +3,15 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
+## Unreleased
+
+### Fixed
+- Diagnostics no longer call `importlib.metadata` on the Home Assistant event loop
+  ([#162](https://github.com/mitchmitchell/HACS-Elk-E27/issues/162)).
+
+### Development
+- Loop-detector regression tests cover diagnostics version lookup and real UDP discovery.
+
 ## [0.3.1] - 2026-11-12
 
 ### Upgrade
