@@ -511,13 +511,15 @@ async def test_multi_area_mixed_user_refusals_combined_message(
             {"entity_id": panels, "mode": "away", ATTR_CODE: CODE},
             blocking=True,
         )
-    text = str(err.value)
-    assert text.startswith("Automatic arming failed for 2 of 2 areas")
-    assert panels[0] in text
-    assert panels[1] in text
-    assert "The area is not ready to arm" in text
-    assert "The area is in alarm" in text
-    assert CODE not in text
+    assert err.value.translation_key == "arm_automatic_multi_failed"
+    ph = err.value.translation_placeholders or {}
+    assert ph.get("failed_count") == "2"
+    assert ph.get("total_count") == "2"
+    names = ph.get("failed_area_names", "")
+    assert "House" in names
+    assert "Garage" in names
+    assert "not_ready" not in names
+    assert CODE not in str(err.value)
 
 
 async def test_multi_area_rejected_code_and_not_ready_combined_message(
@@ -537,10 +539,16 @@ async def test_multi_area_rejected_code_and_not_ready_combined_message(
             {"entity_id": panels, "mode": "away", ATTR_CODE: CODE},
             blocking=True,
         )
-    text = str(err.value)
-    assert "The panel rejected the code" in text
-    assert "The area is not ready to arm" in text
-    assert CODE not in text
+    assert err.value.translation_key == "arm_automatic_multi_failed"
+    ph = err.value.translation_placeholders or {}
+    assert ph.get("failed_count") == "2"
+    assert ph.get("total_count") == "2"
+    names = ph.get("failed_area_names", "")
+    assert "House" in names
+    assert "Garage" in names
+    assert "code_rejected" not in names
+    assert "not_ready" not in names
+    assert CODE not in str(err.value)
 
 
 async def test_arm_away_not_allowed_armed_without_error_log(

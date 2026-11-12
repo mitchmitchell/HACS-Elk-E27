@@ -4,10 +4,9 @@
 from __future__ import annotations
 
 import dataclasses
-import re
 from types import MappingProxyType
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 from elke27_lib import PanelSnapshot
 from elke27_lib.errors import (
@@ -27,7 +26,6 @@ from syrupy.assertion import SnapshotAssertion
 
 from custom_components.elke27 import cover as cover_mod
 from custom_components.elke27.const import DOMAIN
-from custom_components.elke27.coordinator import BARRIER_PERMISSION_MESSAGE
 from homeassistant.components.cover import DOMAIN as COVER_DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.const import (
@@ -164,10 +162,28 @@ async def test_outcome_unknown_not_retried(
     mock_client.client.async_set_barrier.side_effect = (
         errors.Elke27CommandOutcomeUnknownError(("barrier", "set_status"))
     )
-    with pytest.raises(HomeAssistantError, match="check the door"):
+    with pytest.raises(HomeAssistantError) as ctx:
         await _call(hass, SERVICE_CLOSE_COVER)
+    assert ctx.value.translation_key == "barrier_outcome_unknown"
     mock_client.client.async_set_barrier.assert_awaited_once()
     mock_client.client.async_refresh_barrier.assert_awaited_once_with(1)
+
+
+async def test_barrier_not_connected_raises_translation_key(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: ClientHarness
+) -> None:
+    """No client means a translated barrier_not_connected error, not a bare string."""
+    await _load(hass, mock_config_entry, mock_client, _barrier(1, "OPEN"))
+    hub = mock_config_entry.runtime_data.coordinator
+    await hub.async_shutdown_client()
+    with (
+        patch.object(
+            type(hub), "is_ready", new_callable=PropertyMock, return_value=True
+        ),
+        pytest.raises(HomeAssistantError) as ctx,
+    ):
+        await _call(hass, SERVICE_CLOSE_COVER)
+    assert ctx.value.translation_key == "barrier_not_connected"
 
 
 async def test_permission_refusal_message(
@@ -176,8 +192,9 @@ async def test_permission_refusal_message(
     """A permission refusal names automation authority and is not retried."""
     await _load(hass, mock_config_entry, mock_client, _barrier(1, "OPEN"))
     mock_client.client.async_set_barrier.side_effect = Elke27PermissionError()
-    with pytest.raises(HomeAssistantError, match=re.escape(BARRIER_PERMISSION_MESSAGE)):
+    with pytest.raises(HomeAssistantError) as ctx:
         await _call(hass, SERVICE_CLOSE_COVER)
+    assert ctx.value.translation_key == "barrier_permission_denied"
     mock_client.client.async_set_barrier.assert_awaited_once()
 
 

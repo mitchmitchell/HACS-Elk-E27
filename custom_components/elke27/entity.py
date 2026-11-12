@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
@@ -15,7 +14,11 @@ from homeassistant.helpers.device_registry import (
 )
 
 from .const import CONF_PANEL_MAC, CONF_PANEL_MAC_FILLED, DOMAIN
-from .errors import NOT_ACCEPTED_MESSAGE
+from .errors import (
+    NOT_ACCEPTED_TRANSLATION_KEY,
+    NOT_CONNECTED_TRANSLATION_KEY,
+    homeassistant_error,
+)
 from .identity import panel_serial_from_info
 
 if TYPE_CHECKING:
@@ -271,9 +274,6 @@ def panel_display_name(
     return get_panel_field(snapshot, coordinator.panel_name, "name") or entry.title
 
 
-NOT_CONNECTED_MESSAGE = "The panel is not connected; the command was not sent."
-
-
 def raise_if_not_sent(*, sent: bool, coordinator: Elke27DataUpdateCoordinator) -> None:
     """
     Raise when the coordinator reports a command did not go through.
@@ -284,5 +284,5 @@ def raise_if_not_sent(*, sent: bool, coordinator: Elke27DataUpdateCoordinator) -
     if sent:
         return
     if coordinator.client is None:
-        raise HomeAssistantError(NOT_CONNECTED_MESSAGE)
-    raise HomeAssistantError(NOT_ACCEPTED_MESSAGE)
+        raise homeassistant_error(translation_key=NOT_CONNECTED_TRANSLATION_KEY)
+    raise homeassistant_error(translation_key=NOT_ACCEPTED_TRANSLATION_KEY)

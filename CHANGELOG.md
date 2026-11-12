@@ -3,6 +3,11 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
 
+## Unreleased
+
+### Added
+- Translated exception messages for panel commands and services (`exceptions` in `strings.json`).
+
 ## [0.3.1] - 2026-11-12
 
 ### Upgrade
