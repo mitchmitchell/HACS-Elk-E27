@@ -11,6 +11,9 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 ### Changed
 - Install instructions, the HACS button, the FAQ and release links now point at the official
   ElkProducts/HACS-Elk-E27 repository; issues stay on the development repository.
+- Requires [`elke27` 0.5.1](https://github.com/mitchmitchell/elke27/releases/tag/v0.5.1)
+  (was 0.5.0) ([#162](https://github.com/mitchmitchell/HACS-Elk-E27/issues/162)).
+  Closes #162.
 
 ### Fixed
 - Thermostat climate entities use Home Assistant's native temperature attributes

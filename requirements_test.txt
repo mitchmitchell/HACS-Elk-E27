@@ -2,5 +2,5 @@
 # and pytest; keep it matched to the homeassistant version in requirements.txt.
 -r requirements.txt
 pytest-homeassistant-custom-component==0.13.375
-elke27==0.5.0
+elke27==0.5.1
 mypy>=2.4.1
