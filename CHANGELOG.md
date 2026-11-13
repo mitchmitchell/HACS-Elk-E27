@@ -3,26 +3,38 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/ElkProducts/HACS-Elk-E27/releases).
 
-## Unreleased
+## [0.3.2] - 2026-11-13
+
+### Upgrade
+- **Update in HACS and restart Home Assistant.** No re-link, no delete and re-add. Entity
+  IDs, registry IDs, areas, automations, dashboards and history are kept. Minimum Home
+  Assistant is unchanged (2026.10.0).
+- Requires `elke27` 0.5.1, which HACS installs with the update.
+- **Garage doors:** added in 0.2.1 but not yet tested on hardware; see
+  [Garage doors](README.md#garage-doors). Garage hardware testing remains waived (not a
+  pass).
 
 ### Added
-- Translated exception messages for panel commands and services (`exceptions` in `strings.json`).
+- Translated exception messages for panel commands and services (`exceptions` in
+  `strings.json`) ([#118](https://github.com/mitchmitchell/HACS-Elk-E27/pull/118)).
 
 ### Changed
 - Install instructions, the HACS button, the FAQ and release links now point at the official
-  ElkProducts/HACS-Elk-E27 repository; issues stay on the development repository.
-- Requires [`elke27` 0.5.1](https://github.com/mitchmitchell/elke27/releases/tag/v0.5.1)
-  (was 0.5.0) ([#162](https://github.com/mitchmitchell/HACS-Elk-E27/issues/162)).
-  Closes #162.
+  ElkProducts/HACS-Elk-E27 repository; issues stay on the development repository
+  ([#167](https://github.com/mitchmitchell/HACS-Elk-E27/pull/167)).
+- Uses [`elke27` 0.5.1](https://github.com/mitchmitchell/elke27/releases/tag/v0.5.1) (was
+  0.5.0) ([#168](https://github.com/mitchmitchell/HACS-Elk-E27/pull/168)).
 
 ### Fixed
 - Thermostat climate entities use Home Assistant's native temperature attributes
   (`native_temperature_unit`, `native_current_temperature`, and native setpoints) so
   import is clean on Home Assistant 2026.11 and later (deprecated API removal 2027.11).
   A Home Assistant 2026.10 compatibility shim remains until minimum and test pins move
-  to 2026.11 ([#166](https://github.com/mitchmitchell/HACS-Elk-E27/issues/166)).
+  to 2026.11 ([#165](https://github.com/mitchmitchell/HACS-Elk-E27/pull/165),
+  [#166](https://github.com/mitchmitchell/HACS-Elk-E27/issues/166)).
 - Diagnostics no longer call `importlib.metadata` on the Home Assistant event loop
-  ([#162](https://github.com/mitchmitchell/HACS-Elk-E27/issues/162)).
+  ([#163](https://github.com/mitchmitchell/HACS-Elk-E27/pull/163),
+  [#162](https://github.com/mitchmitchell/HACS-Elk-E27/issues/162)).
 
 ## [0.3.1] - 2026-11-12
 
