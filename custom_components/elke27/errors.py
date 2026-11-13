@@ -16,6 +16,7 @@ from elke27_lib.errors import (
     Elke27Error,
     Elke27InvalidArgument,
     Elke27LinkRequiredError,
+    Elke27StayInstantRequiredError,
     Elke27TimeoutError,
 )
 
@@ -143,6 +144,20 @@ def arm_mode_not_supported_error() -> HomeAssistantError:
 def arm_mode_not_supported_validation() -> ServiceValidationError:
     """Return the service validation error for an unsupported arming mode."""
     return service_validation_error(translation_key="arm_mode_not_supported")
+
+
+def arm_night_command_error(err: BaseException) -> HomeAssistantError | None:
+    """Return a translated night-arm error, or None for generic command mapping."""
+    if isinstance(err, Elke27StayInstantRequiredError):
+        return homeassistant_error(translation_key="night_arm_stay_instant_required")
+    if not isinstance(err, Elke27InvalidArgument):
+        return None
+    message = str(err)
+    if "firmware version is unknown" in message:
+        return homeassistant_error(translation_key="night_arm_firmware_unknown")
+    if "requires panel application firmware" in message:
+        return homeassistant_error(translation_key="night_arm_firmware_too_old")
+    return None
 
 
 def panel_error_code(err: BaseException | None) -> int | None:

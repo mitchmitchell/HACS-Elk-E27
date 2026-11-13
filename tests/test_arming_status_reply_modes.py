@@ -55,6 +55,15 @@ def test_vacation_exit_delay_counts_as_arming() -> None:
     assert snap.areas[1].arm_cmd_mode is ArmMode.ARMED_VACATION
 
 
+def test_night_exit_delay_counts_as_arming() -> None:
+    """An exit delay toward ARMED_NIGHT counts as arming."""
+    reply = _reply("DISARMED", arm_cmd_state="ARMED_STAY_INST", ee_timer=30)
+    assert area_arming_from_status_reply(reply) is True
+    snap = snapshot_with_status(panel_snapshot(), 1, reply, None)
+    assert snap is not None
+    assert snap.areas[1].arm_cmd_mode is ArmMode.ARMED_NIGHT
+
+
 @pytest.mark.parametrize("arm_state", [UNKNOWN_ARMED_LOOKING, "ALARM_MEM"])
 def test_unknown_reply_keeps_snapshot_arm_mode(arm_state: str) -> None:
     """An unknown arm_state leaves the cached arm mode unchanged."""

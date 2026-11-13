@@ -80,8 +80,10 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 - **Arm away**, **arm home** (the panel's *Stay* mode) and **disarm**. Each one needs your
   numeric alarm user code, which is entered in the Home Assistant keypad.
-- Arm night and arm vacation are not offered from Home Assistant. If the area is armed in
-  *Night* or *Vacation* mode at a keypad, it shows `armed_night` or `armed_vacation`.
+- **Arm night** (the panel's *Stay Instant* mode) is offered when the panel reports
+  application firmware 0.5.37 or newer and night arm is supported for that area. Arm vacation
+  is not offered from Home Assistant. If the area is armed in *Vacation* mode at a keypad, it
+  shows `armed_vacation`.
 - **Arm away may end up as armed home.** If no entry/exit zone opens before the exit delay
   ends, the panel's *auto-stay* switches the area to Stay and it shows `armed_home`. This is
   panel behavior. Check for both `armed_away` and `armed_home` in automations.
@@ -673,7 +675,8 @@ These are by design or limits of the panel.
 - **Arming**
   - A numeric user code is always required to arm or disarm. All-zero codes are rejected and
     leading zeros are dropped.
-  - **Arm night** and **arm vacation** are not offered. The E27 has no Night mode.
+  - **Arm night** is offered when the panel reports night arm support; **arm vacation** is not
+    offered from Home Assistant.
   - Arm away and custom bypass may end as `armed_home` through the panel's auto-stay.
   - **Custom bypass** always arms in away mode, and only bypasses open zones in that area.
   - Disarming an armed area clears all zone bypasses (panel behavior).

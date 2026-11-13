@@ -10,6 +10,7 @@ import time
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from elke27_lib import (
+    ArmMode,
     ClientConfig,
     CommandResult,
     Elke27Event,
@@ -69,6 +70,7 @@ from .errors import (
     COMMAND_ERRORS,
     NOT_ACCEPTED_TRANSLATION_KEY,
     NOT_CONNECTED_TRANSLATION_KEY,
+    arm_night_command_error,
     code_rejected_error,
     command_error,
     command_homeassistant_error,
@@ -1020,6 +1022,13 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         except COMMAND_ERRORS as err:
             _log_command_failure("Area", area_id, "arming", err)
             self._note_command_error(err)
+            night_err = arm_night_command_error(err)
+            if night_err is not None:
+                raise night_err from err
+            if _is_outcome_unknown(err) and arm_mode is ArmMode.ARMED_NIGHT:
+                raise homeassistant_error(
+                    translation_key="night_arm_outcome_unknown"
+                ) from err
             raise command_error(err) from err
         await self._async_after_write(
             "arm", refresh_ok=refresh_ok, area_id=area_id, epoch=epoch

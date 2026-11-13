@@ -81,7 +81,7 @@ class Elke27AreaAlarmControlPanel(
     _attr_has_entity_name = True
     _attr_code_format = CodeFormat.NUMBER
     _attr_code_arm_required = True
-    _attr_supported_features = (
+    _base_supported_features = (
         AlarmControlPanelEntityFeature.ARM_AWAY
         | AlarmControlPanelEntityFeature.ARM_HOME
         | AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
@@ -156,6 +156,20 @@ class Elke27AreaAlarmControlPanel(
         """Arm the area in home mode."""
         async with self.coordinator.area_arm_lock(self._area_id):
             await self._async_arm(ArmMode.ARMED_STAY, code)
+
+    async def async_alarm_arm_night(self, code: str | None = None) -> None:
+        """Arm the area in night mode (panel Stay Instant)."""
+        async with self.coordinator.area_arm_lock(self._area_id):
+            await self._async_arm(ArmMode.ARMED_NIGHT, code)
+
+    @property
+    def supported_features(self) -> AlarmControlPanelEntityFeature:
+        """Return arm features advertised for this area."""
+        features = self._base_supported_features
+        area = _get_area(self.coordinator.data, self._area_id)
+        if area is not None and area.night_arm_supported:
+            features |= AlarmControlPanelEntityFeature.ARM_NIGHT
+        return features
 
     async def async_alarm_arm_custom_bypass(self, code: str | None = None) -> None:
         """Arm the area with a custom bypass."""

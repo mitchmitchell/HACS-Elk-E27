@@ -122,13 +122,19 @@ class HubArmingTest(unittest.IsolatedAsyncioTestCase):
                 return_result=True,
             )
 
-    async def test_arm_night_is_rejected(self) -> None:
-        """The E27 has no night mode; arm night never reaches the panel."""
+    async def test_arm_night_uses_library_api(self) -> None:
+        """Arm night calls async_arm_area with ARMED_NIGHT."""
         client = _client()
         hub = _hub_with_client(client)
-        with self.assertRaises(HomeAssistantError):
-            await hub.async_arm_area(1, ArmMode.ARMED_NIGHT, "1234")
-        client.async_arm_area.assert_not_called()
+        assert await hub.async_arm_area(1, ArmMode.ARMED_NIGHT, "1234")
+        client.async_arm_area.assert_awaited_once_with(
+            1,
+            mode=ArmMode.ARMED_NIGHT,
+            pin="1234",
+            auto_stay_cancel=False,
+            exit_delay_cancel=False,
+            return_result=True,
+        )
 
     async def test_panel_rejection_reason_is_shown_and_logged(self) -> None:
         """A not-ready refusal is a translated user error; the code is logged."""
