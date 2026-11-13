@@ -76,7 +76,7 @@ async def async_get_config_entry_diagnostics(
         "manufacturer_number": MANUFACTURER_NUMBER,
         "link_keys_present": CONF_LINK_KEYS_JSON in entry.data,
         "integration_version": str(integration.version),
-        "elke27_version": _elke27_version(),
+        "elke27_version": await hass.async_add_executor_job(_elke27_version),
         "legacy_registry_migration": migration_diagnostics(entry),
     }
     if entry.state is not ConfigEntryState.LOADED:
