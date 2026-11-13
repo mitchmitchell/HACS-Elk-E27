@@ -1,12 +1,16 @@
 # Changelog
 
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
-[Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
+[Releases page](https://github.com/ElkProducts/HACS-Elk-E27/releases).
 
 ## Unreleased
 
 ### Added
 - Translated exception messages for panel commands and services (`exceptions` in `strings.json`).
+
+### Changed
+- Install instructions, the HACS button, the FAQ and release links now point at the official
+  ElkProducts/HACS-Elk-E27 repository; issues stay on the development repository.
 
 ### Fixed
 - Thermostat climate entities use Home Assistant's native temperature attributes
