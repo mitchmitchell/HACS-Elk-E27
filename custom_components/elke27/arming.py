@@ -199,7 +199,12 @@ def area_arming_from_status_reply(area_payload: Mapping[str, Any]) -> bool:
     if not isinstance(cmd_raw, str):
         return False
     cmd_mode = _arm_mode_from_text(cmd_raw)
-    if cmd_mode not in (ArmMode.ARMED_AWAY, ArmMode.ARMED_STAY, ArmMode.ARMED_VACATION):
+    if cmd_mode not in (
+        ArmMode.ARMED_AWAY,
+        ArmMode.ARMED_STAY,
+        ArmMode.ARMED_NIGHT,
+        ArmMode.ARMED_VACATION,
+    ):
         return False
     ee_timer = area_payload.get("ee_timer")
     if type(ee_timer) is not int or ee_timer <= 0:
@@ -361,8 +366,7 @@ def _validated_pin(pin: str) -> str:
 
 def _library_arm_mode(mode: Any) -> ArmMode:
     """Map an integration arm request to the elke27 arm mode."""
-    # The E27 has Away and Stay arming only; it has no Night mode.
-    if mode in (ArmMode.ARMED_STAY, ArmMode.ARMED_AWAY):
+    if mode in (ArmMode.ARMED_STAY, ArmMode.ARMED_AWAY, ArmMode.ARMED_NIGHT):
         return ArmMode(mode)
     # Custom bypass: the entity bypasses open zones first, then arms away.
     if isinstance(mode, str) and mode.upper() == "ARMED_CUSTOM_BYPASS":

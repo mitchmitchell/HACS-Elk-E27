@@ -69,7 +69,7 @@ async def test_alarm_state_published_to_hass(
         ("DISARMED", "disarmed"),
         ("ARMED_STAY", "armed_home"),
         ("ARMED_AWAY", "armed_away"),
-        ("ARMED_STAY_INST", "armed_home"),
+        ("ARMED_STAY_INST", "armed_night"),
         ("ARMED_VACATION", "armed_vacation"),
         ("ALARM_MEM", "unknown"),
         ("ARMED_SOMETHING_NEW", "unknown"),

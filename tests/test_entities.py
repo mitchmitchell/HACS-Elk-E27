@@ -164,21 +164,43 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
         assert hub.async_set_zone_bypass.await_count == 1
         hub.async_arm_area.assert_not_called()
 
-    async def test_arm_night_not_offered(self) -> None:
-        """The E27 has no night mode, so arm night is not advertised or sent."""
+    def test_arm_night_feature_flag(self) -> None:
+        """ARM_NIGHT is advertised only when night_arm_supported is True."""
+        for night_arm_supported, expects_night in ((True, True), (False, False)):
+            base = _two_area_snapshot()
+            area = dataclasses.replace(
+                base.areas[1], night_arm_supported=night_arm_supported
+            )
+            snapshot = dataclasses.replace(
+                base, areas=MappingProxyType({**base.areas, 1: area})
+            )
+            entity = _area_entity(snapshot, _hub())
+            has_night = bool(
+                entity.supported_features & AlarmControlPanelEntityFeature.ARM_NIGHT
+            )
+            assert has_night is expects_night
+            assert entity.supported_features & AlarmControlPanelEntityFeature.ARM_AWAY
+            assert entity.supported_features & AlarmControlPanelEntityFeature.ARM_HOME
+            assert (
+                entity.supported_features
+                & AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
+            )
+
+    async def test_arm_night_sends_armed_night(self) -> None:
+        """Arm night is implemented and calls the hub with ARMED_NIGHT."""
         hub = _hub()
-        entity = _area_entity(_two_area_snapshot(), hub)
-        features = entity.supported_features
-        assert not features & AlarmControlPanelEntityFeature.ARM_NIGHT
-        assert features & AlarmControlPanelEntityFeature.ARM_AWAY
-        assert features & AlarmControlPanelEntityFeature.ARM_HOME
-        assert features & AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
-        # Not overridden: Home Assistant's base implementation is not supported.
+        base = _two_area_snapshot()
+        area = dataclasses.replace(base.areas[1], night_arm_supported=True)
+        snapshot = dataclasses.replace(
+            base, areas=MappingProxyType({**base.areas, 1: area})
+        )
+        entity = _area_entity(snapshot, hub)
         assert (
             type(entity).async_alarm_arm_night
-            is AlarmControlPanelEntity.async_alarm_arm_night
+            is not AlarmControlPanelEntity.async_alarm_arm_night
         )
-        hub.async_arm_area.assert_not_called()
+        await entity.async_alarm_arm_night("1234")
+        hub.async_arm_area.assert_awaited_once_with(1, ArmMode.ARMED_NIGHT, "1234")
 
     def test_attributes_are_area_scoped(self) -> None:
         """Attributes list only this area's faulted zones and drop dead fields."""
@@ -240,6 +262,17 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
             area_id=1,
             arm_mode=ArmMode.DISARMED,
             arm_cmd_mode=ArmMode.ARMED_AWAY,
+            ee_timer=45,
+            alarm_zone="",
+        )
+        assert _area_state_to_ha(area) is AlarmControlPanelState.ARMING
+
+    def test_night_exit_delay_shows_arming(self) -> None:
+        """Exit delay toward night arm maps to ARMING."""
+        area = AreaState(
+            area_id=1,
+            arm_mode=ArmMode.DISARMED,
+            arm_cmd_mode=ArmMode.ARMED_NIGHT,
             ee_timer=45,
             alarm_zone="",
         )

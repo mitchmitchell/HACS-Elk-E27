@@ -326,6 +326,18 @@
     "arm_mode_not_supported": {
       "message": "This panel doesn't support that arming mode."
     },
+    "night_arm_firmware_too_old": {
+      "message": "Arm night needs panel application firmware 0.5.37 or newer."
+    },
+    "night_arm_firmware_unknown": {
+      "message": "Arm night isn't available because the panel application firmware version is unknown."
+    },
+    "night_arm_outcome_unknown": {
+      "message": "Arm night may or may not have reached the panel. Check the area on the keypad before trying again."
+    },
+    "night_arm_stay_instant_required": {
+      "message": "Arm night needs Stay Instant enabled for this area in panel settings."
+    },
     "auth_failed": {
       "message": "The panel no longer accepts the stored link. Select Reconfigure and enter the access code and passphrase."
     },
