@@ -1,19 +1,20 @@
 # Changelog
 
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
-[Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
+[Releases page](https://github.com/ElkProducts/HACS-Elk-E27/releases).
 
 ## Unreleased
 
 ### Added
 - Translated exception messages for panel commands and services (`exceptions` in `strings.json`).
 
+### Changed
+- Install instructions, the HACS button, the FAQ and release links now point at the official
+  ElkProducts/HACS-Elk-E27 repository; issues stay on the development repository.
+
 ### Fixed
 - Diagnostics no longer call `importlib.metadata` on the Home Assistant event loop
   ([#162](https://github.com/mitchmitchell/HACS-Elk-E27/issues/162)).
-
-### Development
-- Loop-detector regression tests cover diagnostics version lookup and real UDP discovery.
 
 ## [0.3.1] - 2026-11-12
 
