@@ -13,6 +13,11 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   ElkProducts/HACS-Elk-E27 repository; issues stay on the development repository.
 
 ### Fixed
+- Thermostat climate entities use Home Assistant's native temperature attributes
+  (`native_temperature_unit`, `native_current_temperature`, and native setpoints) so
+  import is clean on Home Assistant 2026.11 and later (deprecated API removal 2027.11).
+  A Home Assistant 2026.10 compatibility shim remains until minimum and test pins move
+  to 2026.11 ([#166](https://github.com/mitchmitchell/HACS-Elk-E27/issues/166)).
 - Diagnostics no longer call `importlib.metadata` on the Home Assistant event loop
   ([#162](https://github.com/mitchmitchell/HACS-Elk-E27/issues/162)).
 
