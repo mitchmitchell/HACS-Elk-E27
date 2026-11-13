@@ -40,6 +40,10 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+_USE_NATIVE_CLIMATE_TEMPERATURES = (
+    "native_current_temperature" in ClimateEntity.__dict__
+)
+
 PARALLEL_UPDATES = 0
 
 _HVAC_TO_TSTAT_MODE: dict[HVACMode, str] = {
@@ -110,7 +114,9 @@ class Elke27Thermostat(
         HVACMode.HEAT_COOL,
     ]
     _attr_fan_modes = [FAN_AUTO, FAN_ON]  # noqa: RUF012 -- class level fan modes list
-    _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
+    _attr_native_temperature_unit = UnitOfTemperature.FAHRENHEIT
+    if not _USE_NATIVE_CLIMATE_TEMPERATURES:
+        _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
     _attr_min_temp = 40
     _attr_max_temp = 99
 
@@ -168,8 +174,8 @@ class Elke27Thermostat(
         return None
 
     @property
-    def current_temperature(self) -> float | None:
-        """Return the current temperature."""
+    def native_current_temperature(self) -> float | None:
+        """Return the current temperature in the native unit."""
         tstat = _get_tstat(self.coordinator.data, self._tstat_id)
         if tstat is None:
             return None
@@ -187,16 +193,16 @@ class Elke27Thermostat(
         return float(tstat.humidity)
 
     @property
-    def target_temperature_low(self) -> float | None:
-        """Return the current low setpoint."""
+    def native_target_temperature_low(self) -> float | None:
+        """Return the current low setpoint in the native unit."""
         tstat = _get_tstat(self.coordinator.data, self._tstat_id)
         if tstat is None:
             return None
         return normalize_temperature(tstat.heat_setpoint)
 
     @property
-    def target_temperature_high(self) -> float | None:
-        """Return the current high setpoint."""
+    def native_target_temperature_high(self) -> float | None:
+        """Return the current high setpoint in the native unit."""
         tstat = _get_tstat(self.coordinator.data, self._tstat_id)
         if tstat is None:
             return None
@@ -213,6 +219,23 @@ class Elke27Thermostat(
         if isinstance(fan_mode, str):
             return _TSTAT_TO_FAN_MODE.get(fan_mode.strip().upper())
         return None
+
+    if not _USE_NATIVE_CLIMATE_TEMPERATURES:
+
+        @property
+        def current_temperature(self) -> float | None:
+            """Return the current temperature."""
+            return self.native_current_temperature
+
+        @property
+        def target_temperature_low(self) -> float | None:
+            """Return the current low setpoint."""
+            return self.native_target_temperature_low
+
+        @property
+        def target_temperature_high(self) -> float | None:
+            """Return the current high setpoint."""
+            return self.native_target_temperature_high
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set a new HVAC mode."""
