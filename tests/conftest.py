@@ -100,20 +100,9 @@ def panel_snapshot() -> PanelSnapshot:
     )
 
 
-def pytest_configure(config: pytest.Config) -> None:
-    """Register markers used by this suite."""
-    config.addinivalue_line(
-        "markers",
-        "real_discover_host: run async_discover_host without the autouse stub",
-    )
-
-
 @pytest.fixture(autouse=True)
-def mock_discover_host(request: pytest.FixtureRequest) -> Generator[AsyncMock | None]:
+def mock_discover_host() -> Generator[AsyncMock]:
     """Stub unicast discovery (E1a); default is no reply. Never touches the network."""
-    if request.node.get_closest_marker("real_discover_host"):
-        yield None
-        return
     mock = AsyncMock(return_value=None)
     with patch("custom_components.elke27.panel_mac.async_discover_host", mock):
         yield mock

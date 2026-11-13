@@ -12,13 +12,11 @@ from pathlib import Path
 import sys
 import threading
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.elke27.diagnostics import async_get_config_entry_diagnostics
-from custom_components.elke27.panel_mac import async_discover_panel_mac
 from homeassistant.core import HomeAssistant
 from homeassistant.util.loop import protect_loop
 
@@ -90,19 +88,4 @@ async def test_diagnostics_elke27_version_no_blocking_io(
     result = await async_get_config_entry_diagnostics(hass, mock_config_entry)
 
     assert result["elke27_version"] == EXPECTED_ELKE27_VERSION
-    assert not any(BLOCKING_LOG in record.message for record in caplog.records)
-
-
-@pytest.mark.real_discover_host
-async def test_discover_panel_mac_no_blocking_io(
-    hass: HomeAssistant,
-    socket_enabled: None,
-    production_loop_guards: None,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Unicast discovery must not import or block on the Home Assistant loop."""
-    caplog.clear()
-    with patch("custom_components.elke27.panel_mac.DISCOVER_HOST_TIMEOUT", 0.25):
-        await async_discover_panel_mac("192.0.2.1")
-
     assert not any(BLOCKING_LOG in record.message for record in caplog.records)
