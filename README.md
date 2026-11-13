@@ -1,7 +1,7 @@
 # Elk E27 Alarm Engine Integration for Home Assistant
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
-[![GitHub release](https://img.shields.io/github/v/release/mitchmitchell/HACS-Elk-E27)](https://github.com/mitchmitchell/HACS-Elk-E27/releases)
+[![GitHub release](https://img.shields.io/github/v/release/ElkProducts/HACS-Elk-E27)](https://github.com/ElkProducts/HACS-Elk-E27/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 The **Elk E27 Alarm Engine Integration** is a Home Assistant custom integration for the **Elk Products E27 Alarm Engine**. It connects
@@ -12,16 +12,15 @@ thermostats and outputs become light, lock, climate and switch entities. All com
 through the [`elke27`](https://github.com/mitchmitchell/elke27) Python library
 ([PyPI](https://pypi.org/project/elke27/)).
 
-> **Canonical repository:** [mitchmitchell/HACS-Elk-E27](https://github.com/mitchmitchell/HACS-Elk-E27).
-> [ElkProducts/HACS-Elk-E27](https://github.com/ElkProducts/HACS-Elk-E27) is a mirror with the
-> same code and releases. Add only one of them to HACS, and report issues on the canonical
-> repository.
+> **Official repository:** [ElkProducts/HACS-Elk-E27](https://github.com/ElkProducts/HACS-Elk-E27).
+> Add only that repository to HACS, not the development repository
+> ([mitchmitchell/HACS-Elk-E27](https://github.com/mitchmitchell/HACS-Elk-E27)) as well.
 
 ## Quick start
 
 1. Install it as a HACS **custom repository** (it is not in the default HACS store): in HACS,
    open the **⋮** menu → **Custom repositories**, add
-   `https://github.com/mitchmitchell/HACS-Elk-E27` with type **Integration**, click **Add**,
+   `https://github.com/ElkProducts/HACS-Elk-E27` with type **Integration**, click **Add**,
    then search HACS for **Elk E27 Alarm Engine Integration**, download it and restart Home Assistant.
    Details under [Installation](#installation).
 2. Get the panel's **access code** and **passphrase** from your installer. These link Home
@@ -242,7 +241,7 @@ This integration is **not in the default HACS store**. You add it to HACS as a
 
 1. In Home Assistant, open **HACS**.
 2. Open the **⋮** (three-dot) menu in the top right and choose **Custom repositories**.
-3. Enter `https://github.com/mitchmitchell/HACS-Elk-E27`, set **Type** to **Integration**,
+3. Enter `https://github.com/ElkProducts/HACS-Elk-E27`, set **Type** to **Integration**,
    and click **Add**.
 4. Search HACS for **Elk E27 Alarm Engine Integration**, open it and click **Download**.
 5. **Restart Home Assistant.**
@@ -250,14 +249,14 @@ This integration is **not in the default HACS store**. You add it to HACS as a
 The button below opens this repository in HACS and offers to add it as a custom repository
 for you:
 
-[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mitchmitchell&repository=HACS-Elk-E27&category=integration)
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ElkProducts&repository=HACS-Elk-E27&category=integration)
 
 Once added, HACS notifies you when new releases come out.
 
 ### Manual
 
 1. Download the latest release from the
-   [Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases).
+   [Releases page](https://github.com/ElkProducts/HACS-Elk-E27/releases).
 2. Copy the `custom_components/elke27` folder into your Home Assistant configuration
    directory, so that you end up with `<config>/custom_components/elke27/manifest.json`.
 3. **Restart Home Assistant.**
@@ -958,9 +957,9 @@ refuses the disarm (for example a wrong code). A refused disarm, or one that's n
 [`elke27.alarm_arm_automatic`](#elke27alarm_arm_automatic).
 
 **Why can't I find it in HACS?** It isn't in the default HACS store. Add
-`https://github.com/mitchmitchell/HACS-Elk-E27` as a custom repository (type
-**Integration**) first; see [Installation](#installation). Add only the canonical repository,
-not the ElkProducts mirror as well.
+`https://github.com/ElkProducts/HACS-Elk-E27` as a custom repository (type
+**Integration**) first; see [Installation](#installation). Add only the official
+Elk Products repository, not the development repository as well.
 
 **Does it retry if something fails?** It keeps reconnecting after a dropped connection, but a
 single command or a refused request is not retried. See [Retries and errors](#retries-and-errors).
@@ -1198,7 +1197,7 @@ these changes:
 ## Releases and changelog
 
 Release notes for each version are on the
-[Releases page](https://github.com/mitchmitchell/HACS-Elk-E27/releases). Library changes
+[Releases page](https://github.com/ElkProducts/HACS-Elk-E27/releases). Library changes
 are tracked in the [`elke27` repository](https://github.com/mitchmitchell/elke27).
 
 ---
