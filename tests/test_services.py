@@ -44,7 +44,10 @@ if _HAS_DEPS:
         coordinator as elke27_hub,
         services as integration,
     )
-    from custom_components.elke27.arming import ZoneBypassFailedError
+    from custom_components.elke27.arming import (
+        ZoneBypassFailedError,
+        reconcile_snapshot_area,
+    )
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
@@ -1342,10 +1345,12 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             areas=MappingProxyType(
                 {
                     **before.areas,
-                    1: AreaState(
-                        area_id=1,
-                        name="House",
-                        arm_mode=ArmMode.DISARMED,
+                    1: reconcile_snapshot_area(
+                        AreaState(
+                            area_id=1,
+                            name="House",
+                            arm_mode=ArmMode.DISARMED,
+                        ),
                         arm_cmd_mode=ArmMode.ARMED_AWAY,
                         ee_timer=30,
                         alarm_zone="",

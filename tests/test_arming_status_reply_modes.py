@@ -62,6 +62,7 @@ def test_night_exit_delay_counts_as_arming() -> None:
     snap = snapshot_with_status(panel_snapshot(), 1, reply, None)
     assert snap is not None
     assert snap.areas[1].arm_cmd_mode is ArmMode.ARMED_NIGHT
+    assert snap.areas[1].arming
 
 
 @pytest.mark.parametrize("arm_state", [UNKNOWN_ARMED_LOOKING, "ALARM_MEM"])

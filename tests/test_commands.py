@@ -31,6 +31,7 @@ if _HAS_DEPS:
         area_faulted_zones,
         area_is_armed,
         area_skip_automatic_arm_from_status_reply,
+        reconcile_snapshot_area,
         zone_bypass_label,
     )
     from homeassistant.exceptions import HomeAssistantError
@@ -323,10 +324,12 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
             _two_area_snapshot(),
             areas=MappingProxyType(
                 {
-                    1: AreaState(
-                        area_id=1,
-                        name="House",
-                        arm_mode=ArmMode.DISARMED,
+                    1: reconcile_snapshot_area(
+                        AreaState(
+                            area_id=1,
+                            name="House",
+                            arm_mode=ArmMode.DISARMED,
+                        ),
                         arm_cmd_mode=ArmMode.ARMED_AWAY,
                         ee_timer=30,
                         alarm_zone="",

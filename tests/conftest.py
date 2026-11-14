@@ -29,6 +29,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.syrupy import HomeAssistantSnapshotExtension
 from syrupy.assertion import SnapshotAssertion  # noqa: TC002  # fixture annotation
 
+from custom_components.elke27.arming import reconcile_snapshot_area
 from custom_components.elke27.const import (
     CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
@@ -72,6 +73,17 @@ def auto_enable_custom_integrations(
 
 def snapshot_with(snapshot: Any, **maps: Any) -> Any:
     """Return `snapshot` with the given domain maps replaced (read-only views)."""
+    areas = maps.get("areas")
+    if isinstance(areas, dict):
+        maps = {
+            **maps,
+            "areas": {
+                area_id: reconcile_snapshot_area(area)
+                if type(area) is AreaState
+                else area
+                for area_id, area in areas.items()
+            },
+        }
     return dataclasses.replace(
         snapshot, **{k: MappingProxyType(v) for k, v in maps.items()}
     )

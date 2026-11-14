@@ -6,7 +6,8 @@ import dataclasses
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from elke27_lib import ArmMode, PanelSnapshot, ZoneState
+from elke27_lib import AreaState, ArmMode, PanelSnapshot, ZoneState
+from elke27_lib.area_delay import alarm_zone_set, ee_timer_set
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
     Elke27AuthError,
@@ -15,6 +16,7 @@ from elke27_lib.errors import (
     Elke27PermissionError,
     Elke27PinRequiredError,
 )
+from elke27_lib.types import DELAY_NONE, DelayState, DelayStateEntry, DelayStateExit
 
 from homeassistant.exceptions import HomeAssistantError
 
@@ -97,6 +99,42 @@ def _arm_mode_from_text(value: Any) -> ArmMode | None:
     return Elke27Client.arm_mode_from_panel_string(value)
 
 
+def delay_state_from_snapshot_area(area: AreaState) -> DelayState:
+    """Derive delay_state from snapshot area fields, matching elke27 area_delay."""
+    if area.alarm_active:
+        return DELAY_NONE
+    arm_mode = area.arm_mode
+    cmd_mode = area.arm_cmd_mode
+    timer = area.ee_timer
+    zone = area.alarm_zone
+    if (
+        arm_mode is not None
+        and arm_mode is not ArmMode.DISARMED
+        and ee_timer_set(timer)
+        and alarm_zone_set(zone)
+    ):
+        return DelayStateEntry(seconds=timer, zone=zone.strip())
+    if not ee_timer_set(timer):
+        return DELAY_NONE
+    if cmd_mode is None or cmd_mode is ArmMode.DISARMED:
+        return DELAY_NONE
+    if arm_mode is None:
+        return DELAY_NONE
+    if arm_mode == cmd_mode:
+        return DELAY_NONE
+    return DelayStateExit(seconds=timer)
+
+
+def reconcile_snapshot_area(area: AreaState, **updates: Any) -> AreaState:
+    """Apply overlay fields and derive delay_state like elke27 snapshot builds."""
+    if "delay_state" in updates:
+        return dataclasses.replace(area, **updates)
+    merged = dataclasses.replace(area, **updates)
+    return dataclasses.replace(
+        merged, delay_state=delay_state_from_snapshot_area(merged)
+    )
+
+
 def _zone_with_status_char(zone: ZoneState, ch: str) -> ZoneState:
     """Apply one zone_get_all_zones_status character (elke27's encoding)."""
     if ch not in _ZONE_STATUS_KNOWN:
@@ -151,7 +189,7 @@ def snapshot_with_status(
                 )
             else:
                 updates["alarm_zone"] = None
-        areas[area_id] = dataclasses.replace(area, **updates)
+        areas[area_id] = reconcile_snapshot_area(area, **updates)
     status = zones_payload.get("status") if zones_payload is not None else None
     if isinstance(status, str):
         for index, ch in enumerate("".join(status.split()).upper()):

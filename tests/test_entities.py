@@ -39,6 +39,7 @@ if _HAS_DEPS:
     from custom_components.elke27.arming import (
         ZoneBypassFailedError,
         area_faulted_zones,
+        reconcile_snapshot_area,
     )
     from custom_components.elke27.binary_sensor import Elke27ZoneBinarySensor
     from custom_components.elke27.climate import Elke27Thermostat
@@ -258,9 +259,8 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
 
     def test_exit_delay_shows_arming(self) -> None:
         """Exit delay (disarmed with pending arm) maps to ARMING."""
-        area = AreaState(
-            area_id=1,
-            arm_mode=ArmMode.DISARMED,
+        area = reconcile_snapshot_area(
+            AreaState(area_id=1, arm_mode=ArmMode.DISARMED),
             arm_cmd_mode=ArmMode.ARMED_AWAY,
             ee_timer=45,
             alarm_zone="",
@@ -269,9 +269,8 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
 
     def test_night_exit_delay_shows_arming(self) -> None:
         """Exit delay toward night arm maps to ARMING."""
-        area = AreaState(
-            area_id=1,
-            arm_mode=ArmMode.DISARMED,
+        area = reconcile_snapshot_area(
+            AreaState(area_id=1, arm_mode=ArmMode.DISARMED),
             arm_cmd_mode=ArmMode.ARMED_NIGHT,
             ee_timer=45,
             alarm_zone="",
@@ -286,10 +285,12 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
             areas=MappingProxyType(
                 {
                     **base.areas,
-                    1: AreaState(
-                        area_id=1,
-                        name="House",
-                        arm_mode=ArmMode.DISARMED,
+                    1: reconcile_snapshot_area(
+                        AreaState(
+                            area_id=1,
+                            name="House",
+                            arm_mode=ArmMode.DISARMED,
+                        ),
                         arm_cmd_mode=ArmMode.ARMED_AWAY,
                         ee_timer=12,
                         alarm_zone="",
@@ -304,7 +305,7 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
             areas=MappingProxyType(
                 {
                     **arming.areas,
-                    1: dataclasses.replace(
+                    1: reconcile_snapshot_area(
                         arming.areas[1],
                         arm_mode=ArmMode.ARMED_AWAY,
                         arm_cmd_mode=None,
