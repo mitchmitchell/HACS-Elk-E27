@@ -327,7 +327,7 @@
       "message": "This panel doesn't support that arming mode."
     },
     "night_arm_firmware_too_old": {
-      "message": "Arm night needs panel application firmware 0.5.37 or newer."
+      "message": "Arm night needs panel application firmware 0.0.5.37 or later."
     },
     "night_arm_firmware_unknown": {
       "message": "Arm night isn't available because the panel application firmware version is unknown."

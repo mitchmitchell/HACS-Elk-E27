@@ -84,7 +84,10 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
   night arm is supported for that area. That requires application firmware **0.0.5.37** or
   later. An area armed in Stay Instant shows `armed_night`. Arm vacation is still not offered
   from Home Assistant; if the area is armed in Vacation from a keypad or the Elk app, it shows
-  `armed_vacation`.
+  `armed_vacation`. If application firmware is older than **0.0.5.37**, or the version is
+  unknown, Arm night is not shown. If firmware is new enough but Stay Instant is off for the
+  area, Arm night is shown and the command fails with an error asking you to enable Stay
+  Instant in panel settings.
 - **Arm away may end up as armed home.** If no entry/exit zone opens before the exit delay
   ends, the panel's *auto-stay* switches the area to Stay and it shows `armed_home`. This is
   panel behavior. Check for both `armed_away` and `armed_home` in automations.
@@ -98,9 +101,9 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
   example *invalid parameter (check the user code) (error 11004)*. See
   [Panel error messages](#panel-error-messages). The reason and code are also logged as a
   warning.
-- States reported: `disarmed`, `arming` (during the exit delay), `armed_home`, `armed_away`,
-  `armed_night`, `armed_vacation`, `triggered` (alarm active) and `unknown`. There is no
-  `pending` state.
+- States reported: `disarmed`, `arming` (during the exit delay), `pending` (during entry
+  delay; simulator-proven only, not verified on hardware), `armed_home`, `armed_away`,
+  `armed_night`, `armed_vacation`, `triggered` (alarm active) and `unknown`.
 - `unknown` means the panel didn't report the area's arm mode, so Home Assistant can't tell
   whether it is armed. It is never shown as `disarmed`. Check the keypad for the real state.
   Before 0.3.0 this case showed `disarmed`; automations that test for `disarmed` should
@@ -224,6 +227,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
+| Unreleased | untagged [`elke27` 35ff15f0](https://github.com/mitchmitchell/elke27/commit/35ff15f0d61d5d0caf59cee48b165e74d3c41e21) (squash of elke27 #140, includes #141); not a released version; pin replaced before merge | CI: 2026.10.4 (minimum 2026.10.0) | Arm night (Stay Instant) PASS on TEST hardware Nov 14 (earlier tip 91ca8c8, same library SHA); entry delay simulator-only; exit delay not hardware-proven; garage doors waived |
 | 0.3.2 | [0.5.1](https://pypi.org/project/elke27/0.5.1/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors waived, not hardware-tested) |
 | 0.3.1 | [0.5.0](https://pypi.org/project/elke27/0.5.0/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors waived, not hardware-tested) |
 | 0.3.0 | [0.4.0](https://pypi.org/project/elke27/0.4.0/) | Hardware: TEST HA Core 2026.10.2; CI: 2026.10.4 (minimum 2026.10.0) | Release-candidate test at `48ee195`: TEST E27 panel, disarmed state verified on hardware; arm, vacation, night and triggered states verified in tests and simulator only; garage doors waived (not hardware-tested) |
@@ -233,7 +237,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 | 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 2.6.1 (Elk app shows application 0.0.6.4) |
 | 0.1.8 | [0.3.12](https://pypi.org/project/elke27/0.3.12/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 2.6.1 (Elk app shows application 0.0.6.4) |
 | 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 2.6.1 (Elk app shows application 0.0.6.4) |
-| 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
+| 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 2.6.1 (Elk app shows application 0.0.6.4) |
 
 ---
 
@@ -950,8 +954,9 @@ The access code and passphrase are linking credentials from your installer, used
 setup. Your user code (PIN) is what you enter to arm, disarm or bypass.
 
 **Why don't I see arm night?** Arm night sends Stay Instant and needs application firmware
-0.0.5.37 or newer with night arm support on the area. When supported, it appears on the alarm
-control panel in Home Assistant.
+**0.0.5.37** or later. If the version is older or unknown, the Arm night action is not shown.
+If firmware is new enough but Stay Instant is off for the area, Arm night appears but the
+command fails with an error asking you to enable Stay Instant in panel settings.
 
 **I armed away, but it shows armed home.** That's the panel's auto-stay: no entry/exit zone
 opened during the exit delay. `elke27.alarm_arm_automatic` cancels auto-stay.
@@ -989,7 +994,9 @@ whole °F, so setpoints you set in °C are rounded.
 ## Glossary
 
 - **Area**: a partition of the panel, armed and disarmed on its own. One alarm panel entity each.
-- **Away / Stay (Home)**: the E27's two arming modes. Stay leaves interior zones unarmed.
+- **Away / Stay (Home)**: the E27's main arming modes. Stay leaves interior zones unarmed.
+- **Stay Instant (Night)**: arm night (`armed_night`) from Home Assistant when application
+  firmware is **0.0.5.37** or later and night arm is supported for the area.
 - **Auto-stay**: the panel switches Away to Stay if no entry/exit zone opens during the exit delay.
 - **Exit delay**: time to leave after arming before the area is fully armed.
 - **Bypass**: tell the panel to ignore a zone until the area is disarmed.
