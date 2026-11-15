@@ -175,7 +175,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._unsubscribe_stale_timer: Callable[[], None] | None = None
         self._stale_task: asyncio.Task[None] | None = None
         # D4: post-command fallback reads (status_refresh_ok False). Kept for
-        # the soak gate; removed with fallback status reads after the soak.
+        # the soak gate; removed with snapshot_with_status after the soak.
         # Every fallback read task still running, and a lock so only one of
         # them reads the panel at a time (Q5 also skips while any is running).
         self._fallback_tasks: set[asyncio.Task[PanelSnapshot | None]] = set()
@@ -451,9 +451,14 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """
         Ask the panel for the area's arm state and all zone statuses.
 
-        Each status request is sent once. elke27 applies read-only status replies
-        into the client snapshot before ``async_execute`` returns. If a request
-        fails, callers fall back to the last client snapshot.
+        Sends read-only status requests, then returns ``client.get_snapshot()``.
+        Callers rely on elke27 publishing each reply into the snapshot before the
+        matching ``async_execute`` returns (ensured in an upcoming elke27
+        release); the snapshot must not be read before those requests finish.
+
+        Each status request is sent once. If a request fails, the snapshot
+        returned is still whatever ``get_snapshot()`` held after any successful
+        reads in this call.
 
         The second value is whether the area_get_status reply reported armed or
         exit-delay arming (True/False), or None when that request failed.

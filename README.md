@@ -123,6 +123,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 |---|---|---|---|---|
 | Arm away | Away | No (open zones: error 11015) | Normal | `armed_away`, or `armed_home` via auto-stay |
 | Arm home | Stay | No (open zones: error 11015) | Normal | `armed_home` |
+| Arm night | Stay Instant | No (open zones: error 11015) | Normal | `armed_night` (application firmware **0.0.5.37** or later) |
 | Arm custom bypass | Away | Yes, open zones in this area only | Normal | `armed_away`, or `armed_home` via auto-stay |
 | `elke27.alarm_arm_automatic` | Away or Stay | Yes, open zones in this area only (0.1.7+) | Both cancelled | `armed_away` / `armed_home` |
 
