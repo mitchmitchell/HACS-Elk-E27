@@ -1,5 +1,5 @@
 # ruff: noqa: S101, ARG001, PLR2004, FBT001, FBT003, TC001
-"""D4: adopt elke27 status_refresh_ok; keep snapshot_with_status as fallback."""
+"""D4: adopt elke27 status_refresh_ok; keep status reads as fallback."""
 
 from __future__ import annotations
 

@@ -13,6 +13,7 @@ from typing import Any
 
 from elke27_lib import AreaState, ArmMode, ZoneState
 from elke27_lib.client import Elke27Client
+from elke27_lib.types import DelayStateEntry, DelayStateExit
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -42,6 +43,25 @@ def _area(**kw: Any) -> AreaState:
 @pytest.mark.parametrize(
     ("area_kw", "expected"),
     [
+        (
+            {
+                "arm_mode": ArmMode.DISARMED,
+                "arm_cmd_mode": ArmMode.ARMED_AWAY,
+                "ee_timer": 12,
+                "alarm_zone": "",
+                "delay_state": DelayStateExit(seconds=12),
+            },
+            "arming",
+        ),
+        (
+            {
+                "arm_mode": ArmMode.ARMED_AWAY,
+                "ee_timer": 20,
+                "alarm_zone": "005",
+                "delay_state": DelayStateEntry(seconds=20, zone="005"),
+            },
+            "pending",
+        ),
         ({"arm_mode": ArmMode.DISARMED}, "disarmed"),
         ({"arm_mode": None}, "unknown"),
         ({"arm_mode": ArmMode.ARMED_AWAY}, "armed_away"),

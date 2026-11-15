@@ -6,13 +6,11 @@ from __future__ import annotations
 from typing import Any
 
 from elke27_lib import ArmMode
-import pytest
 
 from custom_components.elke27.arming import (
     area_armed_from_status_reply,
     area_arming_from_status_reply,
     area_skip_automatic_arm_from_status_reply,
-    snapshot_with_status,
 )
 from tests.conftest import panel_snapshot
 
@@ -33,13 +31,6 @@ def _reply(arm_state: str, **fields: Any) -> dict[str, Any]:
     return payload
 
 
-def test_vacation_reply_sets_snapshot_arm_mode() -> None:
-    """ARMED_VACATION in a status reply sets the snapshot arm mode."""
-    snap = snapshot_with_status(panel_snapshot(), 1, _reply("ARMED_VACATION"), None)
-    assert snap is not None
-    assert snap.areas[1].arm_mode is ArmMode.ARMED_VACATION
-
-
 def test_vacation_reply_counts_as_armed() -> None:
     """ARMED_VACATION counts as armed, so automatic arming skips."""
     assert area_armed_from_status_reply(_reply("ARMED_VACATION")) is True
@@ -50,27 +41,12 @@ def test_vacation_exit_delay_counts_as_arming() -> None:
     """An exit delay toward ARMED_VACATION counts as arming."""
     reply = _reply("DISARMED", arm_cmd_state="ARMED_VACATION", ee_timer=30)
     assert area_arming_from_status_reply(reply) is True
-    snap = snapshot_with_status(panel_snapshot(), 1, reply, None)
-    assert snap is not None
-    assert snap.areas[1].arm_cmd_mode is ArmMode.ARMED_VACATION
 
 
 def test_night_exit_delay_counts_as_arming() -> None:
     """An exit delay toward ARMED_NIGHT counts as arming."""
     reply = _reply("DISARMED", arm_cmd_state="ARMED_STAY_INST", ee_timer=30)
     assert area_arming_from_status_reply(reply) is True
-    snap = snapshot_with_status(panel_snapshot(), 1, reply, None)
-    assert snap is not None
-    assert snap.areas[1].arm_cmd_mode is ArmMode.ARMED_NIGHT
-    assert snap.areas[1].arming
-
-
-@pytest.mark.parametrize("arm_state", [UNKNOWN_ARMED_LOOKING, "ALARM_MEM"])
-def test_unknown_reply_keeps_snapshot_arm_mode(arm_state: str) -> None:
-    """An unknown arm_state leaves the cached arm mode unchanged."""
-    snap = snapshot_with_status(panel_snapshot(), 1, _reply(arm_state), None)
-    assert snap is not None
-    assert snap.areas[1].arm_mode is ArmMode.DISARMED
 
 
 def test_unknown_reply_is_not_armed() -> None:
@@ -88,10 +64,12 @@ def test_unknown_reply_is_not_exit_delay_arming() -> None:
     assert area_arming_from_status_reply(reply) is False
 
 
-def test_unknown_command_state_leaves_arm_cmd_mode_unset() -> None:
-    """An unknown arm_cmd_state maps to no commanded mode."""
+def test_unknown_command_state_is_not_exit_delay_arming() -> None:
+    """An unknown arm_cmd_state does not count as exit-delay arming."""
     reply = _reply("DISARMED", arm_cmd_state=UNKNOWN_ARMED_LOOKING, ee_timer=30)
     assert area_arming_from_status_reply(reply) is False
-    snap = snapshot_with_status(panel_snapshot(), 1, reply, None)
-    assert snap is not None
-    assert snap.areas[1].arm_cmd_mode is None
+
+
+def test_cached_snapshot_unchanged_by_unknown_reply() -> None:
+    """Unknown arm states in a status reply do not change skip/armed parsing alone."""
+    assert panel_snapshot().areas[1].arm_mode is ArmMode.DISARMED

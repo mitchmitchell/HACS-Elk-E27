@@ -80,10 +80,11 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 - **Arm away**, **arm home** (the panel's *Stay* mode) and **disarm**. Each one needs your
   numeric alarm user code, which is entered in the Home Assistant keypad.
-- **Arm night** (the panel's *Stay Instant* mode) is offered when the panel reports
-  application firmware 0.5.37 or newer and night arm is supported for that area. Arm vacation
-  is not offered from Home Assistant. If the area is armed in *Vacation* mode at a keypad, it
-  shows `armed_vacation`.
+- **Arm night** is offered from Home Assistant and sends the panel's *Stay Instant* mode when
+  night arm is supported for that area. That requires application firmware **0.0.5.37** or
+  later. An area armed in Stay Instant shows `armed_night`. Arm vacation is still not offered
+  from Home Assistant; if the area is armed in Vacation from a keypad or the Elk app, it shows
+  `armed_vacation`.
 - **Arm away may end up as armed home.** If no entry/exit zone opens before the exit delay
   ends, the panel's *auto-stay* switches the area to Stay and it shows `armed_home`. This is
   panel behavior. Check for both `armed_away` and `armed_home` in automations.
@@ -204,7 +205,8 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
   Assistant first, or stay on 0.2.0.
 - An **Elk E27** panel on your local network that Home Assistant can reach over TCP. Manual
   setup connects on port **2101**.
-  Tested on an E27 with firmware **0.0.6.4** (hardware 0.0.1.4, bootloader 0.0.2.24). Other
+  Tested on an E27 with firmware **2.6.1**, shown on the panel's device page in Home Assistant
+  (the Elk app shows application 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24). Other
   versions may work but haven't been tested.
 - The panel's **linking credentials**: an **access code** and a **passphrase**.
   - Your panel's installer sets these on the panel, so ask your installer for them.
@@ -225,12 +227,12 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 | 0.3.2 | [0.5.1](https://pypi.org/project/elke27/0.5.1/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors waived, not hardware-tested) |
 | 0.3.1 | [0.5.0](https://pypi.org/project/elke27/0.5.0/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors waived, not hardware-tested) |
 | 0.3.0 | [0.4.0](https://pypi.org/project/elke27/0.4.0/) | Hardware: TEST HA Core 2026.10.2; CI: 2026.10.4 (minimum 2026.10.0) | Release-candidate test at `48ee195`: TEST E27 panel, disarmed state verified on hardware; arm, vacation, night and triggered states verified in tests and simulator only; garage doors waived (not hardware-tested) |
-| 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | Hardware: 2026.10.2; CI: 2026.10.2 (minimum 2026.10.0) | Tested: E27 panel, model 260, firmware 2.6.1; garage doors not hardware-tested |
+| 0.2.1 | [0.3.15](https://pypi.org/project/elke27/0.3.15/) | Hardware: 2026.10.2; CI: 2026.10.2 (minimum 2026.10.0) | Tested: firmware 2.6.1 (Elk app shows application 0.0.6.4); garage doors not hardware-tested |
 | 0.2.0 | [0.3.14](https://pypi.org/project/elke27/0.3.14/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
 | 0.1.9 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | CI: 2026.1.3 (minimum 2026.1.0); hardware: TBD | TBD |
-| 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
-| 0.1.8 | [0.3.12](https://pypi.org/project/elke27/0.3.12/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
-| 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
+| 0.1.8.1 | [0.3.13](https://pypi.org/project/elke27/0.3.13/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 2.6.1 (Elk app shows application 0.0.6.4) |
+| 0.1.8 | [0.3.12](https://pypi.org/project/elke27/0.3.12/) | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 2.6.1 (Elk app shows application 0.0.6.4) |
+| 0.1.7 | 0.3.11 | Hardware: 2026.10.0; CI: 2026.1.3 (minimum 2026.1.0) | Tested: firmware 2.6.1 (Elk app shows application 0.0.6.4) |
 | 0.1.6 | 0.3.10 | 2026.1.3, 2026.10.0 (minimum 2026.1.0) | Tested: firmware 0.0.6.4, hardware 0.0.1.4, bootloader 0.0.2.24 |
 
 ---
@@ -947,7 +949,9 @@ Attach it to bug reports.
 The access code and passphrase are linking credentials from your installer, used once at
 setup. Your user code (PIN) is what you enter to arm, disarm or bypass.
 
-**Why is there no night mode?** The E27 only has Away and Stay.
+**Why don't I see arm night?** Arm night sends Stay Instant and needs application firmware
+0.0.5.37 or newer with night arm support on the area. When supported, it appears on the alarm
+control panel in Home Assistant.
 
 **I armed away, but it shows armed home.** That's the panel's auto-stay: no entry/exit zone
 opened during the exit delay. `elke27.alarm_arm_automatic` cancels auto-stay.

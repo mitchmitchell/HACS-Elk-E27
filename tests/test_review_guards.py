@@ -76,12 +76,14 @@ NOQA_CEILING: dict[str, int] = {
     "tests/test_arming.py:SLF001": 1,
     "tests/test_availability.py:SLF001:file": 1,
     "tests/test_command_errors.py:SLF001:file": 1,
-    "tests/test_commands.py:SLF001": 6,
+    "tests/test_commands.py:SLF001": 8,
     "tests/test_config_flow.py:SLF001:file": 1,
     "tests/test_coordinator.py:SLF001:file": 1,
     "tests/test_coordinator_client.py:SLF001:file": 1,
     "tests/test_coordinator_d3.py:SLF001:file": 1,
+    "tests/test_client_area_status_snapshot.py:SLF001:file": 1,
     "tests/test_init.py:SLF001:file": 1,
+    "tests/elke27_status_client.py:SLF001:file": 1,
     "tests/test_services.py:SLF001": 18,
 }
 

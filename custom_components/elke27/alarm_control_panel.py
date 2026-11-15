@@ -265,6 +265,8 @@ def _area_state_to_ha(area: AreaState) -> AlarmControlPanelState | None:
     """
     if area.alarm_active:
         return AlarmControlPanelState.TRIGGERED
+    if area.entry_delay:
+        return AlarmControlPanelState.PENDING
     if area.arming:
         return AlarmControlPanelState.ARMING
     if area.arm_mode is None:

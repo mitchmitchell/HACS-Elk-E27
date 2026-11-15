@@ -31,6 +31,7 @@ if _HAS_DEPS:
         ZoneDefinition,
         ZoneState,
     )
+    from elke27_lib.types import DelayStateEntry, DelayStateExit, DelayStateNone
 
     from custom_components.elke27.alarm_control_panel import (
         Elke27AreaAlarmControlPanel,
@@ -39,7 +40,6 @@ if _HAS_DEPS:
     from custom_components.elke27.arming import (
         ZoneBypassFailedError,
         area_faulted_zones,
-        reconcile_snapshot_area,
     )
     from custom_components.elke27.binary_sensor import Elke27ZoneBinarySensor
     from custom_components.elke27.climate import Elke27Thermostat
@@ -259,22 +259,40 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
 
     def test_exit_delay_shows_arming(self) -> None:
         """Exit delay (disarmed with pending arm) maps to ARMING."""
-        area = reconcile_snapshot_area(
-            AreaState(area_id=1, arm_mode=ArmMode.DISARMED),
+        area = AreaState(
+            area_id=1,
+            arm_mode=ArmMode.DISARMED,
             arm_cmd_mode=ArmMode.ARMED_AWAY,
             ee_timer=45,
             alarm_zone="",
+            delay_state=DelayStateExit(seconds=45),
         )
+        assert area.arming
         assert _area_state_to_ha(area) is AlarmControlPanelState.ARMING
+
+    def test_entry_delay_shows_pending(self) -> None:
+        """Entry delay while armed maps to PENDING."""
+        area = AreaState(
+            area_id=1,
+            arm_mode=ArmMode.ARMED_AWAY,
+            ee_timer=30,
+            alarm_zone="001",
+            delay_state=DelayStateEntry(seconds=30, zone="001"),
+        )
+        assert area.entry_delay
+        assert _area_state_to_ha(area) is AlarmControlPanelState.PENDING
 
     def test_night_exit_delay_shows_arming(self) -> None:
         """Exit delay toward night arm maps to ARMING."""
-        area = reconcile_snapshot_area(
-            AreaState(area_id=1, arm_mode=ArmMode.DISARMED),
+        area = AreaState(
+            area_id=1,
+            arm_mode=ArmMode.DISARMED,
             arm_cmd_mode=ArmMode.ARMED_NIGHT,
             ee_timer=45,
             alarm_zone="",
+            delay_state=DelayStateExit(seconds=45),
         )
+        assert area.arming
         assert _area_state_to_ha(area) is AlarmControlPanelState.ARMING
 
     def test_arming_transitions_to_armed_away(self) -> None:
@@ -285,15 +303,14 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
             areas=MappingProxyType(
                 {
                     **base.areas,
-                    1: reconcile_snapshot_area(
-                        AreaState(
-                            area_id=1,
-                            name="House",
-                            arm_mode=ArmMode.DISARMED,
-                        ),
+                    1: AreaState(
+                        area_id=1,
+                        name="House",
+                        arm_mode=ArmMode.DISARMED,
                         arm_cmd_mode=ArmMode.ARMED_AWAY,
                         ee_timer=12,
                         alarm_zone="",
+                        delay_state=DelayStateExit(seconds=12),
                     ),
                 }
             ),
@@ -305,12 +322,13 @@ class AlarmEntityTest(unittest.IsolatedAsyncioTestCase):
             areas=MappingProxyType(
                 {
                     **arming.areas,
-                    1: reconcile_snapshot_area(
+                    1: dataclasses.replace(
                         arming.areas[1],
                         arm_mode=ArmMode.ARMED_AWAY,
                         arm_cmd_mode=None,
                         ee_timer=None,
                         alarm_zone=None,
+                        delay_state=DelayStateNone(),
                     ),
                 }
             ),

@@ -36,6 +36,7 @@ if _HAS_DEPS:
         Elke27PinRequiredError,
         Elke27TimeoutError,
     )
+    from elke27_lib.types import DelayStateExit
     from test_commands import _hub, _snapshot, _two_area_snapshot
     from test_entities import _area_entity
 
@@ -44,10 +45,7 @@ if _HAS_DEPS:
         coordinator as elke27_hub,
         services as integration,
     )
-    from custom_components.elke27.arming import (
-        ZoneBypassFailedError,
-        reconcile_snapshot_area,
-    )
+    from custom_components.elke27.arming import ZoneBypassFailedError
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
@@ -102,6 +100,7 @@ def _area_status_client(
     area_status_extra: Any = None,
 ) -> Any:
     """Build a mock elke27 client driven by area_get_status replies."""
+    del snapshot
 
     def _status_payload() -> dict[str, Any]:
         state = arm_state() if callable(arm_state) else arm_state
@@ -116,23 +115,9 @@ def _area_status_client(
                 payload.update(extra)
         return payload
 
-    client = MagicMock()
+    from tests.elke27_status_client import make_status_client  # noqa: PLC0415
 
-    async def _execute(command_key: str, **_params: Any) -> Any:
-        if command_key == "area_get_status":
-            payload = _status_payload()
-        elif command_key == "zone_get_all_zones_status":
-            payload = {"status": "99"}
-        else:
-            payload = {}
-        return MagicMock(ok=True, data=payload, error=None)
-
-    client.async_execute = AsyncMock(side_effect=_execute)
-    client.get_snapshot = MagicMock(return_value=snapshot)
-    client.async_arm_area = AsyncMock(return_value=_WRITE_OK)
-    client.async_disarm_area = AsyncMock(return_value=_WRITE_OK)
-    client.async_disconnect = AsyncMock(return_value=None)
-    return client
+    return make_status_client(area_reply=_status_payload)
 
 
 def _runtime_for_hub(hub: Any) -> Any:
@@ -1345,15 +1330,14 @@ class AlarmArmAutomaticServiceTest(unittest.IsolatedAsyncioTestCase):
             areas=MappingProxyType(
                 {
                     **before.areas,
-                    1: reconcile_snapshot_area(
-                        AreaState(
-                            area_id=1,
-                            name="House",
-                            arm_mode=ArmMode.DISARMED,
-                        ),
+                    1: AreaState(
+                        area_id=1,
+                        name="House",
+                        arm_mode=ArmMode.DISARMED,
                         arm_cmd_mode=ArmMode.ARMED_AWAY,
                         ee_timer=30,
                         alarm_zone="",
+                        delay_state=DelayStateExit(seconds=30),
                     ),
                 }
             ),

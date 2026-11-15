@@ -56,7 +56,6 @@ from .arming import (
     _validated_pin,
     area_faulted_zones,
     area_skip_automatic_arm_from_status_reply,
-    snapshot_with_status,
 )
 from .const import (
     CONF_INTEGRATION_ID,
@@ -176,7 +175,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         self._unsubscribe_stale_timer: Callable[[], None] | None = None
         self._stale_task: asyncio.Task[None] | None = None
         # D4: post-command fallback reads (status_refresh_ok False). Kept for
-        # the soak gate; removed with snapshot_with_status after the soak.
+        # the soak gate; removed with fallback status reads after the soak.
         # Every fallback read task still running, and a lock so only one of
         # them reads the panel at a time (Q5 also skips while any is running).
         self._fallback_tasks: set[asyncio.Task[PanelSnapshot | None]] = set()
@@ -452,11 +451,9 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         """
         Ask the panel for the area's arm state and all zone statuses.
 
-        The answer is built from the reply payloads themselves. Reading the
-        client snapshot afterwards is not enough: elke27 resolves the request
-        before its handlers apply the reply, and it does not apply arm or bypass
-        command replies at all. Each request is sent once; if one fails, that
-        part falls back to the client snapshot for zone data only.
+        Each status request is sent once. elke27 applies read-only status replies
+        into the client snapshot before ``async_execute`` returns. If a request
+        fails, callers fall back to the last client snapshot.
 
         The second value is whether the area_get_status reply reported armed or
         exit-delay arming (True/False), or None when that request failed.
@@ -478,15 +475,11 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         area_payload = await self._async_status_request(
             client, "area_get_status", area_id=area_id
         )
-        zones_payload = (
+        if include_zones:
             await self._async_status_request(client, "zone_get_all_zones_status")
-            if include_zones
-            else None
+        return client.get_snapshot(), area_skip_automatic_arm_from_status_reply(
+            area_payload
         )
-        snapshot = snapshot_with_status(
-            client.get_snapshot(), area_id, area_payload, zones_payload
-        )
-        return snapshot, area_skip_automatic_arm_from_status_reply(area_payload)
 
     async def async_poll_until_area_armed(
         self,
@@ -1157,7 +1150,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
 
         status_refresh_ok True or None: the library already refreshed (or the
         reply carried the state), so push its snapshot with no extra request.
-        False: one fallback read via snapshot_with_status, then push. A failed
+        False: one fallback status read, then push. A failed
         fallback pushes the client snapshot as is; the command still succeeded.
         """
         _LOGGER.debug(
@@ -1278,10 +1271,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         client = self._client
         if client is None:
             return None
-        zones_payload = await self._async_status_request(
-            client, "zone_get_all_zones_status"
-        )
-        return snapshot_with_status(client.get_snapshot(), 0, None, zones_payload)
+        await self._async_status_request(client, "zone_get_all_zones_status")
+        return client.get_snapshot()
 
     @property
     def fallback_refresh_count(self) -> int:

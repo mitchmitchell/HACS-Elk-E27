@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from elke27_lib import AreaState, ArmMode, PanelSnapshot, ZoneState
-from elke27_lib.area_delay import alarm_zone_set, ee_timer_set
+from elke27_lib import ArmMode, PanelSnapshot, ZoneState
 from elke27_lib.client import Elke27Client
 from elke27_lib.errors import (
     Elke27AuthError,
@@ -16,7 +14,6 @@ from elke27_lib.errors import (
     Elke27PermissionError,
     Elke27PinRequiredError,
 )
-from elke27_lib.types import DELAY_NONE, DelayState, DelayStateEntry, DelayStateExit
 
 from homeassistant.exceptions import HomeAssistantError
 
@@ -78,129 +75,11 @@ _ARMED_MODES = frozenset(
 )
 
 
-_ZONE_STATUS_BYPASSED = frozenset("DEF")
-
-
-_ZONE_STATUS_VIOLATED = frozenset("9AB")
-
-
-_ZONE_STATUS_KNOWN = frozenset("0123456789ABCDEF")
-
-
-def _strict_int(value: object) -> int | None:
-    """Return the value only when it is a true int (bool excluded)."""
-    return value if type(value) is int else None
-
-
 def _arm_mode_from_text(value: Any) -> ArmMode | None:
     """Map a panel arm_state string to an ArmMode with elke27's own mapping (#145)."""
     if not isinstance(value, str):
         return None
     return Elke27Client.arm_mode_from_panel_string(value)
-
-
-def delay_state_from_snapshot_area(area: AreaState) -> DelayState:
-    """Derive delay_state from snapshot area fields, matching elke27 area_delay."""
-    if area.alarm_active:
-        return DELAY_NONE
-    arm_mode = area.arm_mode
-    cmd_mode = area.arm_cmd_mode
-    timer = area.ee_timer
-    zone = area.alarm_zone
-    if (
-        arm_mode is not None
-        and arm_mode is not ArmMode.DISARMED
-        and ee_timer_set(timer)
-        and alarm_zone_set(zone)
-    ):
-        return DelayStateEntry(seconds=timer, zone=zone.strip())
-    if not ee_timer_set(timer):
-        return DELAY_NONE
-    if cmd_mode is None or cmd_mode is ArmMode.DISARMED:
-        return DELAY_NONE
-    if arm_mode is None:
-        return DELAY_NONE
-    if arm_mode == cmd_mode:
-        return DELAY_NONE
-    return DelayStateExit(seconds=timer)
-
-
-def reconcile_snapshot_area(area: AreaState, **updates: Any) -> AreaState:
-    """Apply overlay fields and derive delay_state like elke27 snapshot builds."""
-    if "delay_state" in updates:
-        return dataclasses.replace(area, **updates)
-    merged = dataclasses.replace(area, **updates)
-    return dataclasses.replace(
-        merged, delay_state=delay_state_from_snapshot_area(merged)
-    )
-
-
-def _zone_with_status_char(zone: ZoneState, ch: str) -> ZoneState:
-    """Apply one zone_get_all_zones_status character (elke27's encoding)."""
-    if ch not in _ZONE_STATUS_KNOWN:
-        return zone
-    if ch in _ZONE_STATUS_BYPASSED:
-        return dataclasses.replace(zone, bypassed=True)
-    return dataclasses.replace(zone, bypassed=False, open=ch in _ZONE_STATUS_VIOLATED)
-
-
-def snapshot_with_status(
-    snapshot: PanelSnapshot | None,
-    area_id: int,
-    area_payload: Mapping[str, Any] | None,
-    zones_payload: Mapping[str, Any] | None,
-) -> PanelSnapshot | None:
-    """Overlay area and zone status reply payloads on a snapshot."""
-    if snapshot is None:
-        return None
-    areas = dict(snapshot.areas)
-    zones = dict(snapshot.zones)
-    if area_payload is not None and area_id in areas:
-        area = areas[area_id]
-        updates: dict[str, Any] = {}
-        mode = _arm_mode_from_text(
-            area_payload.get("arm_state") or area_payload.get("armed_state")
-        )
-        if mode is not None:
-            updates["arm_mode"] = mode
-        has_exit_delay_fields = any(
-            key in area_payload for key in ("arm_cmd_state", "ee_timer", "alarm_zone")
-        )
-        if not has_exit_delay_fields:
-            updates["arm_cmd_mode"] = None
-            updates["ee_timer"] = None
-            updates["alarm_zone"] = None
-        else:
-            if "arm_cmd_state" in area_payload:
-                cmd_raw = area_payload.get("arm_cmd_state")
-                updates["arm_cmd_mode"] = (
-                    _arm_mode_from_text(cmd_raw) if isinstance(cmd_raw, str) else None
-                )
-            else:
-                updates["arm_cmd_mode"] = None
-            if "ee_timer" in area_payload:
-                updates["ee_timer"] = _strict_int(area_payload["ee_timer"])
-            else:
-                updates["ee_timer"] = None
-            if "alarm_zone" in area_payload:
-                alarm_zone = area_payload.get("alarm_zone")
-                updates["alarm_zone"] = (
-                    alarm_zone if isinstance(alarm_zone, str) else None
-                )
-            else:
-                updates["alarm_zone"] = None
-        areas[area_id] = reconcile_snapshot_area(area, **updates)
-    status = zones_payload.get("status") if zones_payload is not None else None
-    if isinstance(status, str):
-        for index, ch in enumerate("".join(status.split()).upper()):
-            zone = zones.get(index + 1)
-            if zone is not None:
-                zones[index + 1] = _zone_with_status_char(zone, ch)
-    return dataclasses.replace(
-        snapshot,
-        areas=MappingProxyType(areas),
-        zones=MappingProxyType(zones),
-    )
 
 
 def area_armed_from_status_reply(
