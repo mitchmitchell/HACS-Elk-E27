@@ -20,7 +20,14 @@ _HAS_DEPS = all(
 if _HAS_DEPS:
     sys.path.insert(0, str(Path(__file__).parents[1]))
 
-    from elke27_lib import AreaState, ArmMode, PanelInfo, PanelSnapshot, ZoneState
+    from elke27_lib import (
+        AreaState,
+        ArmMode,
+        CommandResult,
+        PanelInfo,
+        PanelSnapshot,
+        ZoneState,
+    )
     from elke27_lib.client import Elke27Client
     from elke27_lib.errors import Elke27PinRequiredError
     from elke27_lib.types import DelayStateNone
@@ -107,10 +114,6 @@ def _hub() -> Any:
 
 def _attach_client(hub: Any, client: Any) -> None:
     hub._client = client  # noqa: SLF001
-
-
-async def _zone_only_fallback(hub: Any, zone_id: int) -> PanelSnapshot | None:
-    return await hub._async_fallback_status(area_id=None, zone_id=zone_id)  # noqa: SLF001
 
 
 @unittest.skipUnless(_HAS_DEPS, "homeassistant and elke27 are required")
@@ -493,23 +496,37 @@ class RefreshAreaStateTest(unittest.IsolatedAsyncioTestCase):
         assert area_is_armed(fresh, 1)
 
     async def test_zone_fallback_reads_snapshot_after_zone_status(self) -> None:
-        """Zone-only fallback snapshot must follow zone status read (M07)."""
+        """Zone-only bypass fallback must publish snapshot after zone status (M07)."""
         from tests.status_snapshot_fake import make_status_read_client  # noqa: PLC0415
 
         hub = _hub()
         before = _two_area_snapshot()
-        after = _snapshot_with_zone_status(before, "D19")
+        assert before.zones[1].bypassed is not True
+        after = dataclasses.replace(
+            before,
+            zones=MappingProxyType(
+                {
+                    **before.zones,
+                    1: dataclasses.replace(before.zones[1], bypassed=True, open=False),
+                }
+            ),
+        )
         client = make_status_read_client(
             before=before,
             after=after,
             area={},
-            zones={"status": "D19"},
+            zones={"status": "ignored"},
             mode="zone_only",
         )
+        client.async_set_zone_bypass = AsyncMock(
+            return_value=CommandResult(route="test", status_refresh_ok=False)
+        )
         _attach_client(hub, client)
-        fresh = await _zone_only_fallback(hub, 5)
-        assert fresh is not None
-        assert fresh.zones[1].bypassed is True
+        assert await hub.async_set_zone_bypass(5, bypassed=True, pin="1234")
+        assert hub.data.zones[1].bypassed is True
+        assert client.async_execute.await_args_list == [
+            unittest.mock.call("zone_get_all_zones_status"),
+        ]
 
     async def test_failed_area_status_reply_is_not_armed_from_cache(self) -> None:
         """Polling does not treat a failed area_get_status as armed from the cache."""

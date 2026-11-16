@@ -205,6 +205,13 @@ def make_coordinator(
     entry.async_create_background_task.side_effect = lambda hass_, coro, name: (
         hass_.async_create_background_task(coro, name)
     )
+    if (
+        isinstance(hass, MagicMock)
+        and hass.async_create_background_task.side_effect is None
+    ):
+        hass.async_create_background_task.side_effect = lambda coro, _name: (
+            asyncio.get_running_loop().create_task(coro)
+        )
     coordinator = Elke27DataUpdateCoordinator(hass, entry)
     # async_setup_entry sets this before the platforms load.
     coordinator.panel_device_id = "panel-device-id"

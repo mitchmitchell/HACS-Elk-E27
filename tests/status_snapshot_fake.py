@@ -1,12 +1,12 @@
-# ruff: noqa: TRY003, EM101, TC002
 """Order-sensitive status-read mocks (pre snapshot until the matching read finishes)."""
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from unittest.mock import AsyncMock, MagicMock
 
-from elke27_lib import PanelSnapshot
+if TYPE_CHECKING:
+    from elke27_lib import PanelSnapshot
 
 
 def make_status_read_client(
@@ -38,21 +38,24 @@ def make_status_read_client(
     def _get_snapshot() -> PanelSnapshot:
         if not _ready():
             if strict_snapshot_order:
-                raise AssertionError("get_snapshot called before status read finished")
+                msg = "get_snapshot called before status read finished"
+                raise AssertionError(msg)
             return before
         return after
 
     async def _execute(command_key: str, **_params: Any) -> Any:
         if command_key == "area_get_status":
             if mode == "zone_only":
-                raise AssertionError(command_key)
+                msg = f"unexpected {command_key}"
+                raise AssertionError(msg)
             if isinstance(area, Exception):
                 raise area
             progress["area"] = True
             return MagicMock(ok=True, data=area, error=None)
         if command_key == "zone_get_all_zones_status":
             if mode == "area_only":
-                raise AssertionError(command_key)
+                msg = f"unexpected {command_key}"
+                raise AssertionError(msg)
             if isinstance(zones, Exception):
                 raise zones
             progress["zone"] = True
