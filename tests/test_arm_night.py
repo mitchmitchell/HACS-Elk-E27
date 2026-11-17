@@ -9,10 +9,13 @@ from elke27_lib import AreaState, ArmMode
 from elke27_lib.errors import (
     Elke27CommandOutcomeUnknownError,
     Elke27InvalidArgument,
+    Elke27NightArmFirmwareTooOldError,
+    Elke27PanelApplicationFirmwareUnknownError,
     Elke27StayInstantRequiredError,
 )
 import pytest
 
+from custom_components.elke27.errors import arm_night_command_error
 from homeassistant.components.alarm_control_panel import AlarmControlPanelEntityFeature
 from homeassistant.const import ATTR_CODE
 from homeassistant.core import HomeAssistant
@@ -87,12 +90,16 @@ async def test_arm_night_service_sends_armed_night(
             "night_arm_stay_instant_required",
         ),
         (
-            Elke27InvalidArgument("Panel application firmware version is unknown."),
+            Elke27PanelApplicationFirmwareUnknownError(
+                "Panel application firmware version is unknown."
+            ),
             "night_arm_firmware_unknown",
         ),
         (
-            Elke27InvalidArgument(
-                "Arm night requires panel application firmware 0.5.37 or newer."
+            Elke27NightArmFirmwareTooOldError(
+                "Arm night requires panel application firmware 0.0.5.37 or later.",
+                required=(0, 0, 5, 37),
+                actual=(0, 0, 5, 36),
             ),
             "night_arm_firmware_too_old",
         ),
@@ -119,3 +126,42 @@ async def test_arm_night_error_translations(
     with pytest.raises(HomeAssistantError) as ctx:
         await coordinator.async_arm_area(1, ArmMode.ARMED_NIGHT, "1234")
     assert ctx.value.translation_key == translation_key
+
+
+def test_arm_night_command_error_maps_typed_firmware_errors() -> None:
+    """Typed elke27 firmware errors map to the night-arm translation keys."""
+    unknown = arm_night_command_error(
+        Elke27PanelApplicationFirmwareUnknownError(
+            "Panel application firmware version is unknown."
+        )
+    )
+    assert unknown is not None
+    assert unknown.translation_key == "night_arm_firmware_unknown"
+
+    too_old = arm_night_command_error(
+        Elke27NightArmFirmwareTooOldError(
+            "Arm night requires panel application firmware 0.0.5.37 or later.",
+            required=(0, 0, 5, 37),
+            actual=(0, 0, 5, 36),
+        )
+    )
+    assert too_old is not None
+    assert too_old.translation_key == "night_arm_firmware_too_old"
+
+
+@pytest.mark.parametrize(
+    "err",
+    [
+        Exception("Panel application firmware version is unknown."),
+        Exception("Arm night requires panel application firmware 0.5.37 or newer."),
+        Elke27InvalidArgument("Panel application firmware version is unknown."),
+        Elke27InvalidArgument(
+            "Arm night requires panel application firmware 0.5.37 or newer."
+        ),
+    ],
+)
+def test_arm_night_command_error_ignores_matching_message(
+    err: BaseException,
+) -> None:
+    """A matching message on a non-typed exception does not map."""
+    assert arm_night_command_error(err) is None

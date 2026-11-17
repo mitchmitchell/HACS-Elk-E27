@@ -228,7 +228,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
-| Unreleased | untagged [`elke27` 35ff15f0](https://github.com/mitchmitchell/elke27/commit/35ff15f0d61d5d0caf59cee48b165e74d3c41e21) (squash of elke27 #140, includes #141); not a released version; pin replaced before merge | CI: 2026.10.4 (minimum 2026.10.0) | Arm night (Stay Instant) PASS on TEST hardware Nov 14 (earlier tip 91ca8c8, same library SHA); entry delay simulator-only; exit delay not hardware-proven; garage doors waived |
+| Unreleased | [0.6.0](https://pypi.org/project/elke27/0.6.0/) | CI: 2026.10.4 (minimum 2026.10.0) | Arm night (Stay Instant) PASS on TEST hardware Nov 14 (earlier tip 91ca8c8); entry delay simulator-only; exit delay not hardware-proven; garage doors waived |
 | 0.3.2 | [0.5.1](https://pypi.org/project/elke27/0.5.1/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors waived, not hardware-tested) |
 | 0.3.1 | [0.5.0](https://pypi.org/project/elke27/0.5.0/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors waived, not hardware-tested) |
 | 0.3.0 | [0.4.0](https://pypi.org/project/elke27/0.4.0/) | Hardware: TEST HA Core 2026.10.2; CI: 2026.10.4 (minimum 2026.10.0) | Release-candidate test at `48ee195`: TEST E27 panel, disarmed state verified on hardware; arm, vacation, night and triggered states verified in tests and simulator only; garage doors waived (not hardware-tested) |

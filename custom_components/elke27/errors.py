@@ -16,6 +16,8 @@ from elke27_lib.errors import (
     Elke27Error,
     Elke27InvalidArgument,
     Elke27LinkRequiredError,
+    Elke27NightArmFirmwareTooOldError,
+    Elke27PanelApplicationFirmwareUnknownError,
     Elke27StayInstantRequiredError,
     Elke27TimeoutError,
 )
@@ -150,12 +152,9 @@ def arm_night_command_error(err: BaseException) -> HomeAssistantError | None:
     """Return a translated night-arm error, or None for generic command mapping."""
     if isinstance(err, Elke27StayInstantRequiredError):
         return homeassistant_error(translation_key="night_arm_stay_instant_required")
-    if not isinstance(err, Elke27InvalidArgument):
-        return None
-    message = str(err)
-    if "firmware version is unknown" in message:
+    if isinstance(err, Elke27PanelApplicationFirmwareUnknownError):
         return homeassistant_error(translation_key="night_arm_firmware_unknown")
-    if "requires panel application firmware" in message:
+    if isinstance(err, Elke27NightArmFirmwareTooOldError):
         return homeassistant_error(translation_key="night_arm_firmware_too_old")
     return None
 

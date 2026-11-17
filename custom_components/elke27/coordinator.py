@@ -451,8 +451,8 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
 
         Sends read-only status requests, then returns ``client.get_snapshot()``.
         Callers rely on elke27 publishing each reply into the snapshot before the
-        matching ``async_execute`` returns (ensured in an upcoming elke27
-        release); the snapshot must not be read before those requests finish.
+        matching ``async_execute`` returns (ensured in elke27 0.6.0 and later);
+        the snapshot must not be read before those requests finish.
 
         Each status request is sent once. If a request fails, the snapshot
         returned is still whatever ``get_snapshot()`` held after any successful
