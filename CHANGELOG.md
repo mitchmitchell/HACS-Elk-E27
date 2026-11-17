@@ -16,8 +16,13 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
   `armed_home`.
 - **Arm night needs panel application firmware 0.0.5.37 or later.** On older firmware, or
   when the version is unknown, Arm night is not shown. If it is attempted anyway, the error
-  reads "Arm night needs panel application firmware 0.0.5.37 or later." If Stay Instant is
-  off for the area, the error asks you to enable it in panel settings.
+  depends on the case:
+  - Firmware older than 0.0.5.37: "Arm night needs panel application firmware 0.0.5.37 or
+    later."
+  - Firmware version unknown: "Arm night isn't available because the panel application
+    firmware version is unknown."
+  - Stay Instant off for the area: "Arm night needs Stay Instant enabled for this area in
+    panel settings."
 - **Garage doors:** added in 0.2.1 but not yet tested on hardware; see
   [Garage doors](README.md#garage-doors). Garage hardware testing remains waived (not a
   pass).
