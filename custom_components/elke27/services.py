@@ -44,6 +44,7 @@ from .arming import (
 )
 from .const import DOMAIN
 from .errors import (
+    ZONE_BYPASS_PIN_ACTION,
     arm_mode_not_supported_validation,
     code_rejected_error,
     homeassistant_error,
@@ -765,7 +766,7 @@ async def _async_raise_zone_bypass_failure(
             _notify_still_changed_after_rollback(
                 hass, still_by_entry=still_by_entry, bypass=bypass
             )
-        raise pin_required_error("bypass") from cause  # noqa: EM101
+        raise pin_required_error(ZONE_BYPASS_PIN_ACTION) from cause
     if not_acknowledged:
         if changed:
             err = zone_bypass_unacknowledged_failed_error(

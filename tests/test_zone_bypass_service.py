@@ -208,7 +208,7 @@ def _snapshot_with_crosslock_zones(snapshot: PanelSnapshot) -> PanelSnapshot:
         zone_id=91, name="Cross A", area_id=1, open=False, bypassed=False
     )
     zones[92] = ZoneState(
-        zone_id=92, name="Cross B", area_id=2, open=False, bypassed=False
+        zone_id=92, name="Cross B", area_id=1, open=False, bypassed=False
     )
     return dataclasses.replace(snapshot, zones=MappingProxyType(zones))
 
@@ -634,7 +634,7 @@ async def test_code_rejected_mid_list_rolls_back_and_raises(
     assert err.value is panel_rejected
     assert code_rejected_error(err.value) is err.value
     assert err.value.__cause__ is None
-    assert err.value is not err.value.__cause__
+    assert err.value.__cause__ is not err.value
     assert _panel_bypass_calls(mock_client) == [(1, True), (2, True), (1, False)]
 
 
@@ -1143,6 +1143,49 @@ async def test_zone_vanished_under_lock_rolls_back_prior_changes(
     assert _panel_bypass_calls(mock_client) == [(1, True), (1, False)]
 
 
+def _track_crosspanel_area_locks(
+    coord_a: Elke27DataUpdateCoordinator,
+    coord_b: Elke27DataUpdateCoordinator,
+    *,
+    y_has_panel_b_area_lock: asyncio.Event,
+    y_waiting_on_panel_a_area_lock: asyncio.Event,
+) -> None:
+    """Track when Y holds panel B area 1 and blocks on panel A area 1."""
+    base_a = coord_a.area_arm_lock
+    base_b = coord_b.area_arm_lock
+
+    def _lock_b(area_id: int) -> Any:
+        lock = base_b(area_id)
+
+        class TrackedB:
+            async def __aenter__(self) -> None:
+                if area_id == 1:
+                    y_has_panel_b_area_lock.set()
+                await lock.acquire()
+
+            async def __aexit__(self, *exc: object) -> None:
+                lock.release()
+
+        return TrackedB()
+
+    def _lock_a(area_id: int) -> Any:
+        lock = base_a(area_id)
+
+        class TrackedA:
+            async def __aenter__(self) -> None:
+                if area_id == 1 and y_has_panel_b_area_lock.is_set():
+                    y_waiting_on_panel_a_area_lock.set()
+                await lock.acquire()
+
+            async def __aexit__(self, *exc: object) -> None:
+                lock.release()
+
+        return TrackedA()
+
+    coord_a.area_arm_lock = _lock_a
+    coord_b.area_arm_lock = _lock_b
+
+
 async def test_two_panels_crossing_lock_order_completes_with_sorted_entry_locks(
     hass: HomeAssistant,
     setup: Setup,
@@ -1162,57 +1205,102 @@ async def test_two_panels_crossing_lock_order_completes_with_sorted_entry_locks(
         for e in hass.config_entries.async_entries(DOMAIN)
         if e.unique_id == PANEL_SERIAL_2
     )
-    ax91, ax92 = await _ensure_crosslock_zone_entities(
+    x_a, x_b = await _ensure_crosslock_zone_entities(
         hass,
         entry_a,
         panel_key=PANEL_MAC,
-        object_91="aaa_crosslock_a91",
-        object_92="zzz_crosslock_a92",
+        object_91="aaa_panel_a_zone",
+        object_92="zzz_panel_a_zone",
     )
-    by91, by92 = await _ensure_crosslock_zone_entities(
+    y_b, _y_a = await _ensure_crosslock_zone_entities(
         hass,
         entry_b,
         panel_key=PANEL_SERIAL_2,
-        object_91="zzz_crosslock_b91",
-        object_92="aaa_crosslock_b92",
+        object_91="zzz_panel_b_zone",
+        object_92="aaa_panel_b_zone",
     )
-    assert ax91 < by91
+    # X: A then B by entity id; Y: B then A (opposite crossing).
+    assert x_a < x_b
+    assert y_b < _y_a
+    y_a = _zone_entity_for_serial(hass, PANEL_MAC, 92)
+    coord_a = entry_a.runtime_data.coordinator
+    coord_b = entry_b.runtime_data.coordinator
+    y_has_b = asyncio.Event()
+    y_waiting_a = asyncio.Event()
+    _track_crosspanel_area_locks(
+        coord_a,
+        coord_b,
+        y_has_panel_b_area_lock=y_has_b,
+        y_waiting_on_panel_a_area_lock=y_waiting_a,
+    )
     holder_ready = asyncio.Event()
     holder_release = asyncio.Event()
-    base = client_a.async_set_zone_bypass
+    send_log: list[tuple[str, int]] = []
+    base_a = client_a.async_set_zone_bypass
+    base_b = harness_b.client.async_set_zone_bypass
 
-    async def _hold_mid_send(zone_id: int, **params: Any) -> Any:
-        if zone_id == 91 and params.get("bypassed") is True:
+    holder_blocks = asyncio.Event()
+
+    async def _panel_a_send(zone_id: int, **params: Any) -> Any:
+        if holder_blocks.is_set() and zone_id == 91 and params.get("bypassed") is True:
+            send_log.append(("holder", zone_id))
             holder_ready.set()
             await holder_release.wait()
-        return await base(zone_id, **params)
+        else:
+            send_log.append(("a", zone_id))
+        return await base_a(zone_id, **params)
+
+    async def _panel_b_send(zone_id: int, **params: Any) -> Any:
+        send_log.append(("b", zone_id))
+        return await base_b(zone_id, **params)
 
     client_a.calls.clear()
-    _patch_bypass(client_a, mock_client, _hold_mid_send)
-    holder = asyncio.create_task(_call_zone_bypass(hass, [ax91]))
+    holder_blocks.set()
+    _patch_bypass(client_a, mock_client, _panel_a_send)
+    harness_b.client.async_set_zone_bypass = AsyncMock(side_effect=_panel_b_send)
+    holder = asyncio.create_task(_call_zone_bypass(hass, [x_a]))
     await holder_ready.wait()
-    call_x = asyncio.create_task(
-        hass.services.async_call(
-            DOMAIN,
-            "zone_bypass",
-            {"entity_id": [ax91, by91], "code": CODE, "bypass": True},
-            blocking=True,
-        )
-    )
+    holder_blocks.clear()
     call_y = asyncio.create_task(
         hass.services.async_call(
             DOMAIN,
             "zone_bypass",
-            {"entity_id": [by92, ax92], "code": CODE, "bypass": True},
+            {"entity_id": [y_b, y_a], "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    )
+    crossed_locks = False
+    try:
+        await asyncio.wait_for(y_waiting_a.wait(), timeout=1.0)
+        crossed_locks = True
+    except TimeoutError:
+        crossed_locks = False
+    call_x = asyncio.create_task(
+        hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [x_a, x_b], "code": CODE, "bypass": True},
             blocking=True,
         )
     )
     for _ in range(50):
         await asyncio.sleep(0)
     holder_release.set()
+    if crossed_locks:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.gather(holder, call_x, call_y), timeout=2.0)
+        call_x.cancel()
+        call_y.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call_x
+        with pytest.raises(asyncio.CancelledError):
+            await call_y
+        await holder
+        pytest.fail("crossing lock order deadlock expected under broken sort")
     await asyncio.wait_for(asyncio.gather(holder, call_x, call_y), timeout=5.0)
     assert (91, True) in _panel_bypass_calls(mock_client)
     assert (91, True) in _client_bypass_calls(harness_b)
+    assert any(role == "b" for role, _ in send_log)
 
 
 async def test_code_rejected_after_partial_rollback_shows_notification(
