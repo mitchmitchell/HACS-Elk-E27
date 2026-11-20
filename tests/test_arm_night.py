@@ -105,7 +105,7 @@ async def test_arm_night_service_sends_armed_night(
         ),
         (
             Elke27CommandOutcomeUnknownError(("area", "set_arm_state")),
-            "night_arm_outcome_unknown",
+            "arm_outcome_unknown",
         ),
     ],
 )
