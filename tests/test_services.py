@@ -72,9 +72,10 @@ def _patch_entity_lookup(test: unittest.TestCase) -> None:
         (
             "_entity_runtime_data",
             MagicMock(
-                side_effect=lambda _hass, entity_id, _platform: _ENTITIES.get()[
-                    entity_id
-                ]
+                side_effect=lambda _hass, entity_id, _platform: (
+                    *_ENTITIES.get()[entity_id],
+                    "test-entry-id",
+                )
             ),
         ),
     ):

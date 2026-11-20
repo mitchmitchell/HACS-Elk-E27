@@ -1,15 +1,17 @@
-# ruff: noqa: S101, PLR2004, TC001, ARG001, D101, D103, D107, TRY003, EM101
 """Real zone_bypass service tests for pre-validation, rollback, and locking."""
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
+from collections.abc import Awaitable, Callable
 from types import MappingProxyType
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from elke27_lib import AreaState, ArmMode, PanelSnapshot, ZoneState
+from elke27_lib.errors import Elke27PinRequiredError
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -19,8 +21,7 @@ from custom_components.elke27.const import (
     DOMAIN,
 )
 from custom_components.elke27.coordinator import Elke27DataUpdateCoordinator
-from custom_components.elke27.models import Elke27RuntimeData
-from homeassistant.config_entries import ConfigEntryState
+from custom_components.elke27.errors import code_rejected_error
 from homeassistant.const import ATTR_CODE, CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -41,6 +42,8 @@ from tests.conftest import (
 
 CODE = "1234"
 KEY = PANEL_MAC
+PANEL_REFUSED_ZONE_2 = "panel refused zone 2"
+PANEL_REFUSED_ZONE_3 = "panel A refused zone 3"
 
 
 def _three_zone_snapshot(*, zone2_bypassed: bool = False) -> PanelSnapshot:
@@ -138,6 +141,67 @@ def _panel_bypass_calls(mock_client: ClientHarness) -> list[tuple[int, bool]]:
     return out
 
 
+def _panel_b_snapshot() -> PanelSnapshot:
+    return dataclasses.replace(
+        _three_zone_snapshot(),
+        panel=dataclasses.replace(
+            panel_snapshot().panel,
+            mac=None,
+            serial=PANEL_SERIAL_2,
+            panel_name="Panel B",
+        ),
+    )
+
+
+def _zone_entity_for_serial(
+    hass: HomeAssistant, panel_serial: str, zone_id: int
+) -> str:
+    for entity_id in entity_ids(hass, "binary_sensor"):
+        entry = er.async_get(hass).async_get(entity_id)
+        if entry is not None and entry.unique_id == f"{panel_serial}:{zone_id}":
+            return entity_id
+    msg = f"zone {zone_id} on {panel_serial}"
+    raise AssertionError(msg)
+
+
+async def _setup_second_panel(
+    hass: HomeAssistant, mock_client: ClientHarness, snapshot: PanelSnapshot
+) -> ClientHarness:
+    client_b = ThreeZoneClient(snapshot=snapshot)
+    harness_b = ClientHarness()
+    client_b.install(harness_b.client)
+    harness_b.snapshot = snapshot
+    entry_b = MockConfigEntry(
+        domain=DOMAIN,
+        title="Panel B",
+        unique_id=PANEL_SERIAL_2,
+        data={
+            CONF_HOST: HOST_2,
+            CONF_PORT: PORT,
+            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
+            CONF_INTEGRATION_ID: "987654321098",
+        },
+    )
+    entry_b.add_to_hass(hass)
+    with patch(
+        "custom_components.elke27.coordinator.Elke27Client",
+        return_value=harness_b.client,
+    ):
+        assert await hass.config_entries.async_setup(entry_b.entry_id)
+        await hass.async_block_till_done()
+    return harness_b
+
+
+def _client_bypass_calls(harness: ClientHarness) -> list[tuple[int, bool]]:
+    out: list[tuple[int, bool]] = []
+    mock = harness.client.async_set_zone_bypass
+    for call in mock.await_args_list:
+        zone_id = call.args[0]
+        bypassed = call.kwargs["bypassed"]
+        out.append((zone_id, bypassed))
+    return out
+
+
 def _zone_entities(hass: HomeAssistant) -> dict[int, str]:
     mapping: dict[int, str] = {}
     for entity_id in entity_ids(hass, "binary_sensor"):
@@ -152,6 +216,48 @@ def _patch_bypass(
     client: FakeClient, mock_client: ClientHarness, side_effect: Any
 ) -> None:
     mock_client.client.async_set_zone_bypass = AsyncMock(side_effect=side_effect)
+
+
+async def _call_zone_bypass(
+    hass: HomeAssistant, entity_ids: list[str], *, bypass: bool = True
+) -> None:
+    await hass.services.async_call(
+        DOMAIN,
+        "zone_bypass",
+        {"entity_id": entity_ids, "code": CODE, "bypass": bypass},
+        blocking=True,
+    )
+
+
+def _record_coordinator_bypass(
+    coordinator: Elke27DataUpdateCoordinator,
+    behave: Callable[..., Awaitable[bool]],
+) -> list[tuple[int, bool]]:
+    calls: list[tuple[int, bool]] = []
+
+    async def _fn(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        calls.append((zone_id, bypassed))
+        return await behave(zone_id, bypassed, pin)
+
+    coordinator.async_set_zone_bypass = _fn
+    return calls
+
+
+def _set_coordinator_snapshot(
+    coordinator: Elke27DataUpdateCoordinator,
+    client: FakeClient,
+    snapshot: PanelSnapshot,
+) -> None:
+    coordinator.async_set_updated_data(snapshot)
+    client.snapshot = snapshot
+
+
+def _zone_bypassed_snapshot(
+    snapshot: PanelSnapshot, zone_id: int, *, bypassed: bool
+) -> PanelSnapshot:
+    zones = dict(snapshot.zones)
+    zones[zone_id] = dataclasses.replace(zones[zone_id], bypassed=bypassed)
+    return dataclasses.replace(snapshot, zones=MappingProxyType(zones))
 
 
 @pytest.fixture
@@ -230,19 +336,16 @@ async def test_unknown_zone_in_list_sends_nothing(
             DOMAIN,
             f"{KEY}:99",
             config_entry=mock_config_entry,
-            suggested_object_id="house_missing_zone",
+            suggested_object_id="house_zone_b_missing",
         )
         .entity_id
     )
     zones = _zone_entities(hass)
+    call_order = sorted([zones[3], missing, zones[1]])
+    assert call_order == [zones[1], missing, zones[3]]
     client.calls.clear()
     with pytest.raises(ServiceValidationError) as err:
-        await hass.services.async_call(
-            DOMAIN,
-            "zone_bypass",
-            {"entity_id": [zones[1], missing, zones[3]], "code": CODE, "bypass": True},
-            blocking=True,
-        )
+        await _call_zone_bypass(hass, call_order)
     assert err.value.translation_key == "zone_not_found"
     assert _bypass_calls(client) == []
 
@@ -257,7 +360,7 @@ async def test_panel_refusal_rolls_back_prior_zones(
 
     async def _bypass(zone_id: int, **params: Any) -> Any:
         if zone_id == 2 and params.get("bypassed") is True:
-            raise HomeAssistantError("panel refused zone 2")
+            raise HomeAssistantError(PANEL_REFUSED_ZONE_2)
         return await base(zone_id, **params)
 
     client.calls.clear()
@@ -287,7 +390,7 @@ async def test_failed_rollback_reports_still_bypassed(
 
     async def _bypass(zone_id: int, **params: Any) -> Any:
         if zone_id == 2 and params.get("bypassed"):
-            raise HomeAssistantError("panel refused zone 2")
+            raise HomeAssistantError(PANEL_REFUSED_ZONE_2)
         if zone_id == 1 and params.get("bypassed") is False:
             raise HomeAssistantError("rollback refused zone 1")
         return await base(zone_id, **params)
@@ -301,9 +404,10 @@ async def test_failed_rollback_reports_still_bypassed(
             {"entity_id": [zones[1], zones[2], zones[3]], "code": CODE, "bypass": True},
             blocking=True,
         )
-    assert err.value.translation_key == "zone_bypass_failed_still_bypassed"
+    assert err.value.translation_key == "zone_bypass_failed_still_bypassed_no_restore"
     ph = err.value.translation_placeholders or {}
     assert ph.get("still_bypassed_zone_numbers") == "1"
+    assert "rolled_back_zone_numbers" not in ph
     assert _panel_bypass_calls(mock_client) == [(1, True), (2, True), (1, False)]
 
 
@@ -340,6 +444,249 @@ async def test_duplicate_targets_send_once(
     assert _bypass_calls(client) == [(1, True)]
 
 
+async def test_two_prior_zones_roll_back_in_reverse(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    _client, _mock = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    panel_msg = "panel refused zone 3"
+    original_bypass = coordinator.async_set_zone_bypass
+
+    async def behave(zone_id: int, bypassed: bool, pin: str | None = None) -> bool:
+        if zone_id == 3 and bypassed:
+            raise HomeAssistantError(panel_msg)
+        return await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+
+    calls = _record_coordinator_bypass(coordinator, behave)
+    with pytest.raises(HomeAssistantError) as err:
+        await _call_zone_bypass(hass, [zones[1], zones[2], zones[3]])
+    assert err.value.translation_key == "zone_bypass_failed_rolled_back"
+    assert calls == [(1, True), (2, True), (3, True), (2, False), (1, False)]
+    ph = err.value.translation_placeholders or {}
+    assert set(ph["rolled_back_zone_numbers"].split(", ")) == {"1", "2"}
+    assert panel_msg in ph["reason"]
+
+
+async def test_pin_required_mid_list_rolls_back(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    _client, _mock = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    original_bypass = coordinator.async_set_zone_bypass
+
+    async def behave(zone_id: int, bypassed: bool, pin: str | None = None) -> bool:
+        if zone_id == 2 and bypassed:
+            raise Elke27PinRequiredError("pin required")
+        return await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+
+    calls = _record_coordinator_bypass(coordinator, behave)
+    with pytest.raises(HomeAssistantError) as err:
+        await _call_zone_bypass(hass, [zones[1], zones[2]])
+    assert err.value.translation_key == "pin_required_bypass"
+    assert calls == [(1, True), (2, True), (1, False)]
+
+
+async def test_unacknowledged_mid_list_with_failed_rollback(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    _client, _mock = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    original_bypass = coordinator.async_set_zone_bypass
+
+    async def behave(zone_id: int, bypassed: bool, pin: str | None = None) -> bool:
+        if zone_id == 2 and bypassed:
+            return False
+        if zone_id == 1 and not bypassed:
+            raise HomeAssistantError("rollback refused zone 1")
+        return await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+
+    calls = _record_coordinator_bypass(coordinator, behave)
+    with pytest.raises(HomeAssistantError) as err:
+        await _call_zone_bypass(hass, [zones[1], zones[2]])
+    assert (
+        err.value.translation_key
+        == "zone_bypass_failed_not_acknowledged_still_bypassed_no_restore"
+    )
+    ph = err.value.translation_placeholders or {}
+    assert ph.get("still_bypassed_zone_numbers") == "1"
+    assert calls == [(1, True), (2, True), (1, False)]
+
+
+async def test_unacknowledged_lists_rolled_back_zones(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    _client, _mock = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    original_bypass = coordinator.async_set_zone_bypass
+
+    async def behave(zone_id: int, bypassed: bool, pin: str | None = None) -> bool:
+        if zone_id == 2 and bypassed:
+            return False
+        return await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+
+    _record_coordinator_bypass(coordinator, behave)
+    with pytest.raises(HomeAssistantError) as err:
+        await _call_zone_bypass(hass, [zones[1], zones[2]])
+    assert (
+        err.value.translation_key == "zone_bypass_failed_not_acknowledged_rolled_back"
+    )
+    ph = err.value.translation_placeholders or {}
+    assert ph.get("rolled_back_zone_numbers") == "1"
+
+
+async def test_code_rejected_mid_list_rolls_back_and_raises(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    client, mock_client = three_zones
+    zones = _zone_entities(hass)
+    base = client.async_set_zone_bypass
+
+    async def _bypass(zone_id: int, **params: Any) -> Any:
+        if zone_id == 2 and params.get("bypassed") is True:
+            raise ServiceValidationError(translation_key="code_rejected")
+        return await base(zone_id, **params)
+
+    client.calls.clear()
+    _patch_bypass(client, mock_client, _bypass)
+    with pytest.raises(ServiceValidationError) as err:
+        await _call_zone_bypass(hass, [zones[1], zones[2]])
+    assert err.value.translation_key == "code_rejected"
+    assert code_rejected_error(err.value) is err.value
+    assert _panel_bypass_calls(mock_client) == [(1, True), (2, True), (1, False)]
+
+
+async def test_duplicate_targets_preserve_order_under_sorted_entity_ids(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    _client, _mock = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    original_bypass = coordinator.async_set_zone_bypass
+
+    async def ok(zone_id: int, bypassed: bool, pin: str | None = None) -> bool:
+        return await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+
+    calls = _record_coordinator_bypass(coordinator, ok)
+    await _call_zone_bypass(hass, [zones[1], zones[1], zones[2], zones[1]])
+    assert calls == [(1, True), (2, True)]
+
+
+async def test_area_less_zone_skips_lock_and_still_bypasses(
+    hass: HomeAssistant,
+    setup: Setup,
+    mock_client: ClientHarness,
+) -> None:
+    base = _three_zone_snapshot()
+    zones_map = dict(base.zones)
+    zones_map[5] = ZoneState(
+        zone_id=5, name="No area", area_id=None, open=False, bypassed=False
+    )
+    client = ThreeZoneClient(
+        snapshot=dataclasses.replace(base, zones=MappingProxyType(zones_map))
+    )
+    await setup(client)
+    zones = _zone_entities(hass)
+    assert 5 in zones
+    client.calls.clear()
+    await _call_zone_bypass(hass, [zones[1], zones[5]])
+    assert _panel_bypass_calls(mock_client) == [(1, True), (5, True)]
+
+
+async def test_zone_already_bypassed_under_lock_is_not_sent_again(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    client, mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    original_bypass = coordinator.async_set_zone_bypass
+
+    async def _bypass(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        result = await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+        if zone_id == 1 and bypassed and coordinator.data is not None:
+            snap = _zone_bypassed_snapshot(coordinator.data, 1, bypassed=True)
+            snap = _zone_bypassed_snapshot(snap, 2, bypassed=True)
+            _set_coordinator_snapshot(coordinator, client, snap)
+        return result
+
+    coordinator.async_set_zone_bypass = _bypass
+    client.calls.clear()
+    await _call_zone_bypass(hass, [zones[1], zones[2]])
+    assert _panel_bypass_calls(mock_client) == [(1, True)]
+
+
+async def test_snapshot_missing_under_lock_rolls_back_and_reports(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    client, mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    original_bypass = coordinator.async_set_zone_bypass
+    empty_snapshot = PanelSnapshot.empty()
+
+    async def _bypass(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        result = await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+        if zone_id == 1 and bypassed:
+            coordinator.async_set_updated_data(empty_snapshot)
+            client.snapshot = empty_snapshot
+
+            def _none() -> PanelSnapshot | None:
+                return None
+
+            coordinator.get_snapshot = _none
+        return result
+
+    coordinator.async_set_zone_bypass = _bypass
+    client.calls.clear()
+    with pytest.raises(HomeAssistantError):
+        await _call_zone_bypass(hass, [zones[1], zones[2]])
+    assert _panel_bypass_calls(mock_client) == [(1, True), (1, False)]
+
+
+async def test_still_changed_after_rollback_logs_warning(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, _mock = three_zones
+    zones = _zone_entities(hass)
+    base = client.async_set_zone_bypass
+    caplog.set_level(logging.WARNING)
+
+    async def _bypass(zone_id: int, **params: Any) -> Any:
+        if zone_id == 2 and params.get("bypassed"):
+            raise HomeAssistantError(PANEL_REFUSED_ZONE_2)
+        if zone_id == 1 and params.get("bypassed") is False:
+            raise HomeAssistantError("rollback refused zone 1")
+        return await base(zone_id, **params)
+
+    _patch_bypass(client, _mock, _bypass)
+    with pytest.raises(HomeAssistantError):
+        await _call_zone_bypass(hass, [zones[1], zones[2]])
+    assert any(
+        "zones still changed after rollback" in record.message
+        for record in caplog.records
+    )
+
+
 async def test_single_zone_unacknowledged_has_no_restore_clause(
     hass: HomeAssistant,
     three_zones: tuple[FakeClient, ClientHarness],
@@ -369,65 +716,435 @@ async def test_single_zone_unacknowledged_has_no_restore_clause(
 async def test_two_panels_dedupe_same_zone_number(
     hass: HomeAssistant,
     setup: Setup,
+    mock_client: ClientHarness,
 ) -> None:
     client_a = ThreeZoneClient()
     await setup(client_a)
-    entry_a = hass.config_entries.async_entries(DOMAIN)[0]
-    coord_a = entry_a.runtime_data.coordinator
-    entry_b = MockConfigEntry(
-        domain=DOMAIN,
-        title="Panel B",
-        unique_id=PANEL_SERIAL_2,
-        data={
-            CONF_HOST: HOST_2,
-            CONF_PORT: PORT,
-            CONF_LINK_KEYS_JSON: LINK_KEYS_JSON,
-            CONF_INTEGRATION_ID: "987654321098",
-        },
-    )
-    entry_b.add_to_hass(hass)
-    coord_b = Elke27DataUpdateCoordinator(hass, entry_b)
-    assert coord_a.client is not None
-    object.__setattr__(coord_b, "_client", coord_a.client)
-    coord_b.data = _three_zone_snapshot()
-    coord_b.panel_device_id = "panel-b-device"
-    entry_b.runtime_data = Elke27RuntimeData(coordinator=coord_b)
-    entry_b.mock_state(hass, ConfigEntryState.LOADED)
-    zone_reg = er.async_get(hass)
-    zones_b: dict[int, str] = {}
-    for zone_id in (1, 2, 3):
-        zones_b[zone_id] = zone_reg.async_get_or_create(
-            "binary_sensor",
-            DOMAIN,
-            f"{entry_b.entry_id}:{zone_id}",
-            config_entry=entry_b,
-            suggested_object_id=f"panel_b_zone_{zone_id}",
-        ).entity_id
-    zones_a = _zone_entities(hass)
-    calls_a: list[tuple[int, bool]] = []
-    calls_b: list[tuple[int, bool]] = []
-    orig_a = coord_a.async_set_zone_bypass
-    orig_b = coord_b.async_set_zone_bypass
-
-    async def _a(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
-        calls_a.append((zone_id, bypassed))
-        return await orig_a(zone_id, bypassed=bypassed, pin=pin)
-
-    async def _b(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
-        calls_b.append((zone_id, bypassed))
-        return await orig_b(zone_id, bypassed=bypassed, pin=pin)
-
-    coord_a.async_set_zone_bypass = _a  # type: ignore[method-assign]
-    coord_b.async_set_zone_bypass = _b  # type: ignore[method-assign]
-
+    harness_b = await _setup_second_panel(hass, mock_client, _panel_b_snapshot())
+    zone_a1 = _zone_entity_for_serial(hass, PANEL_MAC, 1)
+    zone_b1 = _zone_entity_for_serial(hass, PANEL_SERIAL_2, 1)
     await hass.services.async_call(
         DOMAIN,
         "zone_bypass",
-        {"entity_id": [zones_a[1], zones_b[1]], "code": CODE, "bypass": True},
+        {"entity_id": [zone_a1, zone_b1], "code": CODE, "bypass": True},
         blocking=True,
     )
-    assert calls_a == [(1, True)]
-    assert calls_b == [(1, True)]
+    assert _panel_bypass_calls(mock_client) == [(1, True)]
+    assert _client_bypass_calls(harness_b) == [(1, True)]
+
+
+async def test_two_panels_roll_back_all_prior_zones(
+    hass: HomeAssistant,
+    setup: Setup,
+    mock_client: ClientHarness,
+) -> None:
+    client_a = ThreeZoneClient()
+    await setup(client_a)
+    harness_b = await _setup_second_panel(hass, mock_client, _panel_b_snapshot())
+    zone_a1 = _zone_entity_for_serial(hass, PANEL_MAC, 1)
+    zone_a2 = _zone_entity_for_serial(hass, PANEL_MAC, 2)
+    zone_b1 = _zone_entity_for_serial(hass, PANEL_SERIAL_2, 1)
+    zone_b2 = _zone_entity_for_serial(hass, PANEL_SERIAL_2, 2)
+    zone_b3 = _zone_entity_for_serial(hass, PANEL_SERIAL_2, 3)
+    entry_b = next(
+        e
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.unique_id == PANEL_SERIAL_2
+    )
+    coord_b = entry_b.runtime_data.coordinator
+    orig_b = coord_b.async_set_zone_bypass
+    panel_b_attempts: list[tuple[int, bool]] = []
+
+    async def _fail_b3(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        panel_b_attempts.append((zone_id, bypassed))
+        if zone_id == 3 and bypassed is True:
+            raise HomeAssistantError("panel B refused zone 3")
+        return await orig_b(zone_id, bypassed=bypassed, pin=pin)
+
+    coord_b.async_set_zone_bypass = _fail_b3
+    with pytest.raises(HomeAssistantError) as err:
+        await _call_zone_bypass(
+            hass,
+            [zone_a1, zone_a2, zone_b1, zone_b2, zone_b3],
+        )
+    assert err.value.translation_key == "zone_bypass_failed_rolled_back"
+    assert _panel_bypass_calls(mock_client) == [
+        (1, True),
+        (2, True),
+        (2, False),
+        (1, False),
+    ]
+    assert panel_b_attempts == [
+        (1, True),
+        (2, True),
+        (3, True),
+        (2, False),
+        (1, False),
+    ]
+    ph = err.value.translation_placeholders or {}
+    rolled = ph["rolled_back_zone_numbers"].split(", ")
+    assert len(rolled) == 4
+    assert rolled.count("1") == 2
+    assert rolled.count("2") == 2
+
+
+async def test_two_panels_both_locks_held_during_send(
+    hass: HomeAssistant,
+    setup: Setup,
+    mock_client: ClientHarness,
+) -> None:
+    client_a = ThreeZoneClient()
+    await setup(client_a)
+    await _setup_second_panel(hass, mock_client, _panel_b_snapshot())
+    zone_a1 = _zone_entity_for_serial(hass, PANEL_MAC, 1)
+    zone_b1 = _zone_entity_for_serial(hass, PANEL_SERIAL_2, 1)
+    entry_a = hass.config_entries.async_entries(DOMAIN)[0]
+    entry_b = next(
+        e
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.unique_id == PANEL_SERIAL_2
+    )
+    coord_a = entry_a.runtime_data.coordinator
+    coord_b = entry_b.runtime_data.coordinator
+    holds: list[str] = []
+    started = asyncio.Event()
+    hold = asyncio.Event()
+    orig_a = coord_a.async_set_zone_bypass
+
+    def _wrap_lock(coordinator: Elke27DataUpdateCoordinator, label: str) -> None:
+        base = coordinator.area_arm_lock
+
+        def _lock(area_id: int) -> Any:
+            lock = base(area_id)
+
+            class Tracked:
+                async def __aenter__(self) -> None:
+                    holds.append(label)
+                    await lock.acquire()
+
+                async def __aexit__(self, *exc: object) -> None:
+                    holds.remove(label)
+                    lock.release()
+
+            return Tracked()
+
+        coordinator.area_arm_lock = _lock
+
+    _wrap_lock(coord_a, "panel_a")
+    _wrap_lock(coord_b, "panel_b")
+
+    async def _slow_a(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        if zone_id == 1 and bypassed is True:
+            started.set()
+            assert "panel_a" in holds
+            assert "panel_b" in holds
+            await hold.wait()
+        return await orig_a(zone_id, bypassed=bypassed, pin=pin)
+
+    coord_a.async_set_zone_bypass = _slow_a
+    task = asyncio.create_task(_call_zone_bypass(hass, [zone_a1, zone_b1]))
+    await started.wait()
+    hold.set()
+    await task
+
+
+async def test_two_panels_first_panel_send_holds_second(
+    hass: HomeAssistant,
+    setup: Setup,
+    mock_client: ClientHarness,
+) -> None:
+    client_a = ThreeZoneClient()
+    await setup(client_a)
+    harness_b = await _setup_second_panel(hass, mock_client, _panel_b_snapshot())
+    zone_a1 = _zone_entity_for_serial(hass, PANEL_MAC, 1)
+    zone_a2 = _zone_entity_for_serial(hass, PANEL_MAC, 2)
+    zone_b1 = _zone_entity_for_serial(hass, PANEL_SERIAL_2, 1)
+    entry_a = hass.config_entries.async_entries(DOMAIN)[0]
+    coord_a = entry_a.runtime_data.coordinator
+    started_a = asyncio.Event()
+    hold_a = asyncio.Event()
+    original_a = coord_a.async_set_zone_bypass
+    b_calls: list[tuple[int, bool]] = []
+
+    async def _slow_a(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        if zone_id == 1 and bypassed is True:
+            started_a.set()
+            await hold_a.wait()
+        return await original_a(zone_id, bypassed=bypassed, pin=pin)
+
+    coord_a.async_set_zone_bypass = _slow_a
+    entry_b = next(
+        e
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.unique_id == PANEL_SERIAL_2
+    )
+    coord_b = entry_b.runtime_data.coordinator
+    orig_b = coord_b.async_set_zone_bypass
+
+    async def _track_b(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        b_calls.append((zone_id, bypassed))
+        return await orig_b(zone_id, bypassed=bypassed, pin=pin)
+
+    coord_b.async_set_zone_bypass = _track_b
+    task = asyncio.create_task(_call_zone_bypass(hass, [zone_a1, zone_a2, zone_b1]))
+    await started_a.wait()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert b_calls == []
+    hold_a.set()
+    await task
+    assert _panel_bypass_calls(mock_client) == [(1, True), (2, True)]
+    assert b_calls == [(1, True)]
+
+
+async def test_two_panels_rollback_stays_on_originating_coordinator(
+    hass: HomeAssistant,
+    setup: Setup,
+    mock_client: ClientHarness,
+) -> None:
+    client_a = ThreeZoneClient()
+    await setup(client_a)
+    await _setup_second_panel(hass, mock_client, _panel_b_snapshot())
+    zone_a1 = _zone_entity_for_serial(hass, PANEL_MAC, 1)
+    zone_b1 = _zone_entity_for_serial(hass, PANEL_SERIAL_2, 1)
+    entry_b = next(
+        e
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.unique_id == PANEL_SERIAL_2
+    )
+    coord_b = entry_b.runtime_data.coordinator
+    orig_b = coord_b.async_set_zone_bypass
+    panel_b_attempts: list[tuple[int, bool]] = []
+
+    async def _fail_b1(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        panel_b_attempts.append((zone_id, bypassed))
+        if zone_id == 1 and bypassed is True:
+            raise HomeAssistantError("panel B refused zone 1")
+        return await orig_b(zone_id, bypassed=bypassed, pin=pin)
+
+    coord_b.async_set_zone_bypass = _fail_b1
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [zone_a1, zone_b1], "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    assert _panel_bypass_calls(mock_client) == [(1, True), (1, False)]
+    assert panel_b_attempts == [(1, True)]
+
+
+async def test_unbypass_waits_for_lock_and_does_not_return_on_stale_pre_lock_state(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    client, mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    original_bypass = coordinator.async_set_zone_bypass
+    hold_bypass = asyncio.Event()
+    bypass_started = asyncio.Event()
+
+    async def _slow_bypass(
+        zone_id: int, *, bypassed: bool, pin: str | None = None
+    ) -> bool:
+        if zone_id == 1 and bypassed is True:
+            bypass_started.set()
+            await hold_bypass.wait()
+        result = await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+        if zone_id == 1 and bypassed is True and coordinator.data is not None:
+            _set_coordinator_snapshot(
+                coordinator,
+                client,
+                _zone_bypassed_snapshot(coordinator.data, zone_id=1, bypassed=True),
+            )
+        return result
+
+    coordinator.async_set_zone_bypass = _slow_bypass
+    client.calls.clear()
+    bypass_task = asyncio.create_task(
+        hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [zones[1]], "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    )
+    await bypass_started.wait()
+    unbypass_task = asyncio.create_task(
+        hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [zones[1]], "code": CODE, "bypass": False},
+            blocking=True,
+        )
+    )
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert not unbypass_task.done()
+    hold_bypass.set()
+    await bypass_task
+    await unbypass_task
+    assert _panel_bypass_calls(mock_client) == [(1, True), (1, False)]
+
+
+async def test_single_zone_pin_required_not_map_to_not_acknowledged(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    _client, _mock = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    library_error = Elke27PinRequiredError("pin required")
+
+    async def _pin(_zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        raise library_error
+
+    coordinator.async_set_zone_bypass = _pin
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [zones[1]], "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    assert err.value.translation_key == "pin_required_bypass"
+    assert err.value.__cause__ is library_error
+    assert err.value is not err.value.__cause__
+
+
+async def test_single_zone_panel_error_keeps_original_cause_chain(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    _client, _mock = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    inner = HomeAssistantError("inner")
+
+    async def _fail(_zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        raise HomeAssistantError("panel refused") from inner
+
+    coordinator.async_set_zone_bypass = _fail
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [zones[1]], "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    assert err.value.__cause__ is inner
+    assert err.value.__cause__ is not err.value
+
+
+async def test_zone_vanished_under_lock_rolls_back_prior_changes(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    client, mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    assert coordinator.data is not None
+    original_bypass = coordinator.async_set_zone_bypass
+
+    async def _bypass(zone_id: int, *, bypassed: bool, pin: str | None = None) -> bool:
+        result = await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+        if zone_id == 1 and bypassed is True and coordinator.data is not None:
+            snap = _zone_bypassed_snapshot(coordinator.data, zone_id=1, bypassed=True)
+            only_zone_one = dataclasses.replace(
+                snap, zones=MappingProxyType({1: snap.zones[1]})
+            )
+            _set_coordinator_snapshot(coordinator, client, only_zone_one)
+        return result
+
+    coordinator.async_set_zone_bypass = _bypass
+    client.calls.clear()
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [zones[1], zones[2]], "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    assert _panel_bypass_calls(mock_client) == [(1, True), (1, False)]
+
+
+async def test_two_panels_opposite_lock_order_both_complete(
+    hass: HomeAssistant,
+    setup: Setup,
+    mock_client: ClientHarness,
+) -> None:
+    client_a = ThreeZoneClient()
+    await setup(client_a)
+    harness_b = await _setup_second_panel(hass, mock_client, _panel_b_snapshot())
+    zone_a1 = _zone_entity_for_serial(hass, PANEL_MAC, 1)
+    zone_b1 = _zone_entity_for_serial(hass, PANEL_SERIAL_2, 1)
+    first = asyncio.create_task(
+        hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [zone_a1], "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    )
+    second = asyncio.create_task(
+        hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [zone_b1], "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    )
+    await asyncio.wait_for(asyncio.gather(first, second), timeout=5.0)
+    assert _panel_bypass_calls(mock_client) == [(1, True)]
+    assert _client_bypass_calls(harness_b) == [(1, True)]
+
+
+async def test_code_rejected_after_partial_rollback_shows_notification(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+) -> None:
+    client, mock_client = three_zones
+    zones = _zone_entities(hass)
+    base = client.async_set_zone_bypass
+    notices: list[tuple[str, str]] = []
+
+    async def _bypass(zone_id: int, **params: Any) -> Any:
+        if zone_id == 2 and params.get("bypassed") is True:
+            from homeassistant.exceptions import ServiceValidationError
+
+            raise ServiceValidationError(translation_key="code_rejected")
+        if zone_id == 1 and params.get("bypassed") is False:
+            raise HomeAssistantError("rollback refused zone 1")
+        return await base(zone_id, **params)
+
+    client.calls.clear()
+    _patch_bypass(client, mock_client, _bypass)
+
+    def _record_create(
+        _hass: HomeAssistant, *, title: str, message: str, notification_id: str
+    ) -> None:
+        notices.append((title, message))
+
+    with (
+        patch(
+            "custom_components.elke27.services.persistent_notification.async_create",
+            side_effect=_record_create,
+        ),
+        pytest.raises(HomeAssistantError),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": [zones[1], zones[2]], "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    assert notices
+    assert "still bypassed" in notices[0][1].lower()
 
 
 async def test_unbypass_failed_rebypass_rollback_reports_still_unbypassed(
@@ -460,9 +1177,10 @@ async def test_unbypass_failed_rebypass_rollback_reports_still_unbypassed(
             },
             blocking=True,
         )
-    assert err.value.translation_key == "zone_bypass_failed_still_unbypassed"
+    assert err.value.translation_key == "zone_bypass_failed_still_unbypassed_no_restore"
     ph = err.value.translation_placeholders or {}
     assert ph.get("still_unbypassed_zone_numbers") == "1"
+    assert "rolled_back_zone_numbers" not in ph
 
 
 async def test_unbypass_refusal_re_bypasses_prior_zones(

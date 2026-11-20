@@ -335,28 +335,45 @@ def zone_bypass_service_failed_error(
     bypass: bool,
 ) -> HomeAssistantError:
     """Return the translated error when zone bypass failed and was rolled back."""
-    base = {
-        "zone": zone_bypass_label(zone),
-        "reason": reason,
-        "rolled_back_zone_numbers": zone_number_list(list(rolled_back_zones)),
-    }
+    zone_label = zone_bypass_label(zone)
+    still_numbers = zone_number_list(list(still_changed_zones))
+    rolled_numbers = zone_number_list(list(rolled_back_zones))
     if still_changed_zones:
-        still_key = (
+        still_ph_key = (
             "still_bypassed_zone_numbers" if bypass else "still_unbypassed_zone_numbers"
         )
+        if rolled_back_zones:
+            translation_key = (
+                "zone_bypass_failed_still_bypassed"
+                if bypass
+                else "zone_bypass_failed_still_unbypassed"
+            )
+            return _translated_error(
+                translation_key,
+                {
+                    "zone": zone_label,
+                    "reason": reason,
+                    "rolled_back_zone_numbers": rolled_numbers,
+                    still_ph_key: still_numbers,
+                },
+            )
         translation_key = (
-            "zone_bypass_failed_still_bypassed"
+            "zone_bypass_failed_still_bypassed_no_restore"
             if bypass
-            else "zone_bypass_failed_still_unbypassed"
+            else "zone_bypass_failed_still_unbypassed_no_restore"
         )
         return _translated_error(
             translation_key,
-            {
-                **base,
-                still_key: zone_number_list(list(still_changed_zones)),
-            },
+            {"zone": zone_label, "reason": reason, still_ph_key: still_numbers},
         )
-    return _translated_error("zone_bypass_failed_rolled_back", base)
+    return _translated_error(
+        "zone_bypass_failed_rolled_back",
+        {
+            "zone": zone_label,
+            "reason": reason,
+            "rolled_back_zone_numbers": rolled_numbers,
+        },
+    )
 
 
 def zone_bypass_unacknowledged_failed_error(
@@ -367,24 +384,37 @@ def zone_bypass_unacknowledged_failed_error(
     bypass: bool,
 ) -> HomeAssistantError:
     """Return the translated error when an unacknowledged bypass failed mid-call."""
-    base = {
-        "zone": zone_bypass_label(zone),
-        "rolled_back_zone_numbers": zone_number_list(list(rolled_back_zones)),
-    }
+    zone_label = zone_bypass_label(zone)
+    still_numbers = zone_number_list(list(still_changed_zones))
+    rolled_numbers = zone_number_list(list(rolled_back_zones))
     if still_changed_zones:
-        still_key = (
+        still_ph_key = (
             "still_bypassed_zone_numbers" if bypass else "still_unbypassed_zone_numbers"
         )
+        if rolled_back_zones:
+            translation_key = (
+                "zone_bypass_failed_not_acknowledged_still_bypassed"
+                if bypass
+                else "zone_bypass_failed_not_acknowledged_still_unbypassed"
+            )
+            return _translated_error(
+                translation_key,
+                {
+                    "zone": zone_label,
+                    "rolled_back_zone_numbers": rolled_numbers,
+                    still_ph_key: still_numbers,
+                },
+            )
         translation_key = (
-            "zone_bypass_failed_not_acknowledged_still_bypassed"
+            "zone_bypass_failed_not_acknowledged_still_bypassed_no_restore"
             if bypass
-            else "zone_bypass_failed_not_acknowledged_still_unbypassed"
+            else "zone_bypass_failed_not_acknowledged_still_unbypassed_no_restore"
         )
         return _translated_error(
             translation_key,
-            {
-                **base,
-                still_key: zone_number_list(list(still_changed_zones)),
-            },
+            {"zone": zone_label, still_ph_key: still_numbers},
         )
-    return _translated_error("zone_bypass_failed_not_acknowledged_rolled_back", base)
+    return _translated_error(
+        "zone_bypass_failed_not_acknowledged_rolled_back",
+        {"zone": zone_label, "rolled_back_zone_numbers": rolled_numbers},
+    )

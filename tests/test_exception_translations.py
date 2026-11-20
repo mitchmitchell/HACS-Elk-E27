@@ -468,6 +468,10 @@ def _placeholder_observations() -> dict[str, set[frozenset[str]]]:
         {"zone", "reason", "rolled_back_zone_numbers", "still_bypassed_zone_numbers"},
     )
     record(
+        "zone_bypass_failed_still_bypassed_no_restore",
+        {"zone", "reason", "still_bypassed_zone_numbers"},
+    )
+    record(
         "zone_bypass_failed_still_unbypassed",
         {
             "zone",
@@ -475,6 +479,10 @@ def _placeholder_observations() -> dict[str, set[frozenset[str]]]:
             "rolled_back_zone_numbers",
             "still_unbypassed_zone_numbers",
         },
+    )
+    record(
+        "zone_bypass_failed_still_unbypassed_no_restore",
+        {"zone", "reason", "still_unbypassed_zone_numbers"},
     )
     record(
         "zone_bypass_failed_not_acknowledged_rolled_back",
@@ -485,8 +493,16 @@ def _placeholder_observations() -> dict[str, set[frozenset[str]]]:
         {"zone", "rolled_back_zone_numbers", "still_bypassed_zone_numbers"},
     )
     record(
+        "zone_bypass_failed_not_acknowledged_still_bypassed_no_restore",
+        {"zone", "still_bypassed_zone_numbers"},
+    )
+    record(
         "zone_bypass_failed_not_acknowledged_still_unbypassed",
         {"zone", "rolled_back_zone_numbers", "still_unbypassed_zone_numbers"},
+    )
+    record(
+        "zone_bypass_failed_not_acknowledged_still_unbypassed_no_restore",
+        {"zone", "still_unbypassed_zone_numbers"},
     )
     record("zone_bypass_not_acknowledged", set())
     record("arm_automatic_multi_failed_area_unnamed", {"area_number"})

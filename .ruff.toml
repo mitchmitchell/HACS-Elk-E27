@@ -32,6 +32,24 @@ ignore = [
 [lint.per-file-ignores]
 # Vendored elke27 d3b51d0 loopcheck tests; upstream pytest style uses asserts
 "tests/test_loopcheck.py" = ["ANN202", "ARG001", "D103", "PLR2004", "PT018", "S101", "TC003"]
+"tests/test_zone_bypass_service.py" = [
+    "ARG001",
+    "D101",
+    "D103",
+    "D107",
+    "EM101",
+    "FBT001",
+    "PLC0415",
+    "PLR2004",
+    "S101",
+    "SLF001",
+    "TC001",
+    "TC003",
+    "TRY003",
+    "I001",
+    "E501",
+    "F841",
+]
 
 [lint.flake8-pytest-style]
 fixture-parentheses = false

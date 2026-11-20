@@ -459,13 +459,19 @@
       "message": "Set a target temperature."
     },
     "zone_bypass_failed_not_acknowledged_rolled_back": {
-      "message": "{zone}: The panel didn't confirm the bypass. Zones {rolled_back_zone_numbers} were restored."
+      "message": "{zone}: The panel didn't confirm the change. Zones {rolled_back_zone_numbers} were restored."
     },
     "zone_bypass_failed_not_acknowledged_still_bypassed": {
-      "message": "{zone}: The panel didn't confirm the bypass. Zones {rolled_back_zone_numbers} were restored. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+      "message": "{zone}: The panel didn't confirm the change. Zones {rolled_back_zone_numbers} were restored. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
+    "zone_bypass_failed_not_acknowledged_still_bypassed_no_restore": {
+      "message": "{zone}: The panel didn't confirm the change. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
     },
     "zone_bypass_failed_not_acknowledged_still_unbypassed": {
-      "message": "{zone}: The panel didn't confirm the bypass. Zones {rolled_back_zone_numbers} were restored. These zones are no longer bypassed: {still_unbypassed_zone_numbers}. Bypass them again with the zone bypass service."
+      "message": "{zone}: The panel didn't confirm the change. Zones {rolled_back_zone_numbers} were restored. These zones are no longer bypassed: {still_unbypassed_zone_numbers}. Bypass them again with the zone bypass service."
+    },
+    "zone_bypass_failed_not_acknowledged_still_unbypassed_no_restore": {
+      "message": "{zone}: The panel didn't confirm the change. These zones are no longer bypassed: {still_unbypassed_zone_numbers}. Bypass them again with the zone bypass service."
     },
     "zone_bypass_failed_rolled_back": {
       "message": "{zone}: {reason} Zones {rolled_back_zone_numbers} were restored."
@@ -473,11 +479,17 @@
     "zone_bypass_failed_still_bypassed": {
       "message": "{zone}: {reason} Zones {rolled_back_zone_numbers} were restored. These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
     },
+    "zone_bypass_failed_still_bypassed_no_restore": {
+      "message": "{zone}: {reason} These zones are still bypassed: {still_bypassed_zone_numbers}. Clear them with the zone bypass service."
+    },
     "zone_bypass_failed_still_unbypassed": {
       "message": "{zone}: {reason} Zones {rolled_back_zone_numbers} were restored. These zones are no longer bypassed: {still_unbypassed_zone_numbers}. Bypass them again with the zone bypass service."
     },
+    "zone_bypass_failed_still_unbypassed_no_restore": {
+      "message": "{zone}: {reason} These zones are no longer bypassed: {still_unbypassed_zone_numbers}. Bypass them again with the zone bypass service."
+    },
     "zone_bypass_not_acknowledged": {
-      "message": "The panel didn't confirm the bypass. Check the zone's status, then try again."
+      "message": "The panel didn't confirm the change. Check the zone's status, then try again."
     },
     "zone_not_found": {
       "message": "{entity_id} isn't on the panel right now. Reload Elk E27 or pick a different zone."
