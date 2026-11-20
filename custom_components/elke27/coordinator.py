@@ -1316,7 +1316,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if connected is False:
             self._connection_epoch += 1
             _LOGGER.debug("Panel disconnect event received; scheduling reconnect")
-            self._log_unavailable(_event_err_msg(event))
+            self._log_unavailable(event.data.get("err_msg"))
             # Entities already report unavailable (client not ready), but only
             # a listener update makes HA write that state (#97). Queued before
             # the reconnect so it runs before the reconnect's own epoch bump.
@@ -1392,7 +1392,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             "elke27 panel mac check",
         )
 
-    def _log_unavailable(self, err_msg: str | None = None) -> None:
+    def _log_unavailable(self, err_msg: object = None) -> None:
         """Log the panel as unavailable once, with the library's reason if any."""
         if self._unavailable_logged:
             return
@@ -1569,14 +1569,9 @@ def _log_command_failure(
         _LOGGER.warning("%s %s %s failed: %s", kind, target_id, action, err)
 
 
-def _event_err_msg(event: Elke27Event | ConnectionStateChanged) -> str | None:
+def _event_err_msg(event: ConnectionStateChanged) -> str | None:
     """Return the library's disconnect reason, or None if it exposes none."""
-    if isinstance(event, Elke27Event):
-        value = event.data.get("err_msg") if isinstance(event.data, dict) else None
-    elif is_dataclass(event):
-        value = asdict(event).get("err_msg")
-    else:
-        value = None
+    value = asdict(event).get("err_msg") if is_dataclass(event) else None
     return value if isinstance(value, str) else None
 
 

@@ -514,6 +514,35 @@ async def test_warning_includes_err_msg(
 
 
 @pytest.mark.usefixtures("fast_backoff")
+@pytest.mark.parametrize("order", ["typed_first", "raw_first"])
+async def test_single_warning_with_reason_in_either_event_order(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    caplog: pytest.LogCaptureFixture,
+    order: str,
+) -> None:
+    """Typed and raw disconnect events in either order log one WARNING (#177)."""
+    caplog.set_level(logging.DEBUG, logger="custom_components.elke27")
+    await _setup_blocked(hass, mock_config_entry, mock_client)
+    mock_client.client.is_ready = False
+    reason = "2 missed keepalives"
+    typed = connection_event(connected=False, err_msg=reason)
+    raw = link_event(connected=False, err_msg=reason)
+    if order == "typed_first":
+        mock_client.emit(typed)
+        mock_client.emit_link(raw)
+    else:
+        mock_client.emit_link(raw)
+        mock_client.emit(typed)
+    await _settle()
+    lost = _lost_records(caplog)
+    assert [r.levelno for r in lost] == [logging.WARNING]
+    assert reason in lost[0].getMessage()
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
+@pytest.mark.usefixtures("fast_backoff")
 @pytest.mark.parametrize("err_msg", [None, "", "   "])
 async def test_warning_falls_back_without_err_msg(
     hass: HomeAssistant,
