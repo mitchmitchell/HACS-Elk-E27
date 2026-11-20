@@ -485,6 +485,54 @@ async def test_warning_once_per_drop_with_push(
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
 
 
+def _lost_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        r
+        for r in caplog.records
+        if r.name == "custom_components.elke27.coordinator"
+        and r.getMessage().startswith("Panel connection lost")
+    ]
+
+
+@pytest.mark.usefixtures("fast_backoff")
+async def test_warning_includes_err_msg(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The library's err_msg appears in the lost-connection WARNING (#177)."""
+    caplog.set_level(logging.DEBUG, logger="custom_components.elke27")
+    await _setup_blocked(hass, mock_config_entry, mock_client)
+    mock_client.client.is_ready = False
+    mock_client.emit(connection_event(connected=False, err_msg="2 missed keepalives"))
+    await _settle()
+    lost = _lost_records(caplog)
+    assert [r.levelno for r in lost] == [logging.WARNING]
+    assert lost[0].getMessage() == "Panel connection lost: 2 missed keepalives"
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
+@pytest.mark.usefixtures("fast_backoff")
+@pytest.mark.parametrize("err_msg", [None, "", "   "])
+async def test_warning_falls_back_without_err_msg(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: ClientHarness,
+    caplog: pytest.LogCaptureFixture,
+    err_msg: str | None,
+) -> None:
+    """An empty or missing err_msg keeps the original text (#177)."""
+    caplog.set_level(logging.DEBUG, logger="custom_components.elke27")
+    await _setup_blocked(hass, mock_config_entry, mock_client)
+    mock_client.client.is_ready = False
+    mock_client.emit(connection_event(connected=False, err_msg=err_msg))
+    await _settle()
+    lost = _lost_records(caplog)
+    assert [r.getMessage() for r in lost] == ["Panel connection lost"]
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+
+
 def _live_link_listener(mock_client: ClientHarness) -> Callable[[Any], None]:
     """Return the most recent client.subscribe listener (the live session)."""
     return mock_client.client.subscribe.call_args.args[0]

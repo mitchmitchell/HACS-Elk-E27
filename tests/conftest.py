@@ -228,9 +228,22 @@ def link_event(*, connected: bool) -> Elke27Event:
     )
 
 
-def connection_event(*, connected: bool) -> ConnectionStateChanged:
+@dataclasses.dataclass(frozen=True, slots=True)
+class ConnectionStateChangedWithErr(ConnectionStateChanged):
+    """Stand-in for the library event once it carries err_msg (elke27 #150)."""
+
+    err_msg: str | None = None
+
+
+def connection_event(
+    *, connected: bool, err_msg: str | None = None
+) -> ConnectionStateChanged:
     """Return a library connection event (connected or disconnected)."""
-    return ConnectionStateChanged(
+    cls = (
+        ConnectionStateChangedWithErr if err_msg is not None else ConnectionStateChanged
+    )
+    extra: dict[str, Any] = {} if err_msg is None else {"err_msg": err_msg}
+    return cls(
         kind="connection",
         at=0.0,
         seq=None,
@@ -238,6 +251,7 @@ def connection_event(*, connected: bool) -> ConnectionStateChanged:
         route=("system", "connection"),
         session_id=None,
         connected=connected,
+        **extra,
     )
 
 
