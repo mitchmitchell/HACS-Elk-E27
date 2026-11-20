@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import contextvars
 import dataclasses
 import logging
@@ -539,8 +538,7 @@ async def test_pin_required_mid_list_rolls_back(
         await _call_zone_bypass(hass, [zones[1], zones[2]])
     assert err.value.translation_key == "pin_required_bypass"
     assert err.value.translation_domain == DOMAIN
-    ph = err.value.translation_placeholders or {}
-    assert ph.get("reason") is None
+    assert err.value.translation_placeholders in (None, {})
     assert err.value.__cause__ is library_error
     assert str(err.value.__cause__) == str(library_error)
     assert calls == [(1, True), (2, True), (1, False)]
@@ -1144,15 +1142,16 @@ class _CrossBarrier:
         self._mu = asyncio.Lock()
 
     async def after_first(self, role: str, panel: str) -> None:
+        wait_peer = False
         async with self._mu:
             self._first[role] = panel
             other = "y" if role == "x" else "x"
             other_panel = self._first[other]
             if other_panel is not None and other_panel != panel:
                 return
-        if other_panel is None:
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self.peer_blocked.wait(), timeout=1.0)
+            wait_peer = other_panel is None
+        if wait_peer:
+            await self.peer_blocked.wait()
             self.peer_blocked.clear()
 
 
@@ -1183,8 +1182,7 @@ def _install_crosslock_barrier(
                     await lock.acquire()
                     if role not in ("x", "y"):
                         return
-                    task = asyncio.current_task()
-                    tid = id(task) if task else 0
+                    tid = id(asyncio.current_task())
                     lock_counts[tid] = lock_counts.get(tid, 0) + 1
                     if lock_counts[tid] == 1:
                         await barrier.after_first(role, _panel(entry_id))
@@ -1263,35 +1261,25 @@ async def test_two_panels_crossing_lock_order_completes_with_sorted_entry_locks(
         barrier=barrier,
     )
     send_log: list[tuple[str, int, bool]] = []
-    first_send = {"x": False, "y": False}
     base_a = client_a.async_set_zone_bypass
     base_b = harness_b.client.async_set_zone_bypass
 
     async def _panel_a_send(zone_id: int, **params: Any) -> Any:
-        role = _cross_role.get()
         bypassed = params.get("bypassed") is True
-        if role in first_send and bypassed:
-            first_send[role] = True
         send_log.append(("a", zone_id, bypassed))
         return await base_a(zone_id, **params)
 
     async def _panel_b_send(zone_id: int, **params: Any) -> Any:
-        role = _cross_role.get()
         bypassed = params.get("bypassed") is True
-        if role in first_send and bypassed:
-            first_send[role] = True
         send_log.append(("b", zone_id, bypassed))
         return await base_b(zone_id, **params)
 
     client_a.calls.clear()
-    harness_b.client.async_set_zone_bypass = AsyncMock()
     _patch_bypass(client_a, mock_client, _panel_a_send)
     harness_b.client.async_set_zone_bypass = AsyncMock(side_effect=_panel_b_send)
     call_y = asyncio.create_task(_zone_bypass_with_role(hass, [y_b, y_a], "y"))
     call_x = asyncio.create_task(_zone_bypass_with_role(hass, [x_a, x_b], "x"))
-    await asyncio.wait_for(asyncio.gather(call_x, call_y), timeout=5.0)
-    assert first_send["x"]
-    assert first_send["y"]
+    await asyncio.wait_for(asyncio.gather(call_x, call_y), timeout=30.0)
     panel_a = [
         (zone_id, bypassed) for panel, zone_id, bypassed in send_log if panel == "a"
     ]

@@ -730,8 +730,7 @@ async def _async_raise_zone_bypass_failure(
     changed: Sequence[_ZoneBypassTarget],
     code: str,
     bypass: bool,
-    cause: BaseException | None,
-    not_acknowledged: bool = False,
+    cause: HomeAssistantError | Elke27PinRequiredError | None,
 ) -> NoReturn:
     """Roll back this call's changes, then raise the service failure."""
     rolled_back: list[ZoneState] = []
@@ -753,26 +752,19 @@ async def _async_raise_zone_bypass_failure(
                 hass, still_by_entry=still_by_entry, bypass=bypass
             )
         raise rejected
+    if cause is None:
+        if changed:
+            err = zone_bypass_unacknowledged_failed_error(
+                zone, rolled_back, still, bypass=bypass
+            )
+            raise err
+        raise homeassistant_error(translation_key="zone_bypass_not_acknowledged")
     if isinstance(cause, Elke27PinRequiredError):
         if still_by_entry:
             _notify_still_changed_after_rollback(
                 hass, still_by_entry=still_by_entry, bypass=bypass
             )
         raise pin_required_error(ZONE_BYPASS_PIN_ACTION) from cause
-    if not_acknowledged:
-        if changed:
-            err = zone_bypass_unacknowledged_failed_error(
-                zone, rolled_back, still, bypass=bypass
-            )
-            raise err from cause
-        raise homeassistant_error(
-            translation_key="zone_bypass_not_acknowledged"
-        ) from cause
-    if cause is None:
-        msg = "zone bypass failure requires a cause"
-        raise ValueError(msg)
-    if not isinstance(cause, HomeAssistantError):
-        raise cause
     if changed:
         err = zone_bypass_service_failed_error(
             zone, reason, rolled_back, still, bypass=bypass
@@ -879,7 +871,6 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                 await _async_raise_zone_bypass_failure(
                     hass,
                     zone,
-                    reason=str(err),
                     changed=changed,
                     code=code,
                     bypass=bypass,
@@ -893,7 +884,6 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                     code=code,
                     bypass=bypass,
                     cause=None,
-                    not_acknowledged=True,
                 )
             changed.append((zone, runtime_data, entry_id, entity_id))
 
