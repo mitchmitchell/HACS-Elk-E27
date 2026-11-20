@@ -228,7 +228,7 @@ panel. If an item has no name, a fallback such as `Area 1` or `Zone 12` is used.
 
 | Integration | `elke27` library | Home Assistant tested | Panel tested |
 |---|---|---|---|
-| Unreleased | [0.6.0](https://pypi.org/project/elke27/0.6.0/) | CI: 2026.10.4 (minimum 2026.10.0) | Arm night (Stay Instant) PASS on TEST hardware Nov 14 (earlier tip 91ca8c8); entry delay simulator-only; exit delay not hardware-proven; garage doors waived |
+| 0.4.0 | [0.6.0](https://pypi.org/project/elke27/0.6.0/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending release-candidate test | Arm night (Stay Instant) passed on TEST hardware Nov 14 at earlier tip 91ca8c8; re-proof on 0.6.0 pending; entry delay simulator-only; exit delay not hardware-proven; garage doors waived (not hardware-tested) |
 | 0.3.2 | [0.5.1](https://pypi.org/project/elke27/0.5.1/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors waived, not hardware-tested) |
 | 0.3.1 | [0.5.0](https://pypi.org/project/elke27/0.5.0/) | CI: 2026.10.4 (minimum 2026.10.0); hardware: pending | pending (garage doors waived, not hardware-tested) |
 | 0.3.0 | [0.4.0](https://pypi.org/project/elke27/0.4.0/) | Hardware: TEST HA Core 2026.10.2; CI: 2026.10.4 (minimum 2026.10.0) | Release-candidate test at `48ee195`: TEST E27 panel, disarmed state verified on hardware; arm, vacation, night and triggered states verified in tests and simulator only; garage doors waived (not hardware-tested) |
@@ -1007,6 +1007,14 @@ whole °F, so setpoints you set in °C are rounded.
 ---
 
 ## Upgrading
+
+### To 0.4.0
+
+Update in HACS and restart Home Assistant. No re-link, no delete and re-add. Entity IDs
+stay the same. This release installs `elke27` 0.6.0 automatically. An area in Stay Instant
+now shows `armed_night` instead of `armed_home`, so check automations that relied on
+`armed_home` for Stay Instant. Arm night needs panel application firmware 0.0.5.37 or
+later.
 
 ### To 0.3.2
 

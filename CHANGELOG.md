@@ -3,7 +3,29 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/ElkProducts/HACS-Elk-E27/releases).
 
-## Unreleased
+## [0.4.0] - 2026-11-17
+
+### Upgrade
+- **Update in HACS and restart Home Assistant.** No re-link, no delete and re-add. Entity
+  IDs, registry IDs, areas, automations, dashboards and history are kept. Minimum Home
+  Assistant is unchanged (2026.10.0).
+- Requires `elke27` 0.6.0, which HACS installs with the update.
+- **Arm night is the panel's Stay Instant mode.** An area armed in Stay Instant (from Home
+  Assistant, a keypad or the Elk app) now shows `armed_night` instead of `armed_home`. Stay
+  still shows `armed_home`. Update automations or dashboards that treated Stay Instant as
+  `armed_home`.
+- **Arm night needs panel application firmware 0.0.5.37 or later.** On older firmware, or
+  when the version is unknown, Arm night is not shown. If it is attempted anyway, the error
+  depends on the case:
+  - Firmware older than 0.0.5.37: "Arm night needs panel application firmware 0.0.5.37 or
+    later."
+  - Firmware version unknown: "Arm night isn't available because the panel application
+    firmware version is unknown."
+  - Stay Instant off for the area: "Arm night needs Stay Instant enabled for this area in
+    panel settings."
+- **Garage doors:** added in 0.2.1 but not yet tested on hardware; see
+  [Garage doors](README.md#garage-doors). Garage hardware testing remains waived (not a
+  pass).
 
 ### Added
 - **Arm night** (*Stay Instant*) on the alarm control panel when the panel reports night arm
@@ -13,7 +35,7 @@ All notable changes to the Elk E27 Alarm Engine Integration. Full release notes 
 
 ### Changed
 - Requires [`elke27` 0.6.0](https://github.com/mitchmitchell/elke27/releases/tag/v0.6.0)
-  (was 0.5.1).
+  (was 0.5.1) ([#171](https://github.com/mitchmitchell/HACS-Elk-E27/pull/171)).
 
 ## [0.3.2] - 2026-11-13
 
