@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Literal, NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from elke27_lib import ArmMode, PanelSnapshot, ZoneState
 from elke27_lib.errors import Elke27PinRequiredError
@@ -51,8 +51,6 @@ from .errors import (
     service_validation_error,
 )
 from .zone_notifications import notify_still_changed_zones_by_panel
-
-ZONE_BYPASS_PIN_ACTION: Literal["bypass"] = "bypass"
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -688,50 +686,44 @@ async def _async_rollback_zone_bypass_changed(
     code: str,
     *,
     bypass: bool,
-) -> tuple[list[ZoneState], list[ZoneState]]:
+) -> tuple[list[ZoneState], dict[str, list[ZoneState]]]:
     """Undo bypass changes on each panel that was touched."""
     rolled_back: list[ZoneState] = []
-    still: list[ZoneState] = []
+    still_by_entry: dict[str, list[ZoneState]] = {}
     by_coordinator: dict[Elke27DataUpdateCoordinator, list[ZoneState]] = {}
-    for zone, runtime_data, _entry_id, _entity_id in changed:
-        by_coordinator.setdefault(runtime_data.coordinator, []).append(zone)
+    entry_for_coordinator: dict[Elke27DataUpdateCoordinator, str] = {}
+    for zone, runtime_data, entry_id, _entity_id in changed:
+        coordinator = runtime_data.coordinator
+        entry_for_coordinator[coordinator] = entry_id
+        by_coordinator.setdefault(coordinator, []).append(zone)
+    seen_still: set[tuple[str, int]] = set()
     for coordinator, zones in by_coordinator.items():
         rb, st = await coordinator.async_rollback_bypasses(
             tuple(zones), code, bypassed=not bypass
         )
         rolled_back.extend(rb)
-        still.extend(st)
-    return rolled_back, still
-
-
-def _still_zones_by_config_entry(
-    still: Sequence[ZoneState],
-    changed: Sequence[_ZoneBypassTarget],
-) -> dict[str, list[ZoneState]]:
-    """Map still-changed zones to the config entry that touched them in this call."""
-    grouped: dict[str, list[ZoneState]] = {}
-    used: set[int] = set()
-    for zone in still:
-        for cached, _runtime, entry_id, _entity_id in changed:
-            if cached.zone_id != zone.zone_id or id(zone) in used:
+        if not st:
+            continue
+        entry_id = entry_for_coordinator[coordinator]
+        for zone in st:
+            still_key = (entry_id, zone.zone_id)
+            if still_key in seen_still:
                 continue
-            grouped.setdefault(entry_id, []).append(zone)
-            used.add(id(zone))
-            break
-    return grouped
+            seen_still.add(still_key)
+            still_by_entry.setdefault(entry_id, []).append(zone)
+    return rolled_back, still_by_entry
 
 
 def _notify_still_changed_after_rollback(
     hass: HomeAssistant,
     *,
-    still: Sequence[ZoneState],
-    changed: Sequence[_ZoneBypassTarget],
+    still_by_entry: dict[str, list[ZoneState]],
     bypass: bool,
 ) -> None:
     prefix = "zone_bypass_still_bypassed" if bypass else "zone_bypass_still_unbypassed"
     notify_still_changed_zones_by_panel(
         hass,
-        zones_by_config_entry=_still_zones_by_config_entry(still, changed),
+        zones_by_config_entry=still_by_entry,
         bypass=bypass,
         notification_id_prefix=prefix,
     )
@@ -750,11 +742,12 @@ async def _async_raise_zone_bypass_failure(
 ) -> NoReturn:
     """Roll back this call's changes, then raise the service failure."""
     rolled_back: list[ZoneState] = []
-    still: list[ZoneState] = []
+    still_by_entry: dict[str, list[ZoneState]] = {}
     if changed:
-        rolled_back, still = await _async_rollback_zone_bypass_changed(
+        rolled_back, still_by_entry = await _async_rollback_zone_bypass_changed(
             changed, code, bypass=bypass
         )
+    still = [zone for zones in still_by_entry.values() for zone in zones]
     rejected = code_rejected_error(cause) if cause is not None else None
     if still:
         _LOGGER.warning(
@@ -762,17 +755,17 @@ async def _async_raise_zone_bypass_failure(
             ", ".join(str(item.zone_id) for item in still),
         )
     if rejected is not None:
-        if still:
+        if still_by_entry:
             _notify_still_changed_after_rollback(
-                hass, still=still, changed=changed, bypass=bypass
+                hass, still_by_entry=still_by_entry, bypass=bypass
             )
         raise rejected
     if isinstance(cause, Elke27PinRequiredError):
-        if still:
+        if still_by_entry:
             _notify_still_changed_after_rollback(
-                hass, still=still, changed=changed, bypass=bypass
+                hass, still_by_entry=still_by_entry, bypass=bypass
             )
-        raise pin_required_error(ZONE_BYPASS_PIN_ACTION) from cause
+        raise pin_required_error("bypass") from cause  # noqa: EM101
     if not_acknowledged:
         if changed:
             err = zone_bypass_unacknowledged_failed_error(
@@ -788,13 +781,6 @@ async def _async_raise_zone_bypass_failure(
                 zone, reason, rolled_back, still, bypass=bypass
             )
             raise err from cause
-        raise cause
-    if changed:
-        err = zone_bypass_service_failed_error(
-            zone, reason, rolled_back, still, bypass=bypass
-        )
-        raise err from cause
-    if cause is not None:
         raise cause
     raise homeassistant_error(translation_key="zone_bypass_not_acknowledged")
 
@@ -897,7 +883,7 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                 await _async_raise_zone_bypass_failure(
                     hass,
                     zone,
-                    reason=str(err),
+                    reason="",
                     changed=changed,
                     code=code,
                     bypass=bypass,

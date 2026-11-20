@@ -38,12 +38,12 @@ ignore = [
     "D101",  # test helpers omit class docstrings
     "D103",  # test functions omit docstrings
     "D107",  # nested test callables omit docstrings
-    "EM101",  # exceptions carry dynamic Home Assistant error text in stubs
+    "EM101",  # stub bypass handlers assign literal messages before raise
     "FBT001",  # service calls use boolean bypass kwarg like production
     "PLR2004",  # literal zone ids and timeouts are intentional in scenarios
     "S101",  # assertions are the contract under test
-    "TC001",  # fixtures import typing-only symbols at runtime for HA
-    "TC003",  # same for collections.abc test typing
+    "TC001",  # pytest_hass imports used at runtime in async tests
+    "TC003",  # `Any` / Callable kept in runtime imports for coordinator stubs
     "TRY003",  # long exception messages in structured bypass stubs
 ]
 
