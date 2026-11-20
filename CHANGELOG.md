@@ -3,6 +3,14 @@
 All notable changes to the Elk E27 Alarm Engine Integration. Full release notes are on the
 [Releases page](https://github.com/ElkProducts/HACS-Elk-E27/releases).
 
+## Unreleased
+
+### Changed
+- When the panel may or may not have received an arm command (away, stay or night), the
+  error now reads "Arming may or may not have reached the panel. Check the area on the keypad
+  before trying again." Before, away and stay showed a generic panel error, and night had
+  its own message ([#174](https://github.com/mitchmitchell/HACS-Elk-E27/issues/174)).
+
 ## [0.4.0] - 2026-11-17
 
 ### Upgrade
