@@ -53,9 +53,9 @@ from .arming import (
     PIN_REQUIRED_REASON,
     ZoneBypassFailedError,
     _library_arm_mode,
-    _validated_pin,
     area_faulted_zones,
     area_skip_automatic_arm_from_status_reply,
+    validated_pin,
 )
 from .const import (
     CONF_INTEGRATION_ID,
@@ -900,7 +900,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if pin is None:
             msg = "PIN required to bypass zones."
             raise Elke27PinRequiredError(msg)
-        pin_value = _validated_pin(pin)
+        pin_value = validated_pin(pin)
         # Never log the user code.
         _LOGGER.debug(
             "Sending zone bypass request: zone_id=%s bypassed=%s",
@@ -999,7 +999,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if pin is None:
             msg = "PIN required to arm areas."
             raise Elke27PinRequiredError(msg)
-        pin_value = _validated_pin(pin)
+        pin_value = validated_pin(pin)
         arm_mode = _library_arm_mode(mode)
         epoch = self._connection_epoch
         try:
@@ -1066,7 +1066,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if pin is None:
             msg = "PIN required to disarm areas."
             raise Elke27PinRequiredError(msg)
-        pin_value = _validated_pin(pin)
+        pin_value = validated_pin(pin)
         epoch = self._connection_epoch
         try:
             refresh_ok = await self._async_write_disarm(

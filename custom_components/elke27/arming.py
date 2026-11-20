@@ -270,7 +270,7 @@ def zone_number_list(zones: list[ZoneState] | tuple[ZoneState, ...]) -> str:
     return ", ".join(str(zone.zone_id) for zone in zones)
 
 
-def _validated_pin(pin: str) -> str:
+def validated_pin(pin: str) -> str:
     """Return the user code as a digit string; raise if not numeric or all zeros."""
     value = str(pin).strip()
     # ASCII digits only; all-zero detected without int() (no huge-int conversion).

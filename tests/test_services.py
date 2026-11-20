@@ -326,7 +326,7 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
         }
         with self.assertRaises(HomeAssistantError) as ctx:
             await self._run({"code": "1234", "bypass": True}, entities)
-        assert ctx.exception.translation_key == "zone_bypass_failed_rolled_back"
+        assert ctx.exception.translation_key == "zone_bypass_not_acknowledged"
 
     async def test_no_target_raises(self) -> None:
         """A call without targets is rejected."""

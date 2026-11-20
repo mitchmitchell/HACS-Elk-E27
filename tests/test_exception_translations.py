@@ -467,6 +467,28 @@ def _placeholder_observations() -> dict[str, set[frozenset[str]]]:
         "zone_bypass_failed_still_bypassed",
         {"zone", "reason", "rolled_back_zone_numbers", "still_bypassed_zone_numbers"},
     )
+    record(
+        "zone_bypass_failed_still_unbypassed",
+        {
+            "zone",
+            "reason",
+            "rolled_back_zone_numbers",
+            "still_unbypassed_zone_numbers",
+        },
+    )
+    record(
+        "zone_bypass_failed_not_acknowledged_rolled_back",
+        {"zone", "rolled_back_zone_numbers"},
+    )
+    record(
+        "zone_bypass_failed_not_acknowledged_still_bypassed",
+        {"zone", "rolled_back_zone_numbers", "still_bypassed_zone_numbers"},
+    )
+    record(
+        "zone_bypass_failed_not_acknowledged_still_unbypassed",
+        {"zone", "rolled_back_zone_numbers", "still_unbypassed_zone_numbers"},
+    )
+    record("zone_bypass_not_acknowledged", set())
     record("arm_automatic_multi_failed_area_unnamed", {"area_number"})
 
     return by_key
