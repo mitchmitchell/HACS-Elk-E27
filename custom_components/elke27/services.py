@@ -691,27 +691,19 @@ async def _async_rollback_zone_bypass_changed(
     """Undo bypass changes on each panel that was touched."""
     rolled_back: list[ZoneState] = []
     still_by_entry: dict[str, list[ZoneState]] = {}
-    by_coordinator: dict[Elke27DataUpdateCoordinator, list[ZoneState]] = {}
-    entry_for_coordinator: dict[Elke27DataUpdateCoordinator, str] = {}
+    by_entry: dict[str, list[ZoneState]] = {}
+    coordinator_for_entry: dict[str, Elke27DataUpdateCoordinator] = {}
     for zone, runtime_data, entry_id, _entity_id in changed:
-        coordinator = runtime_data.coordinator
-        entry_for_coordinator[coordinator] = entry_id
-        by_coordinator.setdefault(coordinator, []).append(zone)
-    seen_still: set[tuple[str, int]] = set()
-    for coordinator, zones in by_coordinator.items():
+        by_entry.setdefault(entry_id, []).append(zone)
+        coordinator_for_entry[entry_id] = runtime_data.coordinator
+    for entry_id, zones in by_entry.items():
+        coordinator = coordinator_for_entry[entry_id]
         rb, st = await coordinator.async_rollback_bypasses(
             tuple(zones), code, bypassed=not bypass
         )
         rolled_back.extend(rb)
-        if not st:
-            continue
-        entry_id = entry_for_coordinator[coordinator]
-        for zone in st:
-            still_key = (entry_id, zone.zone_id)
-            if still_key in seen_still:
-                continue
-            seen_still.add(still_key)
-            still_by_entry.setdefault(entry_id, []).append(zone)
+        if st:
+            still_by_entry[entry_id] = list(st)
     return rolled_back, still_by_entry
 
 
@@ -734,7 +726,7 @@ async def _async_raise_zone_bypass_failure(
     hass: HomeAssistant,
     zone: ZoneState,
     *,
-    reason: str,
+    reason: str = "",
     changed: Sequence[_ZoneBypassTarget],
     code: str,
     bypass: bool,
@@ -776,14 +768,17 @@ async def _async_raise_zone_bypass_failure(
         raise homeassistant_error(
             translation_key="zone_bypass_not_acknowledged"
         ) from cause
-    if isinstance(cause, HomeAssistantError):
-        if changed:
-            err = zone_bypass_service_failed_error(
-                zone, reason, rolled_back, still, bypass=bypass
-            )
-            raise err from cause
+    if cause is None:
+        msg = "zone bypass failure requires a cause"
+        raise ValueError(msg)
+    if not isinstance(cause, HomeAssistantError):
         raise cause
-    raise homeassistant_error(translation_key="zone_bypass_not_acknowledged")
+    if changed:
+        err = zone_bypass_service_failed_error(
+            zone, reason, rolled_back, still, bypass=bypass
+        )
+        raise err from cause
+    raise cause
 
 
 def _zone_from_coordinator(
@@ -884,7 +879,7 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                 await _async_raise_zone_bypass_failure(
                     hass,
                     zone,
-                    reason="",
+                    reason=str(err),
                     changed=changed,
                     code=code,
                     bypass=bypass,
@@ -894,7 +889,6 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                 await _async_raise_zone_bypass_failure(
                     hass,
                     zone,
-                    reason="",
                     changed=changed,
                     code=code,
                     bypass=bypass,

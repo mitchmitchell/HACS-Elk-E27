@@ -42,8 +42,6 @@ ignore = [
     "FBT001",  # service calls use boolean bypass kwarg like production
     "PLR2004",  # literal zone ids and timeouts are intentional in scenarios
     "S101",  # assertions are the contract under test
-    "TC001",  # pytest_hass imports used at runtime in async tests
-    "TC003",  # `Any` / Callable kept in runtime imports for coordinator stubs
     "TRY003",  # long exception messages in structured bypass stubs
 ]
 

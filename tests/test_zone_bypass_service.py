@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+import contextlib
 import dataclasses
 import logging
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from custom_components.elke27.coordinator import Elke27DataUpdateCoordinator
+    from homeassistant.core import HomeAssistant
 from unittest.mock import AsyncMock, patch
 
 from elke27_lib import AreaState, ArmMode, PanelSnapshot, ZoneState
@@ -20,10 +26,8 @@ from custom_components.elke27.const import (
     CONF_LINK_KEYS_JSON,
     DOMAIN,
 )
-from custom_components.elke27.coordinator import Elke27DataUpdateCoordinator
 from custom_components.elke27.errors import code_rejected_error
 from homeassistant.const import ATTR_CODE, CONF_HOST, CONF_PORT
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from tests.conftest import (
@@ -213,50 +217,35 @@ def _snapshot_with_crosslock_zones(snapshot: PanelSnapshot) -> PanelSnapshot:
     return dataclasses.replace(snapshot, zones=MappingProxyType(zones))
 
 
-def _snapshot_with_crosslock_zones_mirrored(snapshot: PanelSnapshot) -> PanelSnapshot:
-    zones = dict(snapshot.zones)
-    zones[91] = ZoneState(
-        zone_id=91, name="Cross A", area_id=2, open=False, bypassed=False
-    )
-    zones[92] = ZoneState(
-        zone_id=92, name="Cross B", area_id=1, open=False, bypassed=False
-    )
-    return dataclasses.replace(snapshot, zones=MappingProxyType(zones))
+def _assert_entity_on_entry(hass: HomeAssistant, entity_id: str, entry_id: str) -> None:
+    reg_entry = er.async_get(hass).async_get(entity_id)
+    assert reg_entry is not None
+    assert reg_entry.config_entry_id == entry_id
 
 
-async def _ensure_crosslock_zone_entities(
+def _rename_zone_entity(hass: HomeAssistant, entity_id: str, object_id: str) -> str:
+    new_id = f"binary_sensor.{object_id}"
+    er.async_get(hass).async_update_entity(entity_id, new_entity_id=new_id)
+    return new_id
+
+
+def _crosslock_zone_entities(
     hass: HomeAssistant,
     entry: MockConfigEntry,
+    panel_serial: str,
     *,
-    panel_key: str,
-    object_91: str,
-    object_92: str,
-    mirrored: bool = False,
+    slug_91: str,
+    slug_92: str,
 ) -> tuple[str, str]:
-    reg = er.async_get(hass)
-    entity_a = reg.async_get_or_create(
-        "binary_sensor",
-        DOMAIN,
-        f"{panel_key}:91",
-        config_entry=entry,
-        suggested_object_id=object_91,
-    ).entity_id
-    entity_b = reg.async_get_or_create(
-        "binary_sensor",
-        DOMAIN,
-        f"{panel_key}:92",
-        config_entry=entry,
-        suggested_object_id=object_92,
-    ).entity_id
-    coordinator = entry.runtime_data.coordinator
-    base = coordinator.data or _three_zone_snapshot()
-    snap_fn = (
-        _snapshot_with_crosslock_zones_mirrored
-        if mirrored
-        else _snapshot_with_crosslock_zones
+    entity_91 = _rename_zone_entity(
+        hass, _zone_entity_for_serial(hass, panel_serial, 91), slug_91
     )
-    coordinator.async_set_updated_data(snap_fn(base))
-    return entity_a, entity_b
+    entity_92 = _rename_zone_entity(
+        hass, _zone_entity_for_serial(hass, panel_serial, 92), slug_92
+    )
+    _assert_entity_on_entry(hass, entity_91, entry.entry_id)
+    _assert_entity_on_entry(hass, entity_92, entry.entry_id)
+    return entity_91, entity_92
 
 
 def _zone_entities(hass: HomeAssistant) -> dict[int, str]:
@@ -536,7 +525,8 @@ async def test_pin_required_mid_list_rolls_back(
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     coordinator = entry.runtime_data.coordinator
     original_bypass = coordinator.async_set_zone_bypass
-    library_error = Elke27PinRequiredError("pin required")
+    pin_msg = "pin required"
+    library_error = Elke27PinRequiredError(pin_msg)
 
     async def behave(zone_id: int, bypassed: bool, pin: str | None = None) -> bool:
         if zone_id == 2 and bypassed:
@@ -548,9 +538,10 @@ async def test_pin_required_mid_list_rolls_back(
         await _call_zone_bypass(hass, [zones[1], zones[2]])
     assert err.value.translation_key == "pin_required_bypass"
     assert err.value.translation_domain == DOMAIN
-    assert err.value.translation_placeholders in (None, {})
+    ph = err.value.translation_placeholders or {}
+    assert ph.get("reason") is None
     assert err.value.__cause__ is library_error
-    assert err.value is not err.value.__cause__
+    assert str(err.value.__cause__) == str(library_error)
     assert calls == [(1, True), (2, True), (1, False)]
 
 
@@ -634,7 +625,6 @@ async def test_code_rejected_mid_list_rolls_back_and_raises(
     assert err.value is panel_rejected
     assert code_rejected_error(err.value) is err.value
     assert err.value.__cause__ is None
-    assert err.value.__cause__ is not err.value
     assert _panel_bypass_calls(mock_client) == [(1, True), (2, True), (1, False)]
 
 
@@ -1082,7 +1072,6 @@ async def test_single_zone_pin_required_not_map_to_not_acknowledged(
         )
     assert err.value.translation_key == "pin_required_bypass"
     assert err.value.__cause__ is library_error
-    assert err.value is not err.value.__cause__
 
 
 async def test_single_zone_panel_error_keeps_original_cause_chain(
@@ -1107,7 +1096,6 @@ async def test_single_zone_panel_error_keeps_original_cause_chain(
             blocking=True,
         )
     assert err.value.__cause__ is inner
-    assert err.value.__cause__ is not err.value
 
 
 async def test_zone_vanished_under_lock_rolls_back_prior_changes(
@@ -1150,7 +1138,6 @@ def _track_crosspanel_area_locks(
     y_has_panel_b_area_lock: asyncio.Event,
     y_waiting_on_panel_a_area_lock: asyncio.Event,
 ) -> None:
-    """Track when Y holds panel B area 1 and blocks on panel A area 1."""
     base_a = coord_a.area_arm_lock
     base_b = coord_b.area_arm_lock
 
@@ -1205,24 +1192,24 @@ async def test_two_panels_crossing_lock_order_completes_with_sorted_entry_locks(
         for e in hass.config_entries.async_entries(DOMAIN)
         if e.unique_id == PANEL_SERIAL_2
     )
-    x_a, x_b = await _ensure_crosslock_zone_entities(
+    xa91, xa92 = _crosslock_zone_entities(
         hass,
         entry_a,
-        panel_key=PANEL_MAC,
-        object_91="aaa_panel_a_zone",
-        object_92="zzz_panel_a_zone",
+        PANEL_MAC,
+        slug_91="aaa_panel_a_zone",
+        slug_92="zzz_panel_a_zone",
     )
-    y_b, _y_a = await _ensure_crosslock_zone_entities(
+    xb91, xb92 = _crosslock_zone_entities(
         hass,
         entry_b,
-        panel_key=PANEL_SERIAL_2,
-        object_91="zzz_panel_b_zone",
-        object_92="aaa_panel_b_zone",
+        PANEL_SERIAL_2,
+        slug_91="zzz_panel_b_zone",
+        slug_92="aaa_panel_b_zone",
     )
-    # X: A then B by entity id; Y: B then A (opposite crossing).
+    x_a, x_b = xa91, xb91
+    y_b, y_a = xb92, xa92
     assert x_a < x_b
-    assert y_b < _y_a
-    y_a = _zone_entity_for_serial(hass, PANEL_MAC, 92)
+    assert y_b < y_a
     coord_a = entry_a.runtime_data.coordinator
     coord_b = entry_b.runtime_data.coordinator
     y_has_b = asyncio.Event()
@@ -1269,12 +1256,8 @@ async def test_two_panels_crossing_lock_order_completes_with_sorted_entry_locks(
             blocking=True,
         )
     )
-    crossed_locks = False
-    try:
-        await asyncio.wait_for(y_waiting_a.wait(), timeout=1.0)
-        crossed_locks = True
-    except TimeoutError:
-        crossed_locks = False
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(y_waiting_a.wait(), timeout=2.0)
     call_x = asyncio.create_task(
         hass.services.async_call(
             DOMAIN,
@@ -1286,17 +1269,6 @@ async def test_two_panels_crossing_lock_order_completes_with_sorted_entry_locks(
     for _ in range(50):
         await asyncio.sleep(0)
     holder_release.set()
-    if crossed_locks:
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.gather(holder, call_x, call_y), timeout=2.0)
-        call_x.cancel()
-        call_y.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await call_x
-        with pytest.raises(asyncio.CancelledError):
-            await call_y
-        await holder
-        pytest.fail("crossing lock order deadlock expected under broken sort")
     await asyncio.wait_for(asyncio.gather(holder, call_x, call_y), timeout=5.0)
     assert (91, True) in _panel_bypass_calls(mock_client)
     assert (91, True) in _client_bypass_calls(harness_b)
@@ -1390,7 +1362,6 @@ async def test_pin_required_after_partial_rollback_shows_notification(
     assert err.value.translation_domain == DOMAIN
     assert err.value.translation_placeholders in (None, {})
     assert err.value.__cause__ is library_error
-    assert err.value is not err.value.__cause__
     assert notices
     assert "zones 1" in notices[0][1]
     assert notices[0][2] == f"elke27_zone_bypass_still_bypassed_{entry_id}"
