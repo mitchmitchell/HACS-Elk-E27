@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import dataclasses
 import logging
 from types import MappingProxyType
@@ -1131,46 +1132,87 @@ async def test_zone_vanished_under_lock_rolls_back_prior_changes(
     assert _panel_bypass_calls(mock_client) == [(1, True), (1, False)]
 
 
-def _track_crosspanel_area_locks(
+_cross_role: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_cross_role", default=None
+)
+
+
+class _CrossBarrier:
+    def __init__(self) -> None:
+        self._first: dict[str, str | None] = {"x": None, "y": None}
+        self.peer_blocked = asyncio.Event()
+        self._mu = asyncio.Lock()
+
+    async def after_first(self, role: str, panel: str) -> None:
+        async with self._mu:
+            self._first[role] = panel
+            other = "y" if role == "x" else "x"
+            other_panel = self._first[other]
+            if other_panel is not None and other_panel != panel:
+                return
+        if other_panel is None:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self.peer_blocked.wait(), timeout=1.0)
+            self.peer_blocked.clear()
+
+
+def _install_crosslock_barrier(
     coord_a: Elke27DataUpdateCoordinator,
     coord_b: Elke27DataUpdateCoordinator,
     *,
-    y_has_panel_b_area_lock: asyncio.Event,
-    y_waiting_on_panel_a_area_lock: asyncio.Event,
+    entry_a_id: str,
+    entry_b_id: str,
+    barrier: _CrossBarrier,
 ) -> None:
-    base_a = coord_a.area_arm_lock
-    base_b = coord_b.area_arm_lock
+    lock_counts: dict[int, int] = {}
 
-    def _lock_b(area_id: int) -> Any:
-        lock = base_b(area_id)
+    def _panel(entry_id: str) -> str:
+        return "a" if entry_id == entry_a_id else "b"
 
-        class TrackedB:
-            async def __aenter__(self) -> None:
-                if area_id == 1:
-                    y_has_panel_b_area_lock.set()
-                await lock.acquire()
+    def _wrap(coordinator: Elke27DataUpdateCoordinator, entry_id: str) -> None:
+        base = coordinator.area_arm_lock
 
-            async def __aexit__(self, *exc: object) -> None:
-                lock.release()
+        def _factory(area_id: int) -> Any:
+            lock = base(area_id)
 
-        return TrackedB()
+            class _Tracked:
+                async def __aenter__(self) -> None:
+                    role = _cross_role.get()
+                    if role in ("x", "y") and lock.locked():
+                        barrier.peer_blocked.set()
+                    await lock.acquire()
+                    if role not in ("x", "y"):
+                        return
+                    task = asyncio.current_task()
+                    tid = id(task) if task else 0
+                    lock_counts[tid] = lock_counts.get(tid, 0) + 1
+                    if lock_counts[tid] == 1:
+                        await barrier.after_first(role, _panel(entry_id))
 
-    def _lock_a(area_id: int) -> Any:
-        lock = base_a(area_id)
+                async def __aexit__(self, *exc: object) -> None:
+                    lock.release()
 
-        class TrackedA:
-            async def __aenter__(self) -> None:
-                if area_id == 1 and y_has_panel_b_area_lock.is_set():
-                    y_waiting_on_panel_a_area_lock.set()
-                await lock.acquire()
+            return _Tracked()
 
-            async def __aexit__(self, *exc: object) -> None:
-                lock.release()
+        coordinator.area_arm_lock = _factory
 
-        return TrackedA()
+    _wrap(coord_a, entry_a_id)
+    _wrap(coord_b, entry_b_id)
 
-    coord_a.area_arm_lock = _lock_a
-    coord_b.area_arm_lock = _lock_b
+
+async def _zone_bypass_with_role(
+    hass: HomeAssistant, entity_ids: list[str], role: str
+) -> None:
+    token = _cross_role.set(role)
+    try:
+        await hass.services.async_call(
+            DOMAIN,
+            "zone_bypass",
+            {"entity_id": entity_ids, "code": CODE, "bypass": True},
+            blocking=True,
+        )
+    finally:
+        _cross_role.reset(token)
 
 
 async def test_two_panels_crossing_lock_order_completes_with_sorted_entry_locks(
@@ -1212,67 +1254,54 @@ async def test_two_panels_crossing_lock_order_completes_with_sorted_entry_locks(
     assert y_b < y_a
     coord_a = entry_a.runtime_data.coordinator
     coord_b = entry_b.runtime_data.coordinator
-    y_has_b = asyncio.Event()
-    y_waiting_a = asyncio.Event()
-    _track_crosspanel_area_locks(
+    barrier = _CrossBarrier()
+    _install_crosslock_barrier(
         coord_a,
         coord_b,
-        y_has_panel_b_area_lock=y_has_b,
-        y_waiting_on_panel_a_area_lock=y_waiting_a,
+        entry_a_id=entry_a.entry_id,
+        entry_b_id=entry_b.entry_id,
+        barrier=barrier,
     )
-    holder_ready = asyncio.Event()
-    holder_release = asyncio.Event()
-    send_log: list[tuple[str, int]] = []
+    send_log: list[tuple[str, int, bool]] = []
+    first_send = {"x": False, "y": False}
     base_a = client_a.async_set_zone_bypass
     base_b = harness_b.client.async_set_zone_bypass
 
-    holder_blocks = asyncio.Event()
-
     async def _panel_a_send(zone_id: int, **params: Any) -> Any:
-        if holder_blocks.is_set() and zone_id == 91 and params.get("bypassed") is True:
-            send_log.append(("holder", zone_id))
-            holder_ready.set()
-            await holder_release.wait()
-        else:
-            send_log.append(("a", zone_id))
+        role = _cross_role.get()
+        bypassed = params.get("bypassed") is True
+        if role in first_send and bypassed:
+            first_send[role] = True
+        send_log.append(("a", zone_id, bypassed))
         return await base_a(zone_id, **params)
 
     async def _panel_b_send(zone_id: int, **params: Any) -> Any:
-        send_log.append(("b", zone_id))
+        role = _cross_role.get()
+        bypassed = params.get("bypassed") is True
+        if role in first_send and bypassed:
+            first_send[role] = True
+        send_log.append(("b", zone_id, bypassed))
         return await base_b(zone_id, **params)
 
     client_a.calls.clear()
-    holder_blocks.set()
+    harness_b.client.async_set_zone_bypass = AsyncMock()
     _patch_bypass(client_a, mock_client, _panel_a_send)
     harness_b.client.async_set_zone_bypass = AsyncMock(side_effect=_panel_b_send)
-    holder = asyncio.create_task(_call_zone_bypass(hass, [x_a]))
-    await holder_ready.wait()
-    holder_blocks.clear()
-    call_y = asyncio.create_task(
-        hass.services.async_call(
-            DOMAIN,
-            "zone_bypass",
-            {"entity_id": [y_b, y_a], "code": CODE, "bypass": True},
-            blocking=True,
-        )
-    )
-    with contextlib.suppress(TimeoutError):
-        await asyncio.wait_for(y_waiting_a.wait(), timeout=2.0)
-    call_x = asyncio.create_task(
-        hass.services.async_call(
-            DOMAIN,
-            "zone_bypass",
-            {"entity_id": [x_a, x_b], "code": CODE, "bypass": True},
-            blocking=True,
-        )
-    )
-    for _ in range(50):
-        await asyncio.sleep(0)
-    holder_release.set()
-    await asyncio.wait_for(asyncio.gather(holder, call_x, call_y), timeout=5.0)
-    assert (91, True) in _panel_bypass_calls(mock_client)
-    assert (91, True) in _client_bypass_calls(harness_b)
-    assert any(role == "b" for role, _ in send_log)
+    call_y = asyncio.create_task(_zone_bypass_with_role(hass, [y_b, y_a], "y"))
+    call_x = asyncio.create_task(_zone_bypass_with_role(hass, [x_a, x_b], "x"))
+    await asyncio.wait_for(asyncio.gather(call_x, call_y), timeout=5.0)
+    assert first_send["x"]
+    assert first_send["y"]
+    panel_a = [
+        (zone_id, bypassed) for panel, zone_id, bypassed in send_log if panel == "a"
+    ]
+    panel_b = [
+        (zone_id, bypassed) for panel, zone_id, bypassed in send_log if panel == "b"
+    ]
+    assert sorted(panel_a) == [(91, True), (92, True)]
+    assert sorted(panel_b) == [(91, True), (92, True)]
+    assert sorted(_panel_bypass_calls(mock_client)) == [(91, True), (92, True)]
+    assert sorted(_client_bypass_calls(harness_b)) == [(91, True), (92, True)]
 
 
 async def test_code_rejected_after_partial_rollback_shows_notification(
