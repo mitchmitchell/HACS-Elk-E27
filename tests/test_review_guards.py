@@ -128,6 +128,7 @@ LEGACY_PRIVATE_IMPORTS: dict[str, int] = {
     "tests/test_coordinator_client.py": 1,
     "tests/test_entities.py": 1,
     "tests/test_init.py": 1,
+    "tests/test_zone_bypass_service.py": 1,
 }
 
 

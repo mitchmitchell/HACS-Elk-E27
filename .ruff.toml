@@ -32,23 +32,19 @@ ignore = [
 [lint.per-file-ignores]
 # Vendored elke27 d3b51d0 loopcheck tests; upstream pytest style uses asserts
 "tests/test_loopcheck.py" = ["ANN202", "ARG001", "D103", "PLR2004", "PT018", "S101", "TC003"]
+# pytest fixtures and test-only typing (runtime HA imports intentional)
 "tests/test_zone_bypass_service.py" = [
-    "ARG001",
-    "D101",
-    "D103",
-    "D107",
-    "EM101",
-    "FBT001",
-    "PLC0415",
-    "PLR2004",
-    "S101",
-    "SLF001",
-    "TC001",
-    "TC003",
-    "TRY003",
-    "I001",
-    "E501",
-    "F841",
+    "ARG001",  # pytest fixtures may include unused injected deps
+    "D101",  # test helpers omit class docstrings
+    "D103",  # test functions omit docstrings
+    "D107",  # nested test callables omit docstrings
+    "EM101",  # exceptions carry dynamic Home Assistant error text in stubs
+    "FBT001",  # service calls use boolean bypass kwarg like production
+    "PLR2004",  # literal zone ids and timeouts are intentional in scenarios
+    "S101",  # assertions are the contract under test
+    "TC001",  # fixtures import typing-only symbols at runtime for HA
+    "TC003",  # same for collections.abc test typing
+    "TRY003",  # long exception messages in structured bypass stubs
 ]
 
 [lint.flake8-pytest-style]

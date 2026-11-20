@@ -33,7 +33,6 @@ from elke27_lib.events import (
     ZoneStatusUpdated,
 )
 
-from homeassistant.components import persistent_notification
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
@@ -81,6 +80,7 @@ from .identity import build_client_identity
 from .panel_mac import async_verify_panel_mac
 from .reconnect import ReconnectSupervisor
 from .tasks import create_background_task
+from .zone_notifications import notify_still_changed_zones_by_panel
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Iterable
@@ -839,18 +839,13 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             _LOGGER.warning(
                 "Code rejected; zones still bypassed after rollback: %s", zone_ids
             )
-            # Tell the user, not only the log: zone numbers only, never the code.
-            persistent_notification.async_create(
+            notify_still_changed_zones_by_panel(
                 self.hass,
-                title="Elk E27 zones still bypassed",
-                message=(
-                    "The panel refused the command and these zones could not be"
-                    f" un-bypassed, so they are still bypassed: zones {zone_ids}."
-                    " Clear them with the zone bypass service."
-                ),
-                notification_id=(
-                    f"elke27_code_rejected_bypass_{self.config_entry.entry_id}"
-                ),
+                zones_by_config_entry={
+                    self.config_entry.entry_id: still_bypassed,
+                },
+                bypass=True,
+                notification_id_prefix="code_rejected_bypass",
             )
         raise rejected
 
