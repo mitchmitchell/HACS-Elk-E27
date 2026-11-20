@@ -15,6 +15,7 @@ from .arming import (
     ZonePhrase,
     area_automatic_phrase,
     zone_automatic_phrase,
+    zone_bypass_label,
     zone_number_list,
 )
 from .const import DOMAIN
@@ -323,3 +324,28 @@ def arm_automatic_multi_failed_error(
 def zone_bypass_failed_pin_required(err: ZoneBypassFailedError) -> bool:
     """Return True when a bypass failure is missing a user code."""
     return err.pin_required or err.reason == PIN_REQUIRED_REASON
+
+
+def zone_bypass_service_failed_error(
+    zone: ZoneState,
+    reason: str,
+    rolled_back_zones: Sequence[ZoneState],
+    still_bypassed_zones: Sequence[ZoneState],
+) -> HomeAssistantError:
+    """Return the translated error when zone bypass failed and was rolled back."""
+    base = {
+        "zone": zone_bypass_label(zone),
+        "reason": reason,
+        "rolled_back_zone_numbers": zone_number_list(list(rolled_back_zones)),
+    }
+    if still_bypassed_zones:
+        return _translated_error(
+            "zone_bypass_failed_still_bypassed",
+            {
+                **base,
+                "still_bypassed_zone_numbers": zone_number_list(
+                    list(still_bypassed_zones)
+                ),
+            },
+        )
+    return _translated_error("zone_bypass_failed_rolled_back", base)

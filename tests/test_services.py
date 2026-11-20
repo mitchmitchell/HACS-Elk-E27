@@ -148,9 +148,27 @@ def _call(data: dict[str, Any]) -> Any:
     return call
 
 
-def _runtime(*, acknowledged: bool = True) -> Any:
+def _zone_bypass_snapshot(*zone_ids: int, bypassed: bool = False) -> Any:
+    zones = {
+        zone_id: ZoneState(
+            zone_id=zone_id,
+            name=f"Zone {zone_id}",
+            area_id=1,
+            open=False,
+            bypassed=bypassed,
+        )
+        for zone_id in zone_ids
+    }
+    return _snapshot(zones=zones)
+
+
+def _runtime(*, acknowledged: bool = True, zone_ids: tuple[int, ...] = (3,)) -> Any:
     runtime = MagicMock()
-    runtime.coordinator.async_set_zone_bypass = AsyncMock(return_value=acknowledged)
+    hub = runtime.coordinator
+    hub.async_set_zone_bypass = AsyncMock(return_value=acknowledged)
+    hub.async_rollback_bypasses = AsyncMock(return_value=([], []))
+    hub.get_snapshot = MagicMock(return_value=_zone_bypass_snapshot(*zone_ids))
+    hub.area_arm_lock = MagicMock(return_value=contextlib.nullcontext())
     return runtime
 
 
@@ -252,7 +270,7 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_bypass_each_targeted_zone(self) -> None:
         """Each targeted zone is bypassed with the given code."""
-        runtime = _runtime()
+        runtime = _runtime(zone_ids=(3, 12))
         entities = {
             "binary_sensor.front": (_entry("aa:bb:cc:dd:ee:ff:3"), runtime),
             "binary_sensor.rear": (_entry("aa:bb:cc:dd:ee:ff:12"), runtime),
@@ -288,7 +306,10 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_unbypass(self) -> None:
         """bypass: false removes the bypass."""
-        runtime = _runtime()
+        runtime = _runtime(zone_ids=(3,))
+        runtime.coordinator.get_snapshot = MagicMock(
+            return_value=_zone_bypass_snapshot(3, bypassed=True)
+        )
         entities = {"binary_sensor.front": (_entry("aa:bb:cc:dd:ee:ff:3"), runtime)}
         await self._run({"code": "1234", "bypass": False}, entities)
         runtime.coordinator.async_set_zone_bypass.assert_awaited_once_with(
@@ -303,8 +324,9 @@ class ZoneBypassServiceTest(unittest.IsolatedAsyncioTestCase):
                 _runtime(acknowledged=False),
             )
         }
-        with self.assertRaises(HomeAssistantError):
+        with self.assertRaises(HomeAssistantError) as ctx:
             await self._run({"code": "1234", "bypass": True}, entities)
+        assert ctx.exception.translation_key == "zone_bypass_failed_rolled_back"
 
     async def test_no_target_raises(self) -> None:
         """A call without targets is rejected."""

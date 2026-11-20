@@ -860,13 +860,15 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         zones: list[ZoneState] | tuple[ZoneState, ...],
         pin: str | None,
         *,
+        bypassed: bool = False,
         gate: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[list[ZoneState], list[ZoneState]]:
         """
-        Un-bypass zones this integration just bypassed, in reverse order.
+        Undo zone bypass changes, in reverse order.
 
-        Each zone is attempted exactly once; a failure is not retried, it is
-        reported. Return (rolled_back, still_bypassed), both in attempt order.
+        Each zone is written once at ``bypassed`` (False to un-bypass after a
+        bypass, True to re-bypass after an un-bypass). A failure is not retried.
+        Return (rolled_back, still_bypassed), both in attempt order.
         """
         rolled_back: list[ZoneState] = []
         still_bypassed: list[ZoneState] = []
@@ -875,7 +877,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 await gate()
             try:
                 acknowledged = await self.async_set_zone_bypass(
-                    zone.zone_id, bypassed=False, pin=pin
+                    zone.zone_id, bypassed=bypassed, pin=pin
                 )
             except (Elke27PinRequiredError, HomeAssistantError) as err:
                 _LOGGER.warning(

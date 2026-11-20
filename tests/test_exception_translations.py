@@ -459,6 +459,14 @@ def _placeholder_observations() -> dict[str, set[frozenset[str]]]:
     record("entity_invalid_zone", {"entity_id"})
     record("entity_not_linked", {"entity_id"})
     record("config_entry_not_loaded", {"entity_id"})
+    record("zone_not_found", {"entity_id"})
+    record(
+        "zone_bypass_failed_rolled_back", {"zone", "reason", "rolled_back_zone_numbers"}
+    )
+    record(
+        "zone_bypass_failed_still_bypassed",
+        {"zone", "reason", "rolled_back_zone_numbers", "still_bypassed_zone_numbers"},
+    )
     record("arm_automatic_multi_failed_area_unnamed", {"area_number"})
 
     return by_key
