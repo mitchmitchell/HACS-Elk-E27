@@ -15,6 +15,7 @@ from .arming import (
     ZonePhrase,
     area_automatic_phrase,
     zone_automatic_phrase,
+    zone_bypass_label,
     zone_number_list,
 )
 from .const import DOMAIN
@@ -323,3 +324,97 @@ def arm_automatic_multi_failed_error(
 def zone_bypass_failed_pin_required(err: ZoneBypassFailedError) -> bool:
     """Return True when a bypass failure is missing a user code."""
     return err.pin_required or err.reason == PIN_REQUIRED_REASON
+
+
+def zone_bypass_service_failed_error(
+    zone: ZoneState,
+    reason: str,
+    rolled_back_zones: Sequence[ZoneState],
+    still_changed_zones: Sequence[ZoneState],
+    *,
+    bypass: bool,
+) -> HomeAssistantError:
+    """Return the translated error when zone bypass failed and was rolled back."""
+    zone_label = zone_bypass_label(zone)
+    still_numbers = zone_number_list(list(still_changed_zones))
+    rolled_numbers = zone_number_list(list(rolled_back_zones))
+    if still_changed_zones:
+        still_ph_key = (
+            "still_bypassed_zone_numbers" if bypass else "still_unbypassed_zone_numbers"
+        )
+        if rolled_back_zones:
+            translation_key = (
+                "zone_bypass_failed_still_bypassed"
+                if bypass
+                else "zone_bypass_failed_still_unbypassed"
+            )
+            return _translated_error(
+                translation_key,
+                {
+                    "zone": zone_label,
+                    "reason": reason,
+                    "rolled_back_zone_numbers": rolled_numbers,
+                    still_ph_key: still_numbers,
+                },
+            )
+        translation_key = (
+            "zone_bypass_failed_still_bypassed_no_restore"
+            if bypass
+            else "zone_bypass_failed_still_unbypassed_no_restore"
+        )
+        return _translated_error(
+            translation_key,
+            {"zone": zone_label, "reason": reason, still_ph_key: still_numbers},
+        )
+    return _translated_error(
+        "zone_bypass_failed_rolled_back",
+        {
+            "zone": zone_label,
+            "reason": reason,
+            "rolled_back_zone_numbers": rolled_numbers,
+        },
+    )
+
+
+def zone_bypass_unacknowledged_failed_error(
+    zone: ZoneState,
+    rolled_back_zones: Sequence[ZoneState],
+    still_changed_zones: Sequence[ZoneState],
+    *,
+    bypass: bool,
+) -> HomeAssistantError:
+    """Return the translated error when an unacknowledged bypass failed mid-call."""
+    zone_label = zone_bypass_label(zone)
+    still_numbers = zone_number_list(list(still_changed_zones))
+    rolled_numbers = zone_number_list(list(rolled_back_zones))
+    if still_changed_zones:
+        still_ph_key = (
+            "still_bypassed_zone_numbers" if bypass else "still_unbypassed_zone_numbers"
+        )
+        if rolled_back_zones:
+            translation_key = (
+                "zone_bypass_failed_not_acknowledged_still_bypassed"
+                if bypass
+                else "zone_bypass_failed_not_acknowledged_still_unbypassed"
+            )
+            return _translated_error(
+                translation_key,
+                {
+                    "zone": zone_label,
+                    "rolled_back_zone_numbers": rolled_numbers,
+                    still_ph_key: still_numbers,
+                },
+            )
+        translation_key = (
+            "zone_bypass_failed_not_acknowledged_still_bypassed_no_restore"
+            if bypass
+            else "zone_bypass_failed_not_acknowledged_still_unbypassed_no_restore"
+        )
+        return _translated_error(
+            translation_key,
+            {"zone": zone_label, still_ph_key: still_numbers},
+        )
+    return _translated_error(
+        "zone_bypass_failed_not_acknowledged_rolled_back",
+        {"zone": zone_label, "rolled_back_zone_numbers": rolled_numbers},
+    )

@@ -33,7 +33,6 @@ from elke27_lib.events import (
     ZoneStatusUpdated,
 )
 
-from homeassistant.components import persistent_notification
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
@@ -52,9 +51,9 @@ from .arming import (
     PIN_REQUIRED_REASON,
     ZoneBypassFailedError,
     _library_arm_mode,
-    _validated_pin,
     area_faulted_zones,
     area_skip_automatic_arm_from_status_reply,
+    validated_pin,
 )
 from .const import (
     CONF_INTEGRATION_ID,
@@ -81,6 +80,7 @@ from .identity import build_client_identity
 from .panel_mac import async_verify_panel_mac
 from .reconnect import ReconnectSupervisor
 from .tasks import create_background_task
+from .zone_notifications import notify_still_changed_zones_by_panel
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Iterable
@@ -839,18 +839,13 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             _LOGGER.warning(
                 "Code rejected; zones still bypassed after rollback: %s", zone_ids
             )
-            # Tell the user, not only the log: zone numbers only, never the code.
-            persistent_notification.async_create(
+            notify_still_changed_zones_by_panel(
                 self.hass,
-                title="Elk E27 zones still bypassed",
-                message=(
-                    "The panel refused the command and these zones could not be"
-                    f" un-bypassed, so they are still bypassed: zones {zone_ids}."
-                    " Clear them with the zone bypass service."
-                ),
-                notification_id=(
-                    f"elke27_code_rejected_bypass_{self.config_entry.entry_id}"
-                ),
+                zones_by_config_entry={
+                    self.config_entry.entry_id: still_bypassed,
+                },
+                bypass=True,
+                notification_id_prefix="code_rejected_bypass",
             )
         raise rejected
 
@@ -859,13 +854,15 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         zones: list[ZoneState] | tuple[ZoneState, ...],
         pin: str | None,
         *,
+        bypassed: bool = False,
         gate: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[list[ZoneState], list[ZoneState]]:
         """
-        Un-bypass zones this integration just bypassed, in reverse order.
+        Undo zone bypass changes, in reverse order.
 
-        Each zone is attempted exactly once; a failure is not retried, it is
-        reported. Return (rolled_back, still_bypassed), both in attempt order.
+        Each zone is written once at ``bypassed`` (False to un-bypass after a
+        bypass, True to re-bypass after an un-bypass). A failure is not retried.
+        Return (rolled_back, still_bypassed), both in attempt order.
         """
         rolled_back: list[ZoneState] = []
         still_bypassed: list[ZoneState] = []
@@ -874,7 +871,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 await gate()
             try:
                 acknowledged = await self.async_set_zone_bypass(
-                    zone.zone_id, bypassed=False, pin=pin
+                    zone.zone_id, bypassed=bypassed, pin=pin
                 )
             except (Elke27PinRequiredError, HomeAssistantError) as err:
                 _LOGGER.warning(
@@ -897,7 +894,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if pin is None:
             msg = "PIN required to bypass zones."
             raise Elke27PinRequiredError(msg)
-        pin_value = _validated_pin(pin)
+        pin_value = validated_pin(pin)
         # Never log the user code.
         _LOGGER.debug(
             "Sending zone bypass request: zone_id=%s bypassed=%s",
@@ -996,7 +993,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if pin is None:
             msg = "PIN required to arm areas."
             raise Elke27PinRequiredError(msg)
-        pin_value = _validated_pin(pin)
+        pin_value = validated_pin(pin)
         arm_mode = _library_arm_mode(mode)
         epoch = self._connection_epoch
         try:
@@ -1063,7 +1060,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if pin is None:
             msg = "PIN required to disarm areas."
             raise Elke27PinRequiredError(msg)
-        pin_value = _validated_pin(pin)
+        pin_value = validated_pin(pin)
         epoch = self._connection_epoch
         try:
             refresh_ok = await self._async_write_disarm(
