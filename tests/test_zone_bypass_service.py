@@ -1964,3 +1964,30 @@ async def test_coordinator_code_rejected_bypass_notice_text_and_id(
         "could not be un-bypassed, so they are still bypassed: zones 2."
         in notice["message"]
     )
+
+
+@pytest.mark.parametrize("ack_false", [True, False], ids=["unacknowledged", "raised"])
+async def test_mid_list_failure_error_names_the_failing_zone(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+    ack_false: bool,
+) -> None:
+    _client, _mock = three_zones
+    zones = _zone_entities(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator = entry.runtime_data.coordinator
+    original_bypass = coordinator.async_set_zone_bypass
+
+    async def behave(zone_id: int, bypassed: bool, pin: str | None = None) -> bool:
+        if zone_id == 2 and bypassed:
+            if ack_false:
+                return False
+            raise HomeAssistantError("panel refused zone 2")
+        return await original_bypass(zone_id, bypassed=bypassed, pin=pin)
+
+    _record_coordinator_bypass(coordinator, behave)
+    with pytest.raises(HomeAssistantError) as err:
+        await _call_zone_bypass(hass, [zones[1], zones[2]])
+    ph = err.value.translation_placeholders or {}
+    assert "Zone B" in ph["zone"]
+    assert "Zone A" not in ph["zone"]
