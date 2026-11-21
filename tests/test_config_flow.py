@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 import dataclasses
 from types import SimpleNamespace
 from typing import Any
@@ -66,7 +66,7 @@ LINK_KEYS = LinkKeys(tempkey_hex="aa", linkkey_hex="bb", linkhmac_hex="cc")
 
 
 @pytest.fixture
-def flow_client() -> Generator[Any]:
+async def flow_client(hass: HomeAssistant) -> AsyncGenerator[Any]:
     """Patch the client and identity used by the config flow."""
     client: Any = create_autospec(Elke27Client, instance=True)
     client.async_link.return_value = LINK_KEYS
@@ -83,6 +83,7 @@ def flow_client() -> Generator[Any]:
         patch("custom_components.elke27.async_setup_entry", return_value=True),
     ):
         yield client
+        await hass.async_block_till_done()
 
 
 async def _start_manual(hass: HomeAssistant) -> dict[str, Any]:
