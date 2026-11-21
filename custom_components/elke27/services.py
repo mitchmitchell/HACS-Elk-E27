@@ -51,7 +51,10 @@ from .errors import (
     pin_required_error,
     service_validation_error,
 )
-from .zone_notifications import notify_still_changed_zones_by_panel
+from .zone_notifications import (
+    async_clear_zones_still_changed_issues,
+    notify_still_changed_zones_by_panel,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -713,12 +716,10 @@ def _notify_still_changed_after_rollback(
     still_by_entry: dict[str, list[ZoneState]],
     bypass: bool,
 ) -> None:
-    prefix = "zone_bypass_still_bypassed" if bypass else "zone_bypass_still_unbypassed"
     notify_still_changed_zones_by_panel(
         hass,
         zones_by_config_entry=still_by_entry,
         bypass=bypass,
-        notification_id_prefix=prefix,
     )
 
 
@@ -885,6 +886,9 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                     cause=None,
                 )
             changed.append((zone, runtime_data, entry_id, entity_id))
+
+    for entry_id in {entry_id for _, _, entry_id, _ in targets}:
+        async_clear_zones_still_changed_issues(hass, entry_id)
 
 
 def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:

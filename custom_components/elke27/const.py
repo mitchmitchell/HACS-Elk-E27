@@ -35,6 +35,8 @@ MANUFACTURER_NUMBER = 222
 INTEGRATION_ID_LENGTH = 12
 
 ISSUE_RECONNECT_FAILED = "reconnect_failed"
+ISSUE_ZONES_STILL_BYPASSED = "zones_still_bypassed"
+ISSUE_ZONES_STILL_UNBYPASSED = "zones_still_unbypassed"
 RECONNECT_NON_TRANSPORT_ISSUE_THRESHOLD = 3
 # Reconnect backoff: 2**n seconds, capped here before jitter (x0.8-1.2), so
 # the panel is retried at least about every 72 s during a long outage (#79).

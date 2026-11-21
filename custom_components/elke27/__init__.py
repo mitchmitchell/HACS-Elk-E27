@@ -57,6 +57,10 @@ from .services import (  # noqa: F401 -- re-exported for tests and callers
     _numeric_id_from_unique_id,
     _service_mode_to_arm_mode,
 )
+from .zone_notifications import (
+    zones_still_bypassed_issue_id,
+    zones_still_unbypassed_issue_id,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -250,3 +254,5 @@ def _async_delete_entry_issues(hass: HomeAssistant, entry: Elke27ConfigEntry) ->
     ir.async_delete_issue(hass, DOMAIN, blocked_issue_id(entry.entry_id))
     ir.async_delete_issue(hass, DOMAIN, duplicates_issue_id(entry.entry_id))
     ir.async_delete_issue(hass, DOMAIN, record_issue_id(entry.entry_id))
+    ir.async_delete_issue(hass, DOMAIN, zones_still_bypassed_issue_id(entry.entry_id))
+    ir.async_delete_issue(hass, DOMAIN, zones_still_unbypassed_issue_id(entry.entry_id))
