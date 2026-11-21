@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import dataclasses
+import json
 import logging
+from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -1959,11 +1961,16 @@ async def test_coordinator_code_rejected_bypass_notice_text_and_id(
     notice = hass.data["persistent_notification"][
         f"elke27_code_rejected_bypass_{entry.entry_id}"
     ]
-    assert notice["title"] == "Elk E27 zones still bypassed"
-    assert (
-        "could not be un-bypassed, so they are still bypassed: zones 2."
-        in notice["message"]
-    )
+    strings = json.loads(
+        (
+            Path(__file__).parent.parent
+            / "custom_components"
+            / "elke27"
+            / "strings.json"
+        ).read_text(encoding="utf-8")
+    )["notifications"]["still_bypassed"]
+    assert notice["title"] == strings["title"]
+    assert notice["message"] == strings["message"].format(zone_ids="2")
 
 
 @pytest.mark.parametrize("ack_false", [True, False], ids=["unacknowledged", "raised"])

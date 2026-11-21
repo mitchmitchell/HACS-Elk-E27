@@ -665,6 +665,16 @@
       "title": "Panel connection keeps failing"
     }
   },
+  "notifications": {
+    "still_bypassed": {
+      "message": "The panel refused the command and these zones could not be un-bypassed, so they are still bypassed: zones {zone_ids}. Clear them with the zone bypass service.",
+      "title": "Elk E27 zones still bypassed"
+    },
+    "still_unbypassed": {
+      "message": "The panel refused the command and these zones could not be re-bypassed, so they are no longer bypassed: zones {zone_ids}. Bypass them again with the zone bypass service.",
+      "title": "Elk E27 zones still un-bypassed"
+    }
+  },
   "selector": {
     "panel": {
       "options": {
