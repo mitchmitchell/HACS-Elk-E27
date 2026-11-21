@@ -754,10 +754,9 @@ async def _async_raise_zone_bypass_failure(
         raise rejected
     if cause is None:
         if changed:
-            err = zone_bypass_unacknowledged_failed_error(
+            raise zone_bypass_unacknowledged_failed_error(
                 zone, rolled_back, still, bypass=bypass
             )
-            raise err
         raise homeassistant_error(translation_key="zone_bypass_not_acknowledged")
     if isinstance(cause, Elke27PinRequiredError):
         if still_by_entry:
