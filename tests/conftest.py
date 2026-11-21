@@ -218,19 +218,32 @@ def make_coordinator(
     return coordinator
 
 
-def link_event(*, connected: bool) -> Elke27Event:
+def link_event(*, connected: bool, err_msg: str | None = None) -> Elke27Event:
     """Return the client.subscribe connection event (DISCONNECTED or READY)."""
     return Elke27Event(
         event_type=EventType.READY if connected else EventType.DISCONNECTED,
-        data={},
+        data={} if err_msg is None else {"err_msg": err_msg},
         seq=1,
         timestamp=datetime.now(UTC),
     )
 
 
-def connection_event(*, connected: bool) -> ConnectionStateChanged:
+@dataclasses.dataclass(frozen=True, slots=True)
+class ConnectionStateChangedWithErr(ConnectionStateChanged):
+    """Stand-in until the pin carries err_msg (#177); remove at the pin bump."""
+
+    err_msg: str | None = None
+
+
+def connection_event(
+    *, connected: bool, err_msg: str | None = None
+) -> ConnectionStateChanged:
     """Return a library connection event (connected or disconnected)."""
-    return ConnectionStateChanged(
+    cls = (
+        ConnectionStateChangedWithErr if err_msg is not None else ConnectionStateChanged
+    )
+    extra: dict[str, Any] = {} if err_msg is None else {"err_msg": err_msg}
+    return cls(
         kind="connection",
         at=0.0,
         seq=None,
@@ -238,6 +251,7 @@ def connection_event(*, connected: bool) -> ConnectionStateChanged:
         route=("system", "connection"),
         session_id=None,
         connected=connected,
+        **extra,
     )
 
 
