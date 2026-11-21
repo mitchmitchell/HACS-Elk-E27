@@ -80,6 +80,8 @@ AUTH_ERRORS: tuple[type[Exception], ...] = (
 
 PinAction = Literal["arm", "disarm", "bypass", "unlock", "lock", "control"]
 
+ZONE_BYPASS_PIN_ACTION: PinAction = "bypass"
+
 
 def homeassistant_error(
     *,

@@ -30,6 +30,8 @@ from .arm_automatic_errors import (
     arm_automatic_uncertain_error,
     async_arm_automatic_multi_failed_area_label,
     zone_bypass_failed_pin_required,
+    zone_bypass_service_failed_error,
+    zone_bypass_unacknowledged_failed_error,
 )
 from .arming import (
     PIN_REQUIRED_REASON,
@@ -37,21 +39,26 @@ from .arming import (
     area_automatic_phrase,
     is_already_armed_refusal,
     is_definitive_refusal,
+    validated_pin,
     zone_bypass_label,
 )
 from .const import DOMAIN
 from .errors import (
+    ZONE_BYPASS_PIN_ACTION,
     arm_mode_not_supported_validation,
     code_rejected_error,
     homeassistant_error,
+    pin_required_error,
     service_validation_error,
 )
+from .zone_notifications import notify_still_changed_zones_by_panel
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Sequence
 
     from homeassistant.core import HomeAssistant, ServiceCall
 
+    from .coordinator import Elke27DataUpdateCoordinator
     from .models import Elke27RuntimeData
 
 _LOGGER = logging.getLogger(__package__)
@@ -192,7 +199,7 @@ def _validate_alarm_panel_targets(
 async def _arm_automatic_failed_area_name(hass: HomeAssistant, entity_id: str) -> str:
     """Return the panel area name for a multi-failure summary line."""
     try:
-        entity_entry, runtime_data = _entity_runtime_data(
+        entity_entry, runtime_data, _config_id = _entity_runtime_data(
             hass, entity_id, Platform.ALARM_CONTROL_PANEL
         )
     except HomeAssistantError:
@@ -255,7 +262,7 @@ async def _async_arm_automatic_entity(
     code: str,
 ) -> None:
     """Handle the automatic arming service for one entity."""
-    entity_entry, runtime_data = _entity_runtime_data(
+    entity_entry, runtime_data, _config_id = _entity_runtime_data(
         hass, entity_id, Platform.ALARM_CONTROL_PANEL
     )
     area_id = _area_id_from_unique_id(entity_entry.unique_id, entity_id=entity_id)
@@ -621,7 +628,7 @@ _ENTITY_INVALID_KEY = {
 
 def _entity_runtime_data(
     hass: HomeAssistant, entity_id: str, platform: Platform
-) -> tuple[er.RegistryEntry, Elke27RuntimeData]:
+) -> tuple[er.RegistryEntry, Elke27RuntimeData, str]:
     """Return the registry entry and loaded runtime data for an Elke27 entity."""
     entity_entry = er.async_get(hass).async_get(entity_id)
     if (
@@ -648,40 +655,236 @@ def _entity_runtime_data(
             translation_placeholders={"entity_id": entity_id},
         )
 
-    return entity_entry, config_entry.runtime_data
+    return (
+        entity_entry,
+        config_entry.runtime_data,
+        _config_entry_id(entity_entry, entity_id),
+    )
+
+
+type _ZoneBypassTarget = tuple[ZoneState, Elke27RuntimeData, str, str]
+type _AreaLockSpec = tuple[str, Elke27DataUpdateCoordinator, int]
+
+
+@contextlib.asynccontextmanager
+async def _async_area_arm_locks(
+    specs: Sequence[_AreaLockSpec],
+) -> AsyncIterator[None]:
+    """Acquire every area lock in sorted order; release in reverse on exit."""
+    if not specs:
+        yield
+        return
+    async with contextlib.AsyncExitStack() as stack:
+        for _entry_id, coordinator, area_id in sorted(
+            specs, key=lambda item: (item[0], item[2])
+        ):
+            await stack.enter_async_context(coordinator.area_arm_lock(area_id))
+        yield
+
+
+async def _async_rollback_zone_bypass_changed(
+    changed: Sequence[_ZoneBypassTarget],
+    code: str,
+    *,
+    bypass: bool,
+) -> tuple[list[ZoneState], dict[str, list[ZoneState]]]:
+    """Undo bypass changes on each panel that was touched."""
+    rolled_back: list[ZoneState] = []
+    still_by_entry: dict[str, list[ZoneState]] = {}
+    by_entry: dict[str, list[ZoneState]] = {}
+    coordinator_for_entry: dict[str, Elke27DataUpdateCoordinator] = {}
+    for zone, runtime_data, entry_id, _entity_id in changed:
+        by_entry.setdefault(entry_id, []).append(zone)
+        coordinator_for_entry[entry_id] = runtime_data.coordinator
+    for entry_id, zones in by_entry.items():
+        coordinator = coordinator_for_entry[entry_id]
+        rb, st = await coordinator.async_rollback_bypasses(
+            tuple(zones), code, bypassed=not bypass
+        )
+        rolled_back.extend(rb)
+        if st:
+            still_by_entry[entry_id] = list(st)
+    return rolled_back, still_by_entry
+
+
+def _notify_still_changed_after_rollback(
+    hass: HomeAssistant,
+    *,
+    still_by_entry: dict[str, list[ZoneState]],
+    bypass: bool,
+) -> None:
+    prefix = "zone_bypass_still_bypassed" if bypass else "zone_bypass_still_unbypassed"
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry=still_by_entry,
+        bypass=bypass,
+        notification_id_prefix=prefix,
+    )
+
+
+async def _async_raise_zone_bypass_failure(
+    hass: HomeAssistant,
+    zone: ZoneState,
+    *,
+    reason: str = "",
+    changed: Sequence[_ZoneBypassTarget],
+    code: str,
+    bypass: bool,
+    cause: HomeAssistantError | Elke27PinRequiredError | None,
+) -> NoReturn:
+    """Roll back this call's changes, then raise the service failure."""
+    rolled_back: list[ZoneState] = []
+    still_by_entry: dict[str, list[ZoneState]] = {}
+    if changed:
+        rolled_back, still_by_entry = await _async_rollback_zone_bypass_changed(
+            changed, code, bypass=bypass
+        )
+    still = [zone for zones in still_by_entry.values() for zone in zones]
+    rejected = code_rejected_error(cause) if cause is not None else None
+    if still:
+        _LOGGER.warning(
+            "Zone bypass failed; zones still changed after rollback: %s",
+            ", ".join(str(item.zone_id) for item in still),
+        )
+    if rejected is not None:
+        if still_by_entry:
+            _notify_still_changed_after_rollback(
+                hass, still_by_entry=still_by_entry, bypass=bypass
+            )
+        raise rejected
+    if cause is None:
+        if changed:
+            raise zone_bypass_unacknowledged_failed_error(
+                zone, rolled_back, still, bypass=bypass
+            )
+        raise homeassistant_error(translation_key="zone_bypass_not_acknowledged")
+    if isinstance(cause, Elke27PinRequiredError):
+        if still_by_entry:
+            _notify_still_changed_after_rollback(
+                hass, still_by_entry=still_by_entry, bypass=bypass
+            )
+        raise pin_required_error(ZONE_BYPASS_PIN_ACTION) from cause
+    if changed:
+        err = zone_bypass_service_failed_error(
+            zone, reason, rolled_back, still, bypass=bypass
+        )
+        raise err from cause
+    raise cause
+
+
+def _zone_from_coordinator(
+    coordinator: Elke27DataUpdateCoordinator, zone_id: int
+) -> ZoneState | None:
+    snapshot = coordinator.get_snapshot()
+    if snapshot is None:
+        return None
+    return snapshot.zones.get(zone_id)
 
 
 async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> None:
     """Bypass or un-bypass the targeted Elke27 zones."""
     code = call.data[ATTR_CODE]
     bypass = call.data[ATTR_BYPASS]
+    validated_pin(code)
 
     entity_ids = _entity_ids_from_service_call(hass, call, Platform.BINARY_SENSOR)
     if not entity_ids:
         raise service_validation_error(translation_key="no_zone_target")
 
+    resolved: list[_ZoneBypassTarget] = []
     for entity_id in entity_ids:
-        entity_entry, runtime_data = _entity_runtime_data(
+        entity_entry, runtime_data, entry_id = _entity_runtime_data(
             hass, entity_id, Platform.BINARY_SENSOR
         )
         zone_id = _numeric_id_from_unique_id(
             entity_entry.unique_id, "zone", entity_id=entity_id
         )
-        coordinator = runtime_data.coordinator
-        snapshot = coordinator.get_snapshot()
+        snapshot = runtime_data.coordinator.get_snapshot()
         zone = snapshot.zones.get(zone_id) if snapshot is not None else None
-        area_id = zone.area_id if zone is not None else None
-        # Share the area lock with automatic arming so a rollback cannot race
-        # a manual bypass. Zones with no known area are not serialized.
-        lock = (
-            coordinator.area_arm_lock(area_id) if area_id else contextlib.nullcontext()
-        )
-        async with lock:
-            acknowledged = await coordinator.async_set_zone_bypass(
-                zone_id, bypassed=bypass, pin=code
+        if zone is None:
+            raise service_validation_error(
+                translation_key="zone_not_found",
+                translation_placeholders={"entity_id": entity_id},
             )
-        if not acknowledged:
-            raise homeassistant_error(translation_key="zone_bypass_not_acknowledged")
+        resolved.append((zone, runtime_data, entry_id, entity_id))
+
+    seen: set[tuple[str, int]] = set()
+    targets: list[_ZoneBypassTarget] = []
+    for zone, runtime_data, entry_id, entity_id in resolved:
+        key = (entry_id, zone.zone_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append((zone, runtime_data, entry_id, entity_id))
+
+    if not targets:
+        return
+
+    lock_specs: list[_AreaLockSpec] = []
+    seen_locks: set[tuple[str, int]] = set()
+    for zone, runtime_data, entry_id, _entity_id in targets:
+        if zone.area_id is None:
+            continue
+        lock_key = (entry_id, zone.area_id)
+        if lock_key in seen_locks:
+            continue
+        seen_locks.add(lock_key)
+        lock_specs.append((entry_id, runtime_data.coordinator, zone.area_id))
+
+    changed: list[_ZoneBypassTarget] = []
+    async with _async_area_arm_locks(lock_specs):
+        for cached_zone, runtime_data, entry_id, entity_id in targets:
+            coordinator = runtime_data.coordinator
+            zone = _zone_from_coordinator(coordinator, cached_zone.zone_id)
+            if zone is None:
+                gone = homeassistant_error(
+                    translation_key="zone_not_found",
+                    translation_placeholders={"entity_id": entity_id},
+                )
+                await _async_raise_zone_bypass_failure(
+                    hass,
+                    cached_zone,
+                    reason=str(gone),
+                    changed=changed,
+                    code=code,
+                    bypass=bypass,
+                    cause=gone,
+                )
+            if zone.bypassed is bypass:
+                continue
+            try:
+                acknowledged = await coordinator.async_set_zone_bypass(
+                    zone.zone_id, bypassed=bypass, pin=code
+                )
+            except HomeAssistantError as err:
+                await _async_raise_zone_bypass_failure(
+                    hass,
+                    zone,
+                    reason=str(err),
+                    changed=changed,
+                    code=code,
+                    bypass=bypass,
+                    cause=err,
+                )
+            except Elke27PinRequiredError as err:
+                await _async_raise_zone_bypass_failure(
+                    hass,
+                    zone,
+                    changed=changed,
+                    code=code,
+                    bypass=bypass,
+                    cause=err,
+                )
+            if not acknowledged:
+                await _async_raise_zone_bypass_failure(
+                    hass,
+                    zone,
+                    changed=changed,
+                    code=code,
+                    bypass=bypass,
+                    cause=None,
+                )
+            changed.append((zone, runtime_data, entry_id, entity_id))
 
 
 def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:

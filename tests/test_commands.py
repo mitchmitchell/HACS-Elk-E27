@@ -238,6 +238,21 @@ class AsyncRollbackBypassesTest(unittest.IsolatedAsyncioTestCase):
             unittest.mock.call(1, bypassed=False, pin="1234"),
         ]
 
+    async def test_rollback_re_bypass_after_unbypass(self) -> None:
+        """Undoing an un-bypass writes bypassed=True on each zone."""
+        hub = _hub()
+        hub.async_set_zone_bypass = AsyncMock(return_value=True)
+        rolled_back, still = await hub.async_rollback_bypasses(
+            self._zones(), "1234", bypassed=True
+        )
+        assert [zone.zone_id for zone in rolled_back] == [3, 2, 1]
+        assert still == []
+        assert hub.async_set_zone_bypass.await_args_list == [
+            unittest.mock.call(3, bypassed=True, pin="1234"),
+            unittest.mock.call(2, bypassed=True, pin="1234"),
+            unittest.mock.call(1, bypassed=True, pin="1234"),
+        ]
+
     async def test_rollback_failures_are_not_retried(self) -> None:
         """A refused or unacknowledged un-bypass is reported, never retried."""
         hub = _hub()
