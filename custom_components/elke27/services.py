@@ -833,6 +833,7 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
         lock_specs.append((entry_id, runtime_data.coordinator, zone.area_id))
 
     changed: list[_ZoneBypassTarget] = []
+    restored_by_entry: dict[str, list[int]] = {}
     async with _async_area_arm_locks(lock_specs):
         for cached_zone, runtime_data, entry_id, entity_id in targets:
             coordinator = runtime_data.coordinator
@@ -852,6 +853,7 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                     cause=gone,
                 )
             if zone.bypassed is bypass:
+                restored_by_entry.setdefault(entry_id, []).append(zone.zone_id)
                 continue
             try:
                 acknowledged = await coordinator.async_set_zone_bypass(
@@ -886,10 +888,8 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                     cause=None,
                 )
             changed.append((zone, runtime_data, entry_id, entity_id))
+            restored_by_entry.setdefault(entry_id, []).append(zone.zone_id)
 
-    restored_by_entry: dict[str, list[int]] = {}
-    for zone, _runtime_data, entry_id, _entity_id in changed:
-        restored_by_entry.setdefault(entry_id, []).append(zone.zone_id)
     for entry_id, zone_ids in restored_by_entry.items():
         async_clear_restored_zones_from_still_changed_issue(
             hass, entry_id, zone_ids, service_bypass=bypass

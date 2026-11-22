@@ -1453,6 +1453,61 @@ async def test_successful_bypass_ignores_bypassed_still_changed_issue(
     assert issue.translation_placeholders == {"zone_ids": "1"}
 
 
+async def test_unbypass_skipped_already_unbypassed_clears_still_bypassed_issue(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    _client, _mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1, name="Zone A", area_id=1, open=False, bypassed=True
+                ),
+            ]
+        },
+        bypass=True,
+    )
+    issue_id = zones_still_bypassed_issue_id(entry_id)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
+    await _call_zone_bypass(hass, [zones[1]], bypass=False)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_skipped_at_target_trims_coordinator_observed_zone_from_issue(
+    hass: HomeAssistant,
+    setup: Setup,
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    client = ThreeZoneClient(snapshot=_three_zone_snapshot(zone2_bypassed=True))
+    await setup(client)
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1, name="Zone A", area_id=1, open=False, bypassed=True
+                ),
+                ZoneState(
+                    zone_id=2, name="Zone B", area_id=1, open=False, bypassed=True
+                ),
+            ]
+        },
+        bypass=True,
+    )
+    issue_id = zones_still_bypassed_issue_id(entry_id)
+    await _call_zone_bypass(hass, [zones[1]], bypass=False)
+    issue = issue_registry.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_placeholders == {"zone_ids": "2"}
+
+
 async def test_successful_unbypass_leaves_unrelated_still_unbypassed_issue(
     hass: HomeAssistant,
     three_zones: tuple[FakeClient, ClientHarness],
