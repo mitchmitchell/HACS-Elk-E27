@@ -52,7 +52,7 @@ from .errors import (
     service_validation_error,
 )
 from .zone_notifications import (
-    async_clear_zones_still_changed_issues,
+    async_clear_restored_zones_from_still_changed_issue,
     notify_still_changed_zones_by_panel,
 )
 
@@ -887,8 +887,13 @@ async def _async_handle_zone_bypass(hass: HomeAssistant, call: ServiceCall) -> N
                 )
             changed.append((zone, runtime_data, entry_id, entity_id))
 
-    for entry_id in {entry_id for _, _, entry_id, _ in targets}:
-        async_clear_zones_still_changed_issues(hass, entry_id)
+    restored_by_entry: dict[str, list[int]] = {}
+    for zone, _runtime_data, entry_id, _entity_id in changed:
+        restored_by_entry.setdefault(entry_id, []).append(zone.zone_id)
+    for entry_id, zone_ids in restored_by_entry.items():
+        async_clear_restored_zones_from_still_changed_issue(
+            hass, entry_id, zone_ids, service_bypass=bypass
+        )
 
 
 def _service_mode_to_arm_mode(mode_name: str) -> ArmMode:

@@ -50,8 +50,7 @@ def _expect_issue(
     assert issue is not None
     assert issue.is_fixable is False
     assert issue.translation_key == key
-    placeholders = issue.translation_placeholders or {}
-    assert placeholders.get("zone_ids") == zone_ids
+    assert issue.translation_placeholders == {"zone_ids": zone_ids}
     assert issue.severity == ir.IssueSeverity.WARNING
     strings = _ISSUES[key]
     assert strings["title"]
@@ -82,19 +81,57 @@ async def test_remove_entry_clears_zones_still_changed_issues(
     client = FakeClient(command_result(True))
     await setup(client)
     entry = hass.config_entries.async_entries(DOMAIN)[0]
-    zones = (ZoneState(zone_id=1, name="", area_id=1, open=False, bypassed=True),)
+    bypassed_zones = (
+        ZoneState(zone_id=1, name="", area_id=1, open=False, bypassed=True),
+    )
+    unbypassed_zones = (
+        ZoneState(zone_id=2, name="", area_id=1, open=False, bypassed=False),
+    )
     notify_still_changed_zones_by_panel(
         hass,
-        zones_by_config_entry={entry.entry_id: zones},
+        zones_by_config_entry={entry.entry_id: bypassed_zones},
         bypass=True,
     )
-    issue_id = zones_still_bypassed_issue_id(entry.entry_id)
-    assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={entry.entry_id: unbypassed_zones},
+        bypass=False,
+    )
+    bypassed_issue_id = zones_still_bypassed_issue_id(entry.entry_id)
+    unbypassed_issue_id = zones_still_unbypassed_issue_id(entry.entry_id)
+    assert issue_registry.async_get_issue(DOMAIN, bypassed_issue_id) is not None
+    assert issue_registry.async_get_issue(DOMAIN, unbypassed_issue_id) is not None
     await async_remove_entry(hass, entry)
-    assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
-    assert (
-        issue_registry.async_get_issue(
-            DOMAIN, zones_still_unbypassed_issue_id(entry.entry_id)
-        )
-        is None
+    assert issue_registry.async_get_issue(DOMAIN, bypassed_issue_id) is None
+    assert issue_registry.async_get_issue(DOMAIN, unbypassed_issue_id) is None
+
+
+def test_notify_still_changed_merges_zone_ids_on_repeat_failure(
+    hass: HomeAssistant,
+    issue_registry: IssueRegistry,
+) -> None:
+    entry_id = "entry-1"
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: (
+                ZoneState(zone_id=1, name="", area_id=1, open=False, bypassed=True),
+            )
+        },
+        bypass=True,
+    )
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: (
+                ZoneState(zone_id=2, name="", area_id=1, open=False, bypassed=True),
+            )
+        },
+        bypass=True,
+    )
+    _expect_issue(
+        issue_registry,
+        entry_id=entry_id,
+        bypass=True,
+        zone_ids="1, 2",
     )
