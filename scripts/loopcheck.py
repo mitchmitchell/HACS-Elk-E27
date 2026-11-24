@@ -1,6 +1,6 @@
-# https://github.com/mitchmitchell/elke27/blob/d3b51d0b9726da86f16b5293ec71cf71b9a9c107/devtools/loopcheck.py
-# vendored from elke27 d3b51d0; do not local-edit
-"""Report blocking calls in event-loop modules (ELK001-005, ELK101-110).
+# https://github.com/mitchmitchell/elke27/blob/d45070bbe75d128d649085a78eab5da10f5aae52/devtools/loopcheck.py
+# vendored from elke27 d45070b plus ELK111 (pending upstream, elke27 #164); do not local-edit
+"""Report blocking calls in event-loop modules (ELK001-005, ELK101-111).
 
 A file is a *loop* file when its name ends in ``_loop.py``, when it is listed in
 ``loop_modules``, or when it sits under a directory in ``loop_paths``. A file is a
@@ -132,6 +132,20 @@ FUTURE_FACTORIES = {"concurrent.futures.Future", "asyncio.run_coroutine_threadsa
 THREAD_FACTORIES = {"threading.Thread"}
 WAIT_CALLS = {"concurrent.futures.wait", "asyncio.run"}
 TLS_KDF_CALLS = {"ssl.wrap_socket", "hashlib.pbkdf2_hmac", "hashlib.scrypt"}
+IMPORT_CALLS = {
+    "importlib.import_module",
+    "importlib.reload",
+    "importlib.__import__",
+    "importlib.util.find_spec",
+    "builtins.__import__",
+}
+METADATA_PREFIXES = ("importlib.metadata.", "importlib_metadata.", "pkg_resources.")
+METADATA_NO_IO = {
+    "importlib.metadata.PackageNotFoundError",
+    "importlib_metadata.PackageNotFoundError",
+    "pkg_resources.DistributionNotFound",
+    "pkg_resources.VersionConflict",
+}
 
 NOQA_RE = re.compile(
     r"#\s*noqa(?P<colon>:\s*(?P<codes>[A-Za-z]+[0-9]+(?:[\s,]+[A-Za-z]+[0-9]+)*))?"
@@ -376,8 +390,21 @@ class _Checker:
                 continue
             self.check_call(node)
 
+    def callee(self, func: ast.AST) -> str:
+        """Qualify ``func``, resolving ``getattr(obj, "name")`` to ``obj.name``."""
+        if (
+            isinstance(func, ast.Call)
+            and self.is_builtin(func.func, "getattr")
+            and len(func.args) >= 2
+            and isinstance(func.args[1], ast.Constant)
+            and isinstance(func.args[1].value, str)
+        ):
+            owner = self.qualify(func.args[0])
+            return f"{owner}.{func.args[1].value}" if owner else ""
+        return self.qualify(func) or ""
+
     def check_call(self, call: ast.Call) -> None:
-        qualified = self.qualify(call.func) or ""
+        qualified = self.callee(call.func)
         kwargs = {k.arg for k in call.keywords if k.arg}
         base, method, base_node = self.receiver(call)
         if qualified in SLEEP:
@@ -430,6 +457,10 @@ class _Checker:
             self.add(call, "ELK109", "Thread.join() blocks the event loop")
         elif qualified in TLS_KDF_CALLS or method == "do_handshake":
             self.add(call, "ELK110", f"blocking TLS or KDF call {qualified or method}")
+        elif qualified in IMPORT_CALLS or self.is_builtin(call.func, "__import__"):
+            self.add(call, "ELK111", f"dynamic import {qualified or '__import__'} reads files")
+        elif qualified.startswith(METADATA_PREFIXES) and qualified not in METADATA_NO_IO:
+            self.add(call, "ELK111", f"package metadata call {qualified} reads files")
 
 
 def _nonblocking(call: ast.Call, kwargs: set[str], flag: str) -> bool:
