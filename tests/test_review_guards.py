@@ -25,6 +25,8 @@ from pathlib import Path
 import re
 import tokenize
 
+import yaml
+
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "custom_components" / "elke27"
 TESTS = ROOT / "tests"
@@ -388,3 +390,50 @@ def test_getattr_literal_names_do_not_grow() -> None:
         )
     }
     assert counts == GETATTR_LITERAL_CEILING
+
+
+WORKFLOWS = ROOT / ".github" / "workflows"
+GATE_WORKFLOWS = {
+    "lint.yml": "scripts/gate.sh lint",
+    "tests.yml": "scripts/gate.sh tests",
+    "validate.yml": "scripts/gate.sh validate",
+}
+_DIRECT_CHECK = re.compile(r"\b(ruff|mypy|pytest|loopcheck|hassfest)\b")
+
+
+def _workflow(name: str) -> dict[object, object]:
+    loaded = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def _run_lines(workflow: dict[object, object]) -> list[str]:
+    jobs = workflow.get("jobs")
+    assert isinstance(jobs, dict)
+    return [
+        str(step["run"])
+        for job in jobs.values()
+        for step in job.get("steps", [])
+        if "run" in step
+    ]
+
+
+def test_ci_runs_checks_only_through_the_gate_script() -> None:
+    """CI and the local gate are one script, so they cannot drift (repeat CI miss)."""
+    workflows = [p.name for p in WORKFLOWS.iterdir() if p.suffix in {".yml", ".yaml"}]
+    assert sorted(workflows) == sorted(GATE_WORKFLOWS)
+    for name, command in GATE_WORKFLOWS.items():
+        workflow = _workflow(name)
+        runs = _run_lines(workflow)
+        assert command in runs, f"{name} must run `{command}`"
+        direct = [r for r in runs if _DIRECT_CHECK.search(r) and "gate.sh" not in r]
+        assert direct == [], (
+            f"{name} runs a check outside scripts/gate.sh; add it as a gate step"
+        )
+        triggers = workflow.get("on", workflow.get(True))
+        assert isinstance(triggers, dict)
+        assert "pull_request" in triggers
+        pull_request = triggers["pull_request"]
+        assert not (isinstance(pull_request, dict) and "branches" in pull_request), (
+            f"{name} must run on every pull request so stacked PRs are checked"
+        )
