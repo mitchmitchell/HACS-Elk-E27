@@ -551,3 +551,91 @@ def test_unlisted_step_action_fails_the_guard() -> None:
             "which is not allowlisted"
         )
     ]
+
+
+def _one_job(job: object, triggers: object = None) -> list[str]:
+    """Run the workflow guard on a lint.yml holding just ``job``."""
+    on = {"pull_request": None} if triggers is None else triggers
+    workflow = {"on": on, "jobs": {"lint": job}}
+    return _workflow_problems("lint.yml", workflow, "scripts/gate.sh lint")
+
+
+_GATE_STEP = {"run": "scripts/gate.sh lint"}
+
+
+def test_empty_steps_fail_the_guard() -> None:
+    """A job with an empty or missing ``steps`` list fails."""
+    assert _one_job({"steps": []}) == [
+        "lint.yml:lint: job has no steps",
+        "lint.yml: must run `scripts/gate.sh lint`",
+    ]
+    missing = _one_job({"runs-on": "ubuntu-latest"})
+    assert missing[0] == "lint.yml:lint: job has no steps"
+
+
+_LOOKALIKES = (
+    "actions/checkout-evil@v4",
+    "actions/checkoutx@v4",
+    "evil/actions/checkout@v4",
+    "evil/hacs/action@v1",
+    "actions/evil@v4",
+    "actions/setup-python-evil@v5",
+    "hacs/actionx@v1",
+    "./.github/actions/lint",
+    "docker://alpine:3",
+)
+
+
+def test_lookalike_actions_fail_the_guard() -> None:
+    """Prefix, suffix, fork-owner and local or docker actions are not allowlisted."""
+    for uses in _LOOKALIKES:
+        assert _one_job({"steps": [{"uses": uses}, _GATE_STEP]}) == [
+            f"lint.yml:lint: step 0 uses {uses}, which is not allowlisted"
+        ], uses
+
+
+def test_each_allowlisted_action_passes_the_guard() -> None:
+    """Every allowlisted action passes on its own."""
+    for uses in ("actions/checkout@v4", "actions/setup-python@v5", "hacs/action@main"):
+        assert _one_job({"steps": [{"uses": uses}, _GATE_STEP]}) == [], uses
+
+
+def test_direct_checks_fail_and_gate_steps_pass() -> None:
+    """A bare check fails; naming gate steps on ``gate.sh`` is fine."""
+    assert _one_job({"steps": [{"run": "ruff check ."}, _GATE_STEP]}) == [
+        "lint.yml:lint: step 0 runs a check outside scripts/gate.sh"
+    ]
+    assert _one_job({"steps": [{"run": "scripts/gate.sh ruff mypy"}, _GATE_STEP]}) == []
+
+
+def test_non_mapping_step_fails_the_guard() -> None:
+    """A step that is not a mapping fails."""
+    assert _one_job({"steps": ["oops", _GATE_STEP]}) == [
+        "lint.yml:lint: step 0 is not a mapping"
+    ]
+
+
+def test_gate_entry_and_trigger_rules_fail_the_guard() -> None:
+    """Missing gate command, no ``pull_request`` and a branch filter each fail."""
+    assert _one_job({"steps": [{"run": "scripts/gate.sh tests"}]}) == [
+        "lint.yml: must run `scripts/gate.sh lint`"
+    ]
+    assert _one_job({"steps": [_GATE_STEP]}, {"push": None}) == [
+        "lint.yml: must run on pull_request"
+    ]
+    assert _one_job(
+        {"steps": [_GATE_STEP]}, {"pull_request": {"branches": ["main"]}}
+    ) == ["lint.yml: pull_request must not filter on branches"]
+    assert _workflow_problems("x.yml", {"on": {}, "jobs": {}}, None) == [
+        "x.yml: no jobs"
+    ]
+
+
+def test_missing_gate_workflow_fails_the_guard(tmp_path: Path) -> None:
+    """Dropping a gate workflow file fails."""
+    (tmp_path / "lint.yml").write_text(
+        (WORKFLOWS / "lint.yml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    problems = _workflow_dir_problems(tmp_path)
+    assert "tests.yml: gate workflow is missing" in problems
+    assert "validate.yml: gate workflow is missing" in problems
