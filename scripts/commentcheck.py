@@ -12,10 +12,11 @@ the explanation. A comment is allowed only when it is one of:
   ``noqa: CODE``, ``ruff: noqa: CODE``, ``type: ignore[code]``,
   ``pyright: ignore[code]``, ``pragma: no cover``, ``pragma: no branch`` or a
   ``fmt:`` directive;
-- a ``guard-exception:`` line (its form is checked by the review guards);
 - in a config file, the reason for a rule code: a comment on the line that names
   the code, or a full-line comment directly above that line or above a
-  per-file-ignores entry.
+  per-file-ignores entry;
+- in a config file, the reason on an entry of an ``exclude`` or
+  ``extend-exclude`` list (those reasons are required).
 
 Every other comment is a finding. Existing findings are frozen per file in the
 ``ceiling`` table of ``[tool.elke27.commentcheck]``; the counts must match
@@ -48,7 +49,6 @@ MIN_REASON_WORDS = 3
 
 URL_ONLY = re.compile(r"https?://\S+")
 LICENSE = re.compile(r"SPDX-License-Identifier:|^Copyright\b")
-GUARD_EXCEPTION = re.compile(r"^guard-exception:")
 CODE_LIST = r"[A-Za-z]+[0-9]+(?:[\s,]+[A-Za-z]+[0-9]+)*"
 SUPPRESSION = re.compile(
     rf"^(?:(?:ruff:\s*)?noqa(?P<noqa>:\s*{CODE_LIST})?"
@@ -59,6 +59,8 @@ SUPPRESSION = re.compile(
 )
 RULE_CODE = re.compile(r"[\"'][A-Z]{1,4}[0-9]{2,4}[\"']")
 PER_FILE_ENTRY = re.compile(r"^\s*[\"'][^\"']+[\"']\s*=\s*\[")
+EXCLUDE_LIST = re.compile(r"^\s*(?:extend-)?exclude\s*=\s*\[")
+LIST_ENTRY = re.compile(r"^\s*[\"'][^\"']+[\"']\s*,?\s*$")
 
 
 @dataclass(frozen=True, order=True)
@@ -163,7 +165,7 @@ def allowed(body: str, *, first_line: bool, raw: str) -> bool:
     """Return True when a comment body is one of the allowed forms."""
     if first_line and raw.startswith(SHELL_SHEBANG):
         return True
-    if LICENSE.search(body) or URL_ONLY.fullmatch(body) or GUARD_EXCEPTION.match(body):
+    if LICENSE.search(body) or URL_ONLY.fullmatch(body):
         return True
     return bool(suppression_ok(body))
 
@@ -209,6 +211,24 @@ def _explains_rule(lines: list[str], number: int, code: str) -> bool:
     return False
 
 
+def exclusion_entry_lines(lines: list[str]) -> set[int]:
+    """Return the line numbers of string entries inside exclude lists."""
+    entries: set[int] = set()
+    inside = False
+    for number, line in enumerate(lines, 1):
+        index = _hash_index(line)
+        code = line if index is None else line[:index]
+        if EXCLUDE_LIST.match(code):
+            inside = "]" not in code
+            continue
+        if inside:
+            if LIST_ENTRY.match(code):
+                entries.add(number)
+            if "]" in code:
+                inside = False
+    return entries
+
+
 def check_file(path: Path, rel: str) -> list[Finding]:
     """Return the disallowed comments in one file."""
     source = path.read_text(encoding="utf-8")
@@ -220,12 +240,16 @@ def check_file(path: Path, rel: str) -> list[Finding]:
                 findings.append(Finding(rel, number, raw.strip()))
         return findings
     lines = source.splitlines()
+    excluded_entries = exclusion_entry_lines(lines)
     for number, raw, code in config_comments(source):
         body = raw.lstrip("#").strip()
         if allowed(body, first_line=number == 1, raw=raw):
             continue
         shell = path.suffix == ".sh" or is_shell_script(path)
-        if not shell and _explains_rule(lines, number, code):
+        if not shell and (
+            _explains_rule(lines, number, code)
+            or (number in excluded_entries and len(body.split()) >= MIN_REASON_WORDS)
+        ):
             continue
         findings.append(Finding(rel, number, raw.strip()))
     return findings

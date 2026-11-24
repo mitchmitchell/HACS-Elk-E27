@@ -483,6 +483,13 @@ ignore = [
 "tests/test_x.py" = ["S101"]
 # a plain explanation
 key = "value # not a comment"
+extend-exclude = [
+    "scripts/vendored.py", # vendored upstream file, kept verbatim
+    "tests/fixtures", # why
+]
+other = [
+    "x", # not an exclusion list entry
+]
 """
 
 
@@ -491,12 +498,12 @@ def test_commentcheck_allows_only_the_listed_forms(tmp_path: Path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(_PY_SAMPLE, encoding="utf-8")
     lines = [f.line for f in commentcheck.check_file(sample, "sample.py")]
-    assert lines == [5, 6, 8, 12, 13]
+    assert lines == [5, 6, 8, 11, 12, 13]
 
     config = tmp_path / "sample.toml"
     config.write_text(_TOML_SAMPLE, encoding="utf-8")
     lines = [f.line for f in commentcheck.check_file(config, "sample.toml")]
-    assert lines == [6]
+    assert lines == [6, 10, 13]
 
 
 def test_commentcheck_ceiling_must_match_exactly(tmp_path: Path) -> None:
