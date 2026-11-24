@@ -663,6 +663,14 @@
     "reconnect_failed": {
       "description": "Home Assistant could not reconnect to {name}. Check that the panel is powered and reachable on the network. The integration will keep retrying.",
       "title": "Panel connection keeps failing"
+    },
+    "zones_still_bypassed": {
+      "description": "The panel refused the command and these zones could not be un-bypassed, so they are still bypassed: zones {zone_ids}. Clear them with the zone bypass service.",
+      "title": "Elk E27 zones still bypassed"
+    },
+    "zones_still_unbypassed": {
+      "description": "The panel refused the command and these zones could not be re-bypassed, so they are no longer bypassed: zones {zone_ids}. Bypass them again with the zone bypass service.",
+      "title": "Elk E27 zones still un-bypassed"
     }
   },
   "selector": {

@@ -23,11 +23,18 @@ from custom_components.elke27.const import (
     CONF_INTEGRATION_ID,
     CONF_LINK_KEYS_JSON,
     DOMAIN,
+    ISSUE_ZONES_STILL_BYPASSED,
+    ISSUE_ZONES_STILL_UNBYPASSED,
 )
 from custom_components.elke27.errors import code_rejected_error
+from custom_components.elke27.zone_notifications import (
+    notify_still_changed_zones_by_panel,
+    zones_still_bypassed_issue_id,
+    zones_still_unbypassed_issue_id,
+)
 from homeassistant.const import ATTR_CODE, CONF_HOST, CONF_PORT
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from tests.conftest import (
     HOST_2,
     LINK_KEYS_JSON,
@@ -1342,15 +1349,281 @@ async def test_two_panels_crossing_lock_order_completes_with_sorted_entry_locks(
     assert sorted(_client_bypass_calls(harness_b)) == [(91, True), (92, True)]
 
 
+async def test_successful_zone_bypass_clears_matching_still_unbypassed_issue(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    _client, _mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1, name="Zone A", area_id=1, open=False, bypassed=False
+                )
+            ]
+        },
+        bypass=False,
+    )
+    issue_id = zones_still_unbypassed_issue_id(entry_id)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
+    await _call_zone_bypass(hass, [zones[1]])
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_successful_bypass_keeps_remainder_on_still_unbypassed_issue(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    _client, _mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1, name="Zone A", area_id=1, open=False, bypassed=False
+                ),
+                ZoneState(
+                    zone_id=2, name="Zone B", area_id=1, open=False, bypassed=False
+                ),
+            ]
+        },
+        bypass=False,
+    )
+    issue_id = zones_still_unbypassed_issue_id(entry_id)
+    await _call_zone_bypass(hass, [zones[1]])
+    issue = issue_registry.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_placeholders == {"zone_ids": "2"}
+
+
+async def test_successful_unbypass_deletes_last_bypassed_still_changed_issue(
+    hass: HomeAssistant,
+    setup: Setup,
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    client = ThreeZoneClient(snapshot=_three_zone_snapshot(zone2_bypassed=True))
+    await setup(client)
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=2, name="Zone B", area_id=1, open=False, bypassed=True
+                ),
+            ]
+        },
+        bypass=True,
+    )
+    issue_id = zones_still_bypassed_issue_id(entry_id)
+    await _call_zone_bypass(hass, [zones[2]], bypass=False)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_successful_bypass_ignores_bypassed_still_changed_issue(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    _client, _mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1, name="Zone A", area_id=1, open=False, bypassed=True
+                ),
+            ]
+        },
+        bypass=True,
+    )
+    issue_id = zones_still_bypassed_issue_id(entry_id)
+    await _call_zone_bypass(hass, [zones[2]])
+    issue = issue_registry.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_placeholders == {"zone_ids": "1"}
+
+
+async def test_unbypass_skipped_already_unbypassed_clears_still_bypassed_issue(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    _client, _mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1, name="Zone A", area_id=1, open=False, bypassed=True
+                ),
+            ]
+        },
+        bypass=True,
+    )
+    issue_id = zones_still_bypassed_issue_id(entry_id)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
+    await _call_zone_bypass(hass, [zones[1]], bypass=False)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_skipped_at_target_trims_coordinator_observed_zone_from_issue(
+    hass: HomeAssistant,
+    setup: Setup,
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    client = ThreeZoneClient(snapshot=_three_zone_snapshot(zone2_bypassed=True))
+    await setup(client)
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1, name="Zone A", area_id=1, open=False, bypassed=True
+                ),
+                ZoneState(
+                    zone_id=2, name="Zone B", area_id=1, open=False, bypassed=True
+                ),
+            ]
+        },
+        bypass=True,
+    )
+    issue_id = zones_still_bypassed_issue_id(entry_id)
+    await _call_zone_bypass(hass, [zones[1]], bypass=False)
+    issue = issue_registry.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_placeholders == {"zone_ids": "2"}
+
+
+@pytest.mark.parametrize("service_bypass", [True, False], ids=["bypass", "unbypass"])
+async def test_trimmed_still_changed_issue_keeps_its_kind(
+    hass: HomeAssistant,
+    setup: Setup,
+    issue_registry: ir.IssueRegistry,
+    service_bypass: bool,
+) -> None:
+    await setup(
+        ThreeZoneClient(
+            snapshot=_three_zone_snapshot(zone2_bypassed=not service_bypass)
+        )
+    )
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    issue_bypassed = not service_bypass
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1,
+                    name="Zone A",
+                    area_id=1,
+                    open=False,
+                    bypassed=issue_bypassed,
+                ),
+                ZoneState(
+                    zone_id=3,
+                    name="Zone C",
+                    area_id=1,
+                    open=False,
+                    bypassed=issue_bypassed,
+                ),
+            ]
+        },
+        bypass=issue_bypassed,
+    )
+    await _call_zone_bypass(hass, [zones[1]], bypass=service_bypass)
+    issue_id = (
+        zones_still_bypassed_issue_id(entry_id)
+        if issue_bypassed
+        else zones_still_unbypassed_issue_id(entry_id)
+    )
+    issue = issue_registry.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_placeholders == {"zone_ids": "3"}
+    assert issue.translation_key == (
+        ISSUE_ZONES_STILL_BYPASSED if issue_bypassed else ISSUE_ZONES_STILL_UNBYPASSED
+    )
+    assert issue.is_fixable is False
+    assert issue.severity == ir.IssueSeverity.WARNING
+
+
+async def test_bypass_of_every_listed_zone_deletes_still_unbypassed_issue(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    _client, _mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1, name="Zone A", area_id=1, open=False, bypassed=False
+                ),
+                ZoneState(
+                    zone_id=3, name="Zone C", area_id=1, open=False, bypassed=False
+                ),
+            ]
+        },
+        bypass=False,
+    )
+    issue_id = zones_still_unbypassed_issue_id(entry_id)
+    await _call_zone_bypass(hass, [zones[1], zones[3]])
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_successful_unbypass_leaves_unrelated_still_unbypassed_issue(
+    hass: HomeAssistant,
+    three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    _client, _mock_client = three_zones
+    zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: [
+                ZoneState(
+                    zone_id=1, name="Zone A", area_id=1, open=False, bypassed=False
+                ),
+            ]
+        },
+        bypass=False,
+    )
+    issue_id = zones_still_unbypassed_issue_id(entry_id)
+    await _call_zone_bypass(hass, [zones[2]])
+    issue = issue_registry.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_placeholders == {"zone_ids": "1"}
+
+
 async def test_code_rejected_after_partial_rollback_shows_notification(
     hass: HomeAssistant,
     three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
 ) -> None:
     client, mock_client = three_zones
     zones = _zone_entities(hass)
     entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
     base = client.async_set_zone_bypass
-    notices: list[tuple[str, str, str]] = []
 
     async def _bypass(zone_id: int, **params: Any) -> Any:
         if zone_id == 2 and params.get("bypassed") is True:
@@ -1362,18 +1635,7 @@ async def test_code_rejected_after_partial_rollback_shows_notification(
     client.calls.clear()
     _patch_bypass(mock_client, _bypass)
 
-    def _record_create(
-        _hass: HomeAssistant, *, title: str, message: str, notification_id: str
-    ) -> None:
-        notices.append((title, message, notification_id))
-
-    with (
-        patch(
-            "custom_components.elke27.zone_notifications.persistent_notification.async_create",
-            side_effect=_record_create,
-        ),
-        pytest.raises(ServiceValidationError) as err,
-    ):
+    with pytest.raises(ServiceValidationError) as err:
         await hass.services.async_call(
             DOMAIN,
             "zone_bypass",
@@ -1382,21 +1644,24 @@ async def test_code_rejected_after_partial_rollback_shows_notification(
         )
     assert err.value.translation_key == "code_rejected"
     assert err.value.__cause__ is None
-    assert notices
-    assert "still bypassed" in notices[0][1].lower()
-    assert "zones 1" in notices[0][1]
-    assert notices[0][2] == f"elke27_zone_bypass_still_bypassed_{entry_id}"
+    issue = issue_registry.async_get_issue(
+        DOMAIN, zones_still_bypassed_issue_id(entry_id)
+    )
+    assert issue is not None
+    assert issue.translation_key == ISSUE_ZONES_STILL_BYPASSED
+    assert issue.is_fixable is False
+    assert (issue.translation_placeholders or {}).get("zone_ids") == "1"
 
 
 async def test_pin_required_after_partial_rollback_shows_notification(
     hass: HomeAssistant,
     three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
 ) -> None:
     client, mock_client = three_zones
     zones = _zone_entities(hass)
     entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
     base = client.async_set_zone_bypass
-    notices: list[tuple[str, str, str]] = []
     library_error = Elke27PinRequiredError("pin required")
 
     async def _bypass(zone_id: int, **params: Any) -> Any:
@@ -1410,32 +1675,24 @@ async def test_pin_required_after_partial_rollback_shows_notification(
     client.calls.clear()
     _patch_bypass(mock_client, _bypass)
 
-    def _record_create(
-        _hass: HomeAssistant, *, title: str, message: str, notification_id: str
-    ) -> None:
-        notices.append((title, message, notification_id))
-
-    with (
-        patch(
-            "custom_components.elke27.zone_notifications.persistent_notification.async_create",
-            side_effect=_record_create,
-        ),
-        pytest.raises(HomeAssistantError) as err,
-    ):
+    with pytest.raises(HomeAssistantError) as err:
         await _call_zone_bypass(hass, [zones[1], zones[2]])
     assert err.value.translation_key == "pin_required_bypass"
     assert err.value.translation_domain == DOMAIN
     assert err.value.translation_placeholders in (None, {})
     assert err.value.__cause__ is library_error
-    assert notices
-    assert "zones 1" in notices[0][1]
-    assert notices[0][2] == f"elke27_zone_bypass_still_bypassed_{entry_id}"
+    issue = issue_registry.async_get_issue(
+        DOMAIN, zones_still_bypassed_issue_id(entry_id)
+    )
+    assert issue is not None
+    assert (issue.translation_placeholders or {}).get("zone_ids") == "1"
 
 
 async def test_two_panels_still_changed_notifications_per_entry(
     hass: HomeAssistant,
     setup: Setup,
     mock_client: ClientHarness,
+    issue_registry: ir.IssueRegistry,
 ) -> None:
     client_a = ThreeZoneClient()
     await setup(client_a)
@@ -1451,7 +1708,6 @@ async def test_two_panels_still_changed_notifications_per_entry(
     zone_b1 = _zone_entity_for_serial(hass, PANEL_SERIAL_2, 1)
     base_a = client_a.async_set_zone_bypass
     base_b = harness_b.client.async_set_zone_bypass
-    notices: dict[str, str] = {}
     rollback_refused = _panel_refusal("rollback refused")
 
     async def _a(zone_id: int, **params: Any) -> Any:
@@ -1477,24 +1733,19 @@ async def test_two_panels_still_changed_notifications_per_entry(
 
     _patch_bypass(mock_client, _fail_a2)
 
-    def _record_create(
-        _hass: HomeAssistant, *, title: str, message: str, notification_id: str
-    ) -> None:
-        notices[notification_id] = message
-
-    with (
-        patch(
-            "custom_components.elke27.zone_notifications.persistent_notification.async_create",
-            side_effect=_record_create,
-        ),
-        pytest.raises(ServiceValidationError) as err,
-    ):
+    with pytest.raises(ServiceValidationError) as err:
         await _call_zone_bypass(hass, [zone_a1, zone_b1, zone_a2])
     assert err.value is panel_rejected
-    assert f"elke27_zone_bypass_still_bypassed_{entry_a.entry_id}" in notices
-    assert f"elke27_zone_bypass_still_bypassed_{entry_b.entry_id}" in notices
-    assert "zones 1" in notices[f"elke27_zone_bypass_still_bypassed_{entry_a.entry_id}"]
-    assert "zones 1" in notices[f"elke27_zone_bypass_still_bypassed_{entry_b.entry_id}"]
+    issue_a = issue_registry.async_get_issue(
+        DOMAIN, zones_still_bypassed_issue_id(entry_a.entry_id)
+    )
+    issue_b = issue_registry.async_get_issue(
+        DOMAIN, zones_still_bypassed_issue_id(entry_b.entry_id)
+    )
+    assert issue_a is not None
+    assert issue_b is not None
+    assert (issue_a.translation_placeholders or {}).get("zone_ids") == "1"
+    assert (issue_b.translation_placeholders or {}).get("zone_ids") == "1"
 
 
 async def test_unbypass_failed_rebypass_rollback_reports_still_unbypassed(
@@ -1866,11 +2117,12 @@ async def test_rollback_failed_keeps_service_failure_reason(
 async def test_partial_rollback_lists_every_still_bypassed_zone_on_one_panel(
     hass: HomeAssistant,
     three_zones: tuple[FakeClient, ClientHarness],
+    issue_registry: ir.IssueRegistry,
 ) -> None:
     client, mock_client = three_zones
     zones = _zone_entities(hass)
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
     base = client.async_set_zone_bypass
-    notices: dict[str, str] = {}
     rejected = ServiceValidationError(
         translation_domain=DOMAIN, translation_key="code_rejected"
     )
@@ -1884,19 +2136,13 @@ async def test_partial_rollback_lists_every_still_bypassed_zone_on_one_panel(
 
     _patch_bypass(mock_client, _send)
 
-    def _create(_h: Any, *, title: str, message: str, notification_id: str) -> None:
-        notices[notification_id] = message
-
-    with (
-        patch(
-            "custom_components.elke27.zone_notifications.persistent_notification.async_create",
-            side_effect=_create,
-        ),
-        pytest.raises(ServiceValidationError),
-    ):
+    with pytest.raises(ServiceValidationError):
         await _call_zone_bypass(hass, [zones[1], zones[2], zones[3]])
-    (msg,) = notices.values()
-    assert "zones 2, 1." in msg
+    issue = issue_registry.async_get_issue(
+        DOMAIN, zones_still_bypassed_issue_id(entry_id)
+    )
+    assert issue is not None
+    assert issue.translation_placeholders == {"zone_ids": "1, 2"}
 
 
 async def test_two_panels_still_changed_lists_both_panels_in_error_and_log(
@@ -1947,6 +2193,7 @@ async def test_coordinator_code_rejected_bypass_notice_text_and_id(
     rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
+    issue_registry: ir.IssueRegistry,
 ) -> None:
     client = _CustomBypassScriptedClient(
         [None, None, _CUSTOM_BYPASS_REJECT, _CUSTOM_BYPASS_REJECT, None],
@@ -1965,14 +2212,13 @@ async def test_coordinator_code_rejected_bypass_notice_text_and_id(
         )
     await hass.async_block_till_done()
     entry = hass.config_entries.async_entries(DOMAIN)[0]
-    notice = hass.data["persistent_notification"][
-        f"elke27_code_rejected_bypass_{entry.entry_id}"
-    ]
-    assert notice["title"] == "Elk E27 zones still bypassed"
-    assert (
-        "could not be un-bypassed, so they are still bypassed: zones 2."
-        in notice["message"]
+    issue = issue_registry.async_get_issue(
+        DOMAIN, zones_still_bypassed_issue_id(entry.entry_id)
     )
+    assert issue is not None
+    assert issue.translation_key == ISSUE_ZONES_STILL_BYPASSED
+    assert issue.is_fixable is False
+    assert (issue.translation_placeholders or {}).get("zone_ids") == "2"
 
 
 @pytest.mark.parametrize("ack_false", [True, False], ids=["unacknowledged", "raised"])

@@ -895,7 +895,7 @@ state before retrying.
 
 ### Zones still bypassed after a failed automatic arm
 
-- **Rollback failed:** if an un-bypass fails, the notification and the event
+- **Rollback failed:** if an un-bypass fails, a Repairs issue and the event
   (`still_bypassed_zone_ids`) list the zones that are still bypassed. Rollback runs once and
   is not retried. Check the panel, then un-bypass them with `elke27.zone_bypass` and
   `bypass: false`.

@@ -845,7 +845,6 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                     self.config_entry.entry_id: still_bypassed,
                 },
                 bypass=True,
-                notification_id_prefix="code_rejected_bypass",
             )
         raise rejected
 

@@ -21,10 +21,13 @@ from elke27_lib import AreaState, ZoneState
 from elke27_lib.errors import Elke27PanelError
 import pytest
 
+from custom_components.elke27.const import DOMAIN
 from custom_components.elke27.errors import code_rejected_error, command_error
+from custom_components.elke27.zone_notifications import zones_still_bypassed_issue_id
 from homeassistant.const import ATTR_CODE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from tests.conftest import (
     FakeClient,
     Setup,
@@ -345,6 +348,7 @@ async def test_custom_bypass_failed_rollback_notifies_still_bypassed_zones(
     rejected_code: int,
     hass: HomeAssistant,
     setup: Setup,
+    issue_registry: ir.IssueRegistry,
 ) -> None:
     client = ScriptedClient([None, None, REJECT, REJECT, None], rejected_code)
     await setup(client)
@@ -357,21 +361,20 @@ async def test_custom_bypass_failed_rollback_notifies_still_bypassed_zones(
         )
     _assert_code_rejected(err, code_and_key[1])
     await hass.async_block_till_done()
-    notifications = [
-        n
-        for key, n in hass.data["persistent_notification"].items()
-        if key.startswith("elke27_code_rejected_bypass_")
-    ]
-    assert len(notifications) == 1
-    message = notifications[0]["message"]
-    assert "zones 2." in message
-    assert CODE not in message
-    assert "Back Door" not in message
-    assert "Front Door" not in message
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    issue = issue_registry.async_get_issue(
+        DOMAIN, zones_still_bypassed_issue_id(entry_id)
+    )
+    assert issue is not None
+    assert (issue.translation_placeholders or {}).get("zone_ids") == "2"
+    assert CODE not in str(issue.translation_placeholders)
 
 
 async def test_custom_bypass_full_rollback_creates_no_notification(
-    rejected_code: int, hass: HomeAssistant, setup: Setup
+    rejected_code: int,
+    hass: HomeAssistant,
+    setup: Setup,
+    issue_registry: ir.IssueRegistry,
 ) -> None:
     client = ScriptedClient([None, None, REJECT], rejected_code)
     await setup(client)
@@ -383,9 +386,10 @@ async def test_custom_bypass_full_rollback_creates_no_notification(
             blocking=True,
         )
     await hass.async_block_till_done()
-    assert not any(
-        key.startswith("elke27_code_rejected_bypass_")
-        for key in hass.data.get("persistent_notification", {})
+    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
+    assert (
+        issue_registry.async_get_issue(DOMAIN, zones_still_bypassed_issue_id(entry_id))
+        is None
     )
 
 
