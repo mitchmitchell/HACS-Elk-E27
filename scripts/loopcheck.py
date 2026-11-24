@@ -1,6 +1,6 @@
-# https://github.com/mitchmitchell/elke27/blob/d3b51d0b9726da86f16b5293ec71cf71b9a9c107/devtools/loopcheck.py
-# vendored from elke27 d3b51d0; do not local-edit
-"""Report blocking calls in event-loop modules (ELK001-005, ELK101-110).
+# https://github.com/mitchmitchell/elke27/blob/d45070bbe75d128d649085a78eab5da10f5aae52/devtools/loopcheck.py
+# vendored from elke27 d45070b plus ELK111 (pending upstream, HACS #197); do not local-edit
+"""Report blocking calls in event-loop modules (ELK001-005, ELK101-111).
 
 A file is a *loop* file when its name ends in ``_loop.py``, when it is listed in
 ``loop_modules``, or when it sits under a directory in ``loop_paths``. A file is a
@@ -132,6 +132,8 @@ FUTURE_FACTORIES = {"concurrent.futures.Future", "asyncio.run_coroutine_threadsa
 THREAD_FACTORIES = {"threading.Thread"}
 WAIT_CALLS = {"concurrent.futures.wait", "asyncio.run"}
 TLS_KDF_CALLS = {"ssl.wrap_socket", "hashlib.pbkdf2_hmac", "hashlib.scrypt"}
+IMPORT_CALLS = {"importlib.import_module", "importlib.reload", "importlib.__import__"}
+METADATA_PREFIXES = ("importlib.metadata.", "importlib_metadata.", "pkg_resources.")
 
 NOQA_RE = re.compile(
     r"#\s*noqa(?P<colon>:\s*(?P<codes>[A-Za-z]+[0-9]+(?:[\s,]+[A-Za-z]+[0-9]+)*))?"
@@ -430,6 +432,10 @@ class _Checker:
             self.add(call, "ELK109", "Thread.join() blocks the event loop")
         elif qualified in TLS_KDF_CALLS or method == "do_handshake":
             self.add(call, "ELK110", f"blocking TLS or KDF call {qualified or method}")
+        elif qualified in IMPORT_CALLS or self.is_builtin(call.func, "__import__"):
+            self.add(call, "ELK111", f"dynamic import {qualified or '__import__'} reads files")
+        elif qualified.startswith(METADATA_PREFIXES):
+            self.add(call, "ELK111", f"package metadata call {qualified} reads files")
 
 
 def _nonblocking(call: ast.Call, kwargs: set[str], flag: str) -> bool:

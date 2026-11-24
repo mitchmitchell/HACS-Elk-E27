@@ -21,11 +21,17 @@ from __future__ import annotations
 
 import ast
 import configparser
+import importlib.util
 from pathlib import Path
 import re
+import sys
 import tokenize
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "custom_components" / "elke27"
@@ -437,3 +443,96 @@ def test_ci_runs_checks_only_through_the_gate_script() -> None:
         assert not (isinstance(pull_request, dict) and "branches" in pull_request), (
             f"{name} must run on every pull request so stacked PRs are checked"
         )
+
+
+def _load_commentcheck() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "commentcheck", ROOT / "scripts" / "commentcheck.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["commentcheck"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+commentcheck = _load_commentcheck()
+
+_PY_SAMPLE = """\
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# https://github.com/home-assistant/core
+import os  # noqa: F401 -- kept for the public re-export
+import re  # noqa: F401
+import sys  # noqa
+x: int = "a"  # type: ignore[assignment] -- fixture for the type checker
+y: int = "b"  # type: ignore
+if os:  # pragma: no cover -- only on a real panel
+    pass
+# guard-exception: sleep - waits on real timer - expires 2999-01-01 - approved by Mitch
+# Explain the next line.
+z = 1  # trailing explanation
+"""
+
+_TOML_SAMPLE = """\
+ignore = [
+    "ANN401", # typing.Any is allowed at the HA boundary
+]
+# reason for the per-file entry below
+"tests/test_x.py" = ["S101"]
+# a plain explanation
+key = "value # not a comment"
+"""
+
+
+def test_commentcheck_allows_only_the_listed_forms(tmp_path: Path) -> None:
+    """Explanations and reasonless suppressions are findings; the rest pass."""
+    sample = tmp_path / "sample.py"
+    sample.write_text(_PY_SAMPLE, encoding="utf-8")
+    lines = [f.line for f in commentcheck.check_file(sample, "sample.py")]
+    assert lines == [5, 6, 8, 12, 13]
+
+    config = tmp_path / "sample.toml"
+    config.write_text(_TOML_SAMPLE, encoding="utf-8")
+    lines = [f.line for f in commentcheck.check_file(config, "sample.toml")]
+    assert lines == [6]
+
+
+def test_commentcheck_ceiling_must_match_exactly(tmp_path: Path) -> None:
+    """A file above its ceiling fails with its lines; below it asks to lower it."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "a.py").write_text("x = 1  # why\n", encoding="utf-8")
+    (tmp_path / "pkg" / "b.py").write_text("y = 2\n", encoding="utf-8")
+    cfg = tmp_path / "commentcheck.toml"
+    cfg.write_text(
+        '[tool.elke27.commentcheck]\npaths = ["pkg"]\n'
+        '[tool.elke27.commentcheck.ceiling]\n"pkg/b.py" = 1\n',
+        encoding="utf-8",
+    )
+    config = commentcheck.Config.load(cfg)
+    report = commentcheck.compare(config, commentcheck.collect(config))
+    assert report == [
+        "pkg/a.py: 1 disallowed comments, ceiling 0",
+        "  pkg/a.py:1 # why",
+        "pkg/b.py: 0 disallowed comments; lower the ceiling to 0",
+    ]
+    assert commentcheck.main(["--config", str(cfg)]) == 1
+
+
+def test_commentcheck_scope_covers_code_tests_scripts_and_config() -> None:
+    """The repo config reads the integration, tests, scripts and config files."""
+    config = commentcheck.Config.load(ROOT / "commentcheck.toml")
+    scanned = {p.relative_to(ROOT).as_posix() for p in commentcheck.iter_files(config)}
+    for expected in (
+        "custom_components/elke27/diagnostics.py",
+        "tests/conftest.py",
+        "scripts/gate.sh",
+        "scripts/commentcheck.py",
+        ".github/workflows/lint.yml",
+        ".ruff.toml",
+        "pytest.ini",
+    ):
+        assert expected in scanned
+    assert "scripts/loopcheck.py" not in scanned
+    assert not any(p.startswith("tests/loopcheck/") for p in scanned)

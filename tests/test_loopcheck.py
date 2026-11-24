@@ -55,6 +55,7 @@ BAD = {
     "bad_elk108_loop.py": [("ELK002", 1), ("ELK108", 6)],
     "bad_elk109_loop.py": [("ELK109", 5)],
     "bad_elk110_loop.py": [("ELK110", 5)],
+    "bad_elk111_loop.py": [("ELK111", 6), ("ELK111", 10), ("ELK111", 14)],
     "bad_unsuffixed_imports_session.py": [("ELK001", 1)],
     "bad_noqa_no_reason_loop.py": [("ELK003", 5), ("ELK101", 5)],
     "bad_async_in_thread.py": [("ELK004", 1)],
@@ -78,7 +79,7 @@ def test_good_fixture_passes(name: str) -> None:
 def test_every_code_has_a_bad_fixture() -> None:
     covered = {code for findings in BAD.values() for code, _ in findings}
     expected = {f"ELK00{n}" for n in range(1, 5)} | {
-        f"ELK1{n:02d}" for n in range(1, 11)
+        f"ELK1{n:02d}" for n in range(1, 12)
     }
     assert expected <= covered
 

@@ -1,0 +1,90 @@
+[tool.elke27.commentcheck]
+paths = [
+    "custom_components",
+    "tests",
+    "scripts",
+    ".github",
+    ".ruff.toml",
+    "commentcheck.toml",
+    "loopcheck.toml",
+    "mypy.ini",
+    "pytest.ini",
+    "requirements.txt",
+    "requirements_test.txt",
+]
+exclude = ["scripts/loopcheck.py", "tests/loopcheck", "tests/snapshots"]
+
+[tool.elke27.commentcheck.ceiling]
+".github/dependabot.yml" = 1
+".github/workflows/lint.yml" = 2
+".github/workflows/tests.yml" = 2
+".github/workflows/validate.yml" = 3
+".ruff.toml" = 3
+"custom_components/elke27/__init__.py" = 14
+"custom_components/elke27/alarm_control_panel.py" = 17
+"custom_components/elke27/arming.py" = 5
+"custom_components/elke27/binary_sensor.py" = 7
+"custom_components/elke27/climate.py" = 4
+"custom_components/elke27/config_flow.py" = 10
+"custom_components/elke27/const.py" = 11
+"custom_components/elke27/coordinator.py" = 61
+"custom_components/elke27/cover.py" = 4
+"custom_components/elke27/diagnostics.py" = 13
+"custom_components/elke27/entity.py" = 5
+"custom_components/elke27/light.py" = 6
+"custom_components/elke27/lock.py" = 1
+"custom_components/elke27/migration.py" = 31
+"custom_components/elke27/panel_mac.py" = 1
+"custom_components/elke27/quality_scale.yaml" = 6
+"custom_components/elke27/reconnect.py" = 8
+"custom_components/elke27/repairs.py" = 6
+"custom_components/elke27/services.py" = 24
+"custom_components/elke27/temperature.py" = 4
+"pytest.ini" = 1
+"requirements_test.txt" = 2
+"scripts/develop" = 6
+"scripts/restore_entity_names.py" = 15
+"tests/conftest.py" = 9
+"tests/test_alarm_services.py" = 10
+"tests/test_area_devices.py" = 2
+"tests/test_arm_automatic_targets.py" = 2
+"tests/test_arm_night.py" = 1
+"tests/test_arm_outcome_unknown.py" = 1
+"tests/test_arming.py" = 3
+"tests/test_arming_status_reply_modes.py" = 1
+"tests/test_availability.py" = 2
+"tests/test_binary_sensor.py" = 8
+"tests/test_blocking_loop.py" = 1
+"tests/test_climate_services.py" = 1
+"tests/test_code_rejected_arming.py" = 10
+"tests/test_command_errors.py" = 2
+"tests/test_commands.py" = 13
+"tests/test_config_flow.py" = 4
+"tests/test_conftest_background_tasks.py" = 1
+"tests/test_coordinator.py" = 13
+"tests/test_coordinator_client.py" = 7
+"tests/test_coordinator_d3.py" = 6
+"tests/test_coordinator_d4.py" = 11
+"tests/test_coordinator_fallback_races.py" = 5
+"tests/test_cover.py" = 1
+"tests/test_diagnostics.py" = 3
+"tests/test_empty_snapshot.py" = 1
+"tests/test_entities.py" = 3
+"tests/test_entity_id_stability.py" = 1
+"tests/test_exception_translations.py" = 1
+"tests/test_init.py" = 8
+"tests/test_integration_id.py" = 6
+"tests/test_legacy_migration.py" = 83
+"tests/test_light_services.py" = 6
+"tests/test_manifest_pin.py" = 1
+"tests/test_no_private_access.py" = 1
+"tests/test_panel_mac.py" = 8
+"tests/test_reconnect.py" = 4
+"tests/test_repairs_fix_flow.py" = 1
+"tests/test_restore_entity_names.py" = 9
+"tests/test_review_guards.py" = 21
+"tests/test_services.py" = 49
+"tests/test_services_loaded.py" = 1
+"tests/test_temperature.py" = 2
+"tests/test_user_condition_errors.py" = 14
+"tests/test_zone_notifications.py" = 1

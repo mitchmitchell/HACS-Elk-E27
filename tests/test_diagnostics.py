@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import dataclasses
-from importlib.metadata import version as package_version
+from importlib.metadata import PackageNotFoundError, version as package_version
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from elke27_lib import ArmMode, CommandResult
 from elke27_lib.client import Result
@@ -190,3 +191,19 @@ async def test_diagnostics_entry_not_loaded(
     assert "linkkey" not in repr(result).lower()
     for runtime_key in ("client_ready", "snapshot", "reconnect_attempts"):
         assert runtime_key not in result
+
+
+async def test_diagnostics_elke27_version_none_when_not_installed(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A missing elke27 distribution reports elke27_version as None."""
+    mock_config_entry.add_to_hass(hass)
+    with patch(
+        "custom_components.elke27.diagnostics.package_version",
+        side_effect=PackageNotFoundError("elke27"),
+    ) as lookup:
+        result = await async_get_config_entry_diagnostics(hass, mock_config_entry)
+
+    lookup.assert_called_once_with("elke27")
+    assert result["elke27_version"] is None
