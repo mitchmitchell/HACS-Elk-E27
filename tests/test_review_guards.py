@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import configparser
+import datetime as dt
 from pathlib import Path
 import re
 import tokenize
@@ -436,3 +437,253 @@ def test_ci_runs_checks_only_through_the_gate_script() -> None:
         assert not (isinstance(pull_request, dict) and "branches" in pull_request), (
             f"{name} must run on every pull request so stacked PRs are checked"
         )
+
+
+GUARD_EXCEPTION = re.compile(
+    r"#\s*guard-exception:\s*(?P<guard>[a-z][a-z-]*)\s+-\s+(?P<reason>\S.*?\S)"
+    r"\s+-\s+expires\s+(?P<expires>\d{4}-\d{2}-\d{2})"
+    r"\s+-\s+approved by\s+(?P<approver>\S.*?)\s*$"
+)
+_GUARD_EXCEPTION_START = re.compile(r"#\s*guard-exception\b")
+_MIN_REASON_WORDS = 3
+
+
+def _comment_tokens(path: Path) -> list[tokenize.TokenInfo]:
+    with path.open("rb") as handle:
+        return [
+            tok
+            for tok in tokenize.tokenize(handle.readline)
+            if tok.type == tokenize.COMMENT
+        ]
+
+
+def _guard_exception_lines(path: Path, guard: str) -> set[int]:
+    """Return the lines that carry a valid, unexpired exception for ``guard``."""
+    today = dt.datetime.now(tz=dt.UTC).date()
+    lines: set[int] = set()
+    for tok in _comment_tokens(path):
+        match = GUARD_EXCEPTION.search(tok.string)
+        if (
+            match
+            and match["guard"] == guard
+            and len(match["reason"].split()) >= _MIN_REASON_WORDS
+            and dt.date.fromisoformat(match["expires"]) >= today
+        ):
+            lines.add(tok.start[0])
+    return lines
+
+
+def test_guard_exceptions_are_well_formed_and_unexpired() -> None:
+    """
+    A guard exception sits on the offending line in one exact form.
+
+    ``# guard-exception: <guard> - <reason, 3+ words> - expires YYYY-MM-DD -
+    approved by <named human>``. An expired or malformed one fails here, so an
+    exception cannot outlive its approval.
+    """
+    today = dt.datetime.now(tz=dt.UTC).date()
+    problems: list[str] = []
+    for path in [*_files(SOURCE), *_files(TESTS)]:
+        for tok in _comment_tokens(path):
+            if not _GUARD_EXCEPTION_START.search(tok.string):
+                continue
+            where = f"{_rel(path)}:{tok.start[0]}"
+            match = GUARD_EXCEPTION.search(tok.string)
+            if match is None or len(match["reason"].split()) < _MIN_REASON_WORDS:
+                problems.append(f"{where}: malformed guard exception")
+            elif dt.date.fromisoformat(match["expires"]) < today:
+                problems.append(f"{where}: guard exception expired {match['expires']}")
+    assert problems == []
+
+
+_PACKAGES = ("custom_components", "elke27_lib", "homeassistant")
+_DOTTED = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)+")
+_REFLECTION_ATTRS = {
+    "setattr",
+    "delattr",
+    "getattr",
+    "hasattr",
+    "object",
+    "__setattr__",
+    "__delattr__",
+    "__getattribute__",
+}
+_PATCH_CALLS = {"patch", "setattr", "delattr"}
+
+
+def _call_name(call: ast.Call) -> str | None:
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    return None
+
+
+def _str_arg(call: ast.Call, index: int) -> str | None:
+    if len(call.args) > index:
+        arg = call.args[index]
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            return arg.value
+    return None
+
+
+def _private_path(value: str | None) -> bool:
+    return (
+        value is not None
+        and _DOTTED.fullmatch(value) is not None
+        and any(_is_private(part) for part in value.split("."))
+    )
+
+
+def _private_reach_call(call: ast.Call) -> bool:
+    """Reflection on a private name that the older counters do not see."""
+    name = _call_name(call)
+    if (
+        isinstance(call.func, ast.Attribute)
+        and name in _REFLECTION_ATTRS
+        and _is_private(_str_arg(call, 1) or "")
+    ):
+        return True
+    return name in _PATCH_CALLS and _private_path(_str_arg(call, 0))
+
+
+def _imported_package_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            _PACKAGES
+        ):
+            names |= {alias.asname or alias.name for alias in node.names}
+        elif isinstance(node, ast.Import):
+            names |= {
+                (alias.asname or alias.name).split(".")[0]
+                for alias in node.names
+                if alias.name.startswith(_PACKAGES)
+            }
+    return names
+
+
+def _base_root(base: ast.expr) -> str | None:
+    while isinstance(base, ast.Attribute):
+        base = base.value
+    if isinstance(base, ast.Subscript):
+        return _base_root(base.value)
+    return base.id if isinstance(base, ast.Name) else None
+
+
+def _private_overrides(tree: ast.Module) -> list[int]:
+    """Private methods defined on a test subclass of a library or HA class."""
+    imported = _imported_package_names(tree)
+    return [
+        item.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        and any(_base_root(base) in imported for base in node.bases)
+        for item in node.body
+        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+        and _is_private(item.name)
+    ]
+
+
+def _private_reach_lines(path: Path) -> list[int]:
+    tree = _tree(path)
+    lines = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _private_reach_call(node)
+    ]
+    if path.is_relative_to(TESTS):
+        lines += _private_overrides(tree)
+    allowed = _guard_exception_lines(path, "private-access")
+    return [line for line in lines if line not in allowed]
+
+
+PRIVATE_REACH_CEILING: dict[str, int] = {
+    "tests/test_config_flow.py": 1,
+    "tests/test_coordinator_d3.py": 4,
+    "tests/test_panel_mac.py": 1,
+}
+
+
+def test_no_new_private_reach_through_strings_or_subclasses() -> None:
+    """
+    Private reach the import/getattr counter misses (repeat review finding).
+
+    Counts, per file: string patch targets with a private part
+    (``patch("pkg._x")``, ``monkeypatch.setattr("pkg._x", v)``), attribute
+    reflection on a private name (``monkeypatch.setattr(x, "_y", v)``,
+    ``patch.object(x, "_y")``, ``object.__setattr__(x, "_y", v)``) and private
+    methods defined on a test subclass of an elke27, integration or Home
+    Assistant class. ``PRIVATE_REACH_CEILING`` was frozen on 2026-11-24 and may
+    only shrink. A one-off goes on the line as a ``private-access`` guard
+    exception.
+    """
+    counts = {
+        _rel(path): len(lines)
+        for path in [*_files(SOURCE), *_test_modules()]
+        if (lines := _private_reach_lines(path))
+    }
+    assert counts == PRIVATE_REACH_CEILING, (
+        "Use a public seam instead of patching or overriding a private name. If you "
+        "removed one, lower PRIVATE_REACH_CEILING."
+    )
+
+
+def _src_private_imports(path: Path) -> list[str]:
+    allowed = _guard_exception_lines(path, "private-access")
+    return [
+        alias.name
+        for node in ast.walk(_tree(path))
+        if isinstance(node, ast.ImportFrom)
+        and (node.level or (node.module or "").startswith(_PACKAGES))
+        and node.lineno not in allowed
+        for alias in node.names
+        if _is_private(alias.name)
+    ]
+
+
+SRC_PRIVATE_IMPORT_CEILING: dict[str, list[str]] = {
+    "custom_components/elke27/__init__.py": [
+        "_area_id_from_unique_id",
+        "_async_handle_alarm_arm_automatic",
+        "_async_handle_zone_bypass",
+        "_numeric_id_from_unique_id",
+        "_service_mode_to_arm_mode",
+    ],
+    "custom_components/elke27/coordinator.py": ["_library_arm_mode"],
+}
+
+
+def test_src_modules_import_no_private_names() -> None:
+    """
+    One integration module never imports another module's ``_name``.
+
+    ruff's PLC2701 is preview-only, so this is the check. The existing imports
+    were frozen in ``SRC_PRIVATE_IMPORT_CEILING`` on 2026-11-24 and may only be
+    removed.
+    """
+    found = {
+        _rel(path): names
+        for path in _files(SOURCE)
+        if (names := sorted(_src_private_imports(path)))
+    }
+    assert found == SRC_PRIVATE_IMPORT_CEILING, (
+        "Do not import a private name from another module; make it public. If you "
+        "removed one, drop it from SRC_PRIVATE_IMPORT_CEILING."
+    )
+
+
+def test_guard_exception_exempts_only_its_own_line(tmp_path: Path) -> None:
+    """A valid exception on the line exempts it; an expired one does not."""
+    module = tmp_path / "test_sample.py"
+    module.write_text(
+        "patch.object(m, '_a')  # guard-exception: private-access - seam lands "
+        "in #999 - expires 2999-01-01 - approved by Mitch Mitchell\n"
+        "patch.object(m, '_b')  # guard-exception: private-access - seam lands "
+        "in #999 - expires 2000-01-01 - approved by Mitch Mitchell\n"
+        "patch.object(m, '_c')\n",
+        encoding="utf-8",
+    )
+    assert _guard_exception_lines(module, "private-access") == {1}
+    assert _guard_exception_lines(module, "sleep") == set()
+    assert _private_reach_lines(module) == [2, 3]
