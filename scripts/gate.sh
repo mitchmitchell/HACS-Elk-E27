@@ -106,7 +106,7 @@ step_diffcov() {
     fi
     "$PY" -m diff_cover.diff_cover_tool coverage.xml \
         --compare-branch="$GATE_BASE" --branch-coverage \
-        --include "$PACKAGE/*" --fail-under=100
+        --include "$PACKAGE/**" --include-untracked --fail-under=100
 }
 
 hass_version() {
