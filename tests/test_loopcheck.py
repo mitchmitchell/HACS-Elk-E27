@@ -239,3 +239,69 @@ def test_single_positional_blocking_true_is_still_blocking(tmp_path: Path) -> No
 def test_positional_timeout_makes_acquire_nonblocking(tmp_path: Path) -> None:
     body = "    lock.acquire(True, 1)\n    q.get(True, 1)\n    q.put(1, True, 1)\n"
     assert _lock_and_queue_findings(tmp_path, body) == []
+
+
+ELK111_SOURCES = {
+    "reload": (
+        "import importlib\nimport json\n\n\n"
+        "def f():\n    return importlib.reload(json)\n"
+    ),
+    "importlib-dunder-import": (
+        "import importlib\n\n\ndef f():\n    return importlib.__import__('json')\n"
+    ),
+    "from-import-import_module": (
+        "from importlib import import_module\n\n\n"
+        "def f():\n    return import_module('json')\n"
+    ),
+    "metadata-attribute-call": (
+        "import importlib.metadata\n\n\n"
+        "def f():\n    return importlib.metadata.version('elke27')\n"
+    ),
+    "importlib_metadata-backport": (
+        "import importlib_metadata\n\n\n"
+        "def f():\n    return importlib_metadata.version('elke27')\n"
+    ),
+    "pkg_resources": (
+        "import pkg_resources\n\n\n"
+        "def f():\n    return pkg_resources.get_distribution('elke27')\n"
+    ),
+    "import_module-in-async-def": (
+        "import importlib\n\n\n"
+        "async def f():\n    return importlib.import_module('json')\n"
+    ),
+    "metadata-in-async-def": (
+        "from importlib.metadata import version\n\n\n"
+        "async def f():\n    return version('elke27')\n"
+    ),
+    "getattr-import_module": (
+        "import importlib\n\n\n"
+        "def f():\n    return getattr(importlib, 'import_module')('json')\n"
+    ),
+    "builtins-dunder-import": (
+        "import builtins\n\n\ndef f():\n    return builtins.__import__('json')\n"
+    ),
+    "find_spec": (
+        "import importlib.util\n\n\n"
+        "def f():\n    return importlib.util.find_spec('json')\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("source", ELK111_SOURCES.values(), ids=ELK111_SOURCES.keys())
+def test_elk111_flags_each_matcher_entry(tmp_path: Path, source: str) -> None:
+    """Each ELK111 entry and call form is flagged once, on the call line (D55)."""
+    path = tmp_path / "probe_loop.py"
+    path.write_text(source, encoding="utf-8")
+    findings = loopcheck.check_source(source, path, loopcheck.Config(root=tmp_path))
+    assert [(f.code, f.line) for f in findings] == [("ELK111", source.count("\n"))]
+
+
+def test_elk111_ignores_metadata_exception_classes(tmp_path: Path) -> None:
+    """Building ``PackageNotFoundError`` reads no files: not ELK111 (D55 N2)."""
+    source = (
+        "import importlib.metadata\n\n\n"
+        "def f():\n    return importlib.metadata.PackageNotFoundError('elke27')\n"
+    )
+    path = tmp_path / "probe_loop.py"
+    path.write_text(source, encoding="utf-8")
+    assert loopcheck.check_source(source, path, loopcheck.Config(root=tmp_path)) == []

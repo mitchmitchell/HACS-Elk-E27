@@ -132,7 +132,13 @@ FUTURE_FACTORIES = {"concurrent.futures.Future", "asyncio.run_coroutine_threadsa
 THREAD_FACTORIES = {"threading.Thread"}
 WAIT_CALLS = {"concurrent.futures.wait", "asyncio.run"}
 TLS_KDF_CALLS = {"ssl.wrap_socket", "hashlib.pbkdf2_hmac", "hashlib.scrypt"}
-IMPORT_CALLS = {"importlib.import_module", "importlib.reload", "importlib.__import__"}
+IMPORT_CALLS = {
+    "importlib.import_module",
+    "importlib.reload",
+    "importlib.__import__",
+    "importlib.util.find_spec",
+    "builtins.__import__",
+}
 METADATA_PREFIXES = ("importlib.metadata.", "importlib_metadata.", "pkg_resources.")
 
 NOQA_RE = re.compile(
@@ -378,8 +384,21 @@ class _Checker:
                 continue
             self.check_call(node)
 
+    def callee(self, func: ast.AST) -> str:
+        """Qualify ``func``, resolving ``getattr(obj, "name")`` to ``obj.name``."""
+        if (
+            isinstance(func, ast.Call)
+            and self.is_builtin(func.func, "getattr")
+            and len(func.args) >= 2
+            and isinstance(func.args[1], ast.Constant)
+            and isinstance(func.args[1].value, str)
+        ):
+            owner = self.qualify(func.args[0])
+            return f"{owner}.{func.args[1].value}" if owner else ""
+        return self.qualify(func) or ""
+
     def check_call(self, call: ast.Call) -> None:
-        qualified = self.qualify(call.func) or ""
+        qualified = self.callee(call.func)
         kwargs = {k.arg for k in call.keywords if k.arg}
         base, method, base_node = self.receiver(call)
         if qualified in SLEEP:
@@ -434,8 +453,13 @@ class _Checker:
             self.add(call, "ELK110", f"blocking TLS or KDF call {qualified or method}")
         elif qualified in IMPORT_CALLS or self.is_builtin(call.func, "__import__"):
             self.add(call, "ELK111", f"dynamic import {qualified or '__import__'} reads files")
-        elif qualified.startswith(METADATA_PREFIXES):
+        elif qualified.startswith(METADATA_PREFIXES) and not _is_class_name(qualified):
             self.add(call, "ELK111", f"package metadata call {qualified} reads files")
+
+
+def _is_class_name(qualified: str) -> bool:
+    """Return True for a CapWords last segment, such as an exception class."""
+    return qualified.rpartition(".")[2][:1].isupper()
 
 
 def _nonblocking(call: ast.Call, kwargs: set[str], flag: str) -> bool:
