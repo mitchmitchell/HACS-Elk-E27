@@ -399,6 +399,7 @@ GATE_WORKFLOWS = {
     "validate.yml": "scripts/gate.sh validate",
 }
 _DIRECT_CHECK = re.compile(r"\b(ruff|mypy|pytest|loopcheck|hassfest)\b")
+ALLOWED_ACTIONS = ("actions/checkout@", "actions/setup-python@", "hacs/action@")
 
 
 def _workflow(name: str) -> dict[object, object]:
@@ -416,6 +417,30 @@ def _run_lines(workflow: dict[object, object]) -> list[str]:
         for step in job.get("steps", [])
         if "run" in step
     ]
+
+
+def _uses(workflow: dict[object, object]) -> list[str]:
+    jobs = workflow.get("jobs")
+    assert isinstance(jobs, dict)
+    return [
+        str(step["uses"])
+        for job in jobs.values()
+        for step in job.get("steps", [])
+        if "uses" in step
+    ]
+
+
+def test_ci_uses_only_allowlisted_actions() -> None:
+    """A workflow action can't run a check behind the gate's back (Tester F1)."""
+    for name in GATE_WORKFLOWS:
+        others = [
+            uses
+            for uses in _uses(_workflow(name))
+            if not uses.startswith(ALLOWED_ACTIONS)
+        ]
+        assert others == [], (
+            f"{name} uses {others}; run the check as a scripts/gate.sh step"
+        )
 
 
 def test_ci_runs_checks_only_through_the_gate_script() -> None:

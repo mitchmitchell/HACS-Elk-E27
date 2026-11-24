@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+if [ -n "${GATE_CACHE:-}" ]; then
+    GATE_CACHE="$("${PYTHON:-python3}" -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$GATE_CACHE")"
+fi
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 PY="${PYTHON:-python3}"
