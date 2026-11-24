@@ -2,9 +2,10 @@
 Guards against tests that synchronise with sleeps or the wall clock.
 
 Review kept finding tests that yield with ``asyncio.sleep(0)``, sleep a real
-interval, loop on yields until something happens, or assert on
-``time.monotonic()`` / ``loop.time()``. Those pass on a quiet machine and flake
-under load. Synchronise with ``await hass.async_block_till_done()``, an
+interval, loop on yields until something happens, or read
+``time.monotonic()`` / ``loop.time()`` (directly in an assert or through a
+variable). Those pass on a quiet machine and flake under load. Synchronise
+with ``await hass.async_block_till_done()``, an
 ``asyncio.Event`` or ``Future`` the fake sets, or ``freezer`` plus
 ``async_fire_time_changed`` instead.
 
@@ -28,6 +29,7 @@ EXCLUDED = {TESTS / "loopcheck"}
 SLEEP_CALLS = {"asyncio.sleep", "time.sleep"}
 CLOCK_CALLS = {"time.monotonic", "time.time", "time.perf_counter", "time.monotonic_ns"}
 LOOP_GETTERS = {"asyncio.get_running_loop", "asyncio.get_event_loop"}
+ALIASED_CALLS = SLEEP_CALLS | CLOCK_CALLS
 
 SLEEP_CEILING: dict[str, int] = {
     "tests/conftest.py": 3,
@@ -63,7 +65,7 @@ def _dotted(node: ast.AST) -> str | None:
 
 
 class _Scanner:
-    """Resolve import aliases and module-level sleep aliases in one module."""
+    """Resolve import aliases and sleep/clock aliases (any scope) in one module."""
 
     def __init__(self, tree: ast.Module) -> None:
         self.tree = tree
@@ -77,11 +79,14 @@ class _Scanner:
                     self.aliases[alias.asname or alias.name] = (
                         f"{node.module}.{alias.name}"
                     )
-        for node in tree.body:
-            if isinstance(node, ast.Assign) and len(node.targets) == 1:
-                target = node.targets[0]
-                if isinstance(target, ast.Name) and self.qualify(node.value):
-                    self.aliases[target.id] = self.qualify(node.value) or ""
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and (qualified := self.qualify(node.value)) in ALIASED_CALLS
+            ):
+                self.aliases[node.targets[0].id] = qualified
 
     def qualify(self, node: ast.AST) -> str | None:
         dotted = _dotted(node)
@@ -117,14 +122,12 @@ class _Scanner:
             if isinstance(node, ast.Call) and self.qualify(node.func) == "time.sleep"
         ]
 
-    def clock_asserts(self) -> list[int]:
+    def clock_reads(self) -> list[int]:
         return [
-            call.lineno
+            node.lineno
             for node in ast.walk(self.tree)
-            if isinstance(node, ast.Assert)
-            for call in ast.walk(node.test)
-            if isinstance(call, ast.Call)
-            and (self.qualify(call.func) in CLOCK_CALLS or self.is_loop_time(call))
+            if isinstance(node, ast.Call)
+            and (self.qualify(node.func) in CLOCK_CALLS or self.is_loop_time(node))
         ]
 
     def zero_sleeps(self) -> list[int]:
@@ -133,10 +136,19 @@ class _Scanner:
             for node in ast.walk(self.tree)
             if isinstance(node, ast.Call)
             and self.qualify(node.func) == "asyncio.sleep"
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-            and node.args[0].value == 0
+            and _is_zero(_sleep_delay(node))
         ]
+
+
+def _sleep_delay(call: ast.Call) -> ast.expr | None:
+    """Return the ``delay`` argument of ``asyncio.sleep(delay, result=None)``."""
+    if call.args:
+        return call.args[0]
+    return next((k.value for k in call.keywords if k.arg == "delay"), None)
+
+
+def _is_zero(node: ast.expr | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value == 0
 
 
 def _scanner(path: Path) -> _Scanner:
@@ -148,7 +160,7 @@ def _test_sync_lines(path: Path) -> list[int]:
     lines = [
         *scanner.awaited_sleeps(),
         *scanner.blocking_sleeps(),
-        *scanner.clock_asserts(),
+        *scanner.clock_reads(),
     ]
     return sorted(lines)
 
@@ -163,7 +175,7 @@ def _sync_counts() -> dict[str, list[int]]:
 
 
 def test_tests_do_not_synchronise_with_sleeps_or_the_clock() -> None:
-    """Awaited sleeps, time.sleep and clock asserts in tests only shrink."""
+    """Awaited sleeps, time.sleep and clock reads in tests only shrink."""
     found = _sync_counts()
     problems = []
     for rel in sorted(set(found) | set(SLEEP_CEILING)):
@@ -194,14 +206,14 @@ def test_integration_never_yields_with_sleep_zero() -> None:
 
 
 def test_scanner_counts_each_form(tmp_path: Path) -> None:
-    """Awaited sleeps, aliases, time.sleep and clock asserts each count once."""
+    """Awaited sleeps, aliases, time.sleep and every clock read count once."""
     module = tmp_path / "test_sample.py"
     module.write_text(
         "import asyncio\n"
         "import time\n"
         "from asyncio import sleep as nap\n"
         "_REAL = asyncio.sleep\n"
-        "async def f(loop):\n"
+        "async def f(loop, hass):\n"
         "    await asyncio.sleep(0)\n"
         "    await nap(1)\n"
         "    for _ in range(5):\n"
@@ -210,9 +222,31 @@ def test_scanner_counts_each_form(tmp_path: Path) -> None:
         "    assert time.monotonic() > 0\n"
         "    assert loop.time() > 0\n"
         "    assert asyncio.get_running_loop().time() > 0\n"
-        "    task = asyncio.create_task(asyncio.sleep(10))\n",
+        "    task = asyncio.create_task(asyncio.sleep(10))\n"
+        "    t0 = time.perf_counter()\n"
+        "    now = hass.loop.time()\n"
+        "    s = asyncio.sleep\n"
+        "    await s(delay=0)\n"
+        "    clock = time.monotonic_ns\n"
+        "    elapsed = clock() - t0\n",
         encoding="utf-8",
     )
-    expected = [6, 7, 9, 10, 11, 12, 13]
+    expected = [6, 7, 9, 10, 11, 12, 13, 15, 16, 18, 20]
     if _test_sync_lines(module) != expected:
         pytest.fail(f"{_test_sync_lines(module)} != {expected}")
+
+
+def test_zero_sleep_matches_positional_and_keyword_delay(tmp_path: Path) -> None:
+    """``asyncio.sleep(0)`` and ``asyncio.sleep(delay=0)`` are both caught."""
+    module = tmp_path / "sample.py"
+    module.write_text(
+        "import asyncio\n"
+        "async def f():\n"
+        "    await asyncio.sleep(0)\n"
+        "    await asyncio.sleep(delay=0)\n"
+        "    await asyncio.sleep(0.5)\n"
+        "    await asyncio.sleep(delay=1, result=None)\n",
+        encoding="utf-8",
+    )
+    if _scanner(module).zero_sleeps() != [3, 4]:
+        pytest.fail(f"{_scanner(module).zero_sleeps()} != [3, 4]")
