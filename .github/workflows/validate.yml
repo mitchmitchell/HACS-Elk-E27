@@ -8,21 +8,28 @@ on:
     branches:
       - main
   pull_request:
-    branches:
-      - main
 
 permissions: {}
 
 jobs:
-  hassfest: # https://developers.home-assistant.io/blog/2020/04/16/hassfest
+  hassfest:
     name: Hassfest validation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Run hassfest validation
-        uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361 # master
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: python3 -m pip install uv==0.13.5
+
+      - name: Gate (validate)
+        run: scripts/gate.sh validate
 
   hacs: # https://github.com/hacs/action
     name: HACS validation
@@ -32,5 +39,4 @@ jobs:
         uses: hacs/action@d556e736723344f83838d08488c983a15381059a # 22.5.0
         with:
           category: integration
-          # Remove this 'ignore' key when you have added brand images for your integration to https://github.com/home-assistant/brands
           ignore: brands

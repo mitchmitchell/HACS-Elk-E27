@@ -15,7 +15,7 @@ Pull requests are the best way to propose changes to the codebase.
 
 1. Fork the repo and create your branch from `main`.
 2. If you've changed something, update the documentation.
-3. Make sure your code lints (using `scripts/lint`).
+3. Make sure `scripts/gate.sh` passes. It is the same gate CI runs.
 4. Test you contribution.
 5. Issue that pull request!
 
@@ -44,7 +44,9 @@ People *love* thorough bug reports. I'm not even kidding.
 
 ## Use a Consistent Coding Style
 
-Use [Ruff](https://docs.astral.sh/ruff/) to make sure the code follows the style. Run `scripts/lint` (it runs `ruff format`, `ruff check --fix`, `mypy custom_components/elke27`, and `scripts/loopcheck.py` on that package) before opening a pull request.
+Use [Ruff](https://docs.astral.sh/ruff/) to make sure the code follows the style. `scripts/lint` applies `ruff format` and `ruff check --fix` for you.
+
+Before every push, run `scripts/gate.sh`. It is the only gate: the Lint, Tests and Validate workflows call the same script (`scripts/gate.sh lint`, `scripts/gate.sh tests`, `scripts/gate.sh validate`), so a local pass means CI runs the same commands. With no arguments it runs, in order: the elke27 pin check, `ruff check`, `ruff format --check`, `mypy`, loopcheck, the raw pass-through check, pytest (runtime, unraisable and thread warnings are errors) and hassfest. Run `scripts/gate.sh --help` for single steps. The hassfest step clones Home Assistant core at the pinned `homeassistant` version into `.gate-cache/` the first time (set `GATE_CACHE` to move it) and needs `git` and [uv](https://docs.astral.sh/uv/).
 
 ## Test your code modification
 
