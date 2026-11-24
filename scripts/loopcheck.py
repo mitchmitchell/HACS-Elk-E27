@@ -140,6 +140,12 @@ IMPORT_CALLS = {
     "builtins.__import__",
 }
 METADATA_PREFIXES = ("importlib.metadata.", "importlib_metadata.", "pkg_resources.")
+METADATA_NO_IO = {
+    "importlib.metadata.PackageNotFoundError",
+    "importlib_metadata.PackageNotFoundError",
+    "pkg_resources.DistributionNotFound",
+    "pkg_resources.VersionConflict",
+}
 
 NOQA_RE = re.compile(
     r"#\s*noqa(?P<colon>:\s*(?P<codes>[A-Za-z]+[0-9]+(?:[\s,]+[A-Za-z]+[0-9]+)*))?"
@@ -453,13 +459,8 @@ class _Checker:
             self.add(call, "ELK110", f"blocking TLS or KDF call {qualified or method}")
         elif qualified in IMPORT_CALLS or self.is_builtin(call.func, "__import__"):
             self.add(call, "ELK111", f"dynamic import {qualified or '__import__'} reads files")
-        elif qualified.startswith(METADATA_PREFIXES) and not _is_class_name(qualified):
+        elif qualified.startswith(METADATA_PREFIXES) and qualified not in METADATA_NO_IO:
             self.add(call, "ELK111", f"package metadata call {qualified} reads files")
-
-
-def _is_class_name(qualified: str) -> bool:
-    """Return True for a CapWords last segment, such as an exception class."""
-    return qualified.rpartition(".")[2][:1].isupper()
 
 
 def _nonblocking(call: ast.Call, kwargs: set[str], flag: str) -> bool:

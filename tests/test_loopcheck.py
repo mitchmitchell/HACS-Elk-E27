@@ -280,6 +280,12 @@ ELK111_SOURCES = {
     "builtins-dunder-import": (
         "import builtins\n\n\ndef f():\n    return builtins.__import__('json')\n"
     ),
+    "pkg_resources-WorkingSet": (
+        "import pkg_resources\n\n\ndef f():\n    return pkg_resources.WorkingSet()\n"
+    ),
+    "pkg_resources-Environment": (
+        "import pkg_resources\n\n\ndef f():\n    return pkg_resources.Environment()\n"
+    ),
     "find_spec": (
         "import importlib.util\n\n\n"
         "def f():\n    return importlib.util.find_spec('json')\n"
@@ -296,12 +302,21 @@ def test_elk111_flags_each_matcher_entry(tmp_path: Path, source: str) -> None:
     assert [(f.code, f.line) for f in findings] == [("ELK111", source.count("\n"))]
 
 
-def test_elk111_ignores_metadata_exception_classes(tmp_path: Path) -> None:
-    """Building ``PackageNotFoundError`` reads no files: not ELK111 (D55 N2)."""
-    source = (
-        "import importlib.metadata\n\n\n"
-        "def f():\n    return importlib.metadata.PackageNotFoundError('elke27')\n"
-    )
+@pytest.mark.parametrize(
+    "exception",
+    [
+        "importlib.metadata.PackageNotFoundError",
+        "importlib_metadata.PackageNotFoundError",
+        "pkg_resources.DistributionNotFound",
+        "pkg_resources.VersionConflict",
+    ],
+)
+def test_elk111_ignores_metadata_exception_classes(
+    tmp_path: Path, exception: str
+) -> None:
+    """Building a metadata exception reads no files: not ELK111 (D55 N2)."""
+    module = exception.rpartition(".")[0]
+    source = f"import {module}\n\n\ndef f():\n    return {exception}('elke27')\n"
     path = tmp_path / "probe_loop.py"
     path.write_text(source, encoding="utf-8")
     assert loopcheck.check_source(source, path, loopcheck.Config(root=tmp_path)) == []
