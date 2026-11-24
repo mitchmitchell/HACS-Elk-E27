@@ -15,7 +15,7 @@ STRICT_WARNINGS=(
     -W error::pytest.PytestUnraisableExceptionWarning
     -W error::pytest.PytestUnhandledThreadExceptionWarning
 )
-ORDER=(deps ruff format mypy loopcheck passthrough pytest hassfest)
+ORDER=(deps ruff format mypy loopcheck comments passthrough pytest hassfest)
 
 usage() {
     cat <<USAGE
@@ -29,11 +29,12 @@ With no arguments every step runs, in this order:
   format       ruff format --check .
   mypy         mypy $PACKAGE
   loopcheck    scripts/loopcheck.py on $PACKAGE
+  comments     scripts/commentcheck.py: no comment beyond the frozen ceiling
   passthrough  the integration never uses the elke27 raw pass-through
   pytest       pytest with runtime, unraisable and thread warnings as errors
   hassfest     Home Assistant hassfest at the pinned homeassistant version
 
-Groups: lint (deps ruff format mypy loopcheck passthrough),
+Groups: lint (deps ruff format mypy loopcheck comments passthrough),
         tests (deps pytest), validate (hassfest), all.
 Every selected step runs; the exit status is 1 if any failed.
 USAGE
@@ -74,6 +75,10 @@ step_mypy() {
 
 step_loopcheck() {
     "$PY" scripts/loopcheck.py --config loopcheck.toml "$PACKAGE"
+}
+
+step_comments() {
+    "$PY" scripts/commentcheck.py --config commentcheck.toml
 }
 
 step_passthrough() {
@@ -133,10 +138,10 @@ step_hassfest() {
 expand() {
     case "$1" in
         all) echo "${ORDER[@]}" ;;
-        lint) echo "deps ruff format mypy loopcheck passthrough" ;;
+        lint) echo "deps ruff format mypy loopcheck comments passthrough" ;;
         tests) echo "deps pytest" ;;
         validate) echo "hassfest" ;;
-        deps | ruff | format | mypy | loopcheck | passthrough | pytest | hassfest) echo "$1" ;;
+        deps | ruff | format | mypy | loopcheck | comments | passthrough | pytest | hassfest) echo "$1" ;;
         *) return 1 ;;
     esac
 }

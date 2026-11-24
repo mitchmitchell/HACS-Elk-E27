@@ -76,7 +76,7 @@ async def async_get_config_entry_diagnostics(
         "manufacturer_number": MANUFACTURER_NUMBER,
         "link_keys_present": CONF_LINK_KEYS_JSON in entry.data,
         "integration_version": str(integration.version),
-        "elke27_version": await hass.async_add_executor_job(_elke27_version),
+        "elke27_version": await _async_elke27_version(hass),
         "legacy_registry_migration": migration_diagnostics(entry),
     }
     if entry.state is not ConfigEntryState.LOADED:
@@ -119,10 +119,14 @@ async def async_get_config_entry_diagnostics(
     return async_redact_data(data, TO_REDACT)
 
 
-def _elke27_version() -> str | None:
-    """Return the installed elke27 library version."""
+async def _async_elke27_version(hass: HomeAssistant) -> str | None:
+    """
+    Return the installed elke27 library version, read in the executor.
+
+    The metadata lookup reads files, so it never runs on the event loop.
+    """
     try:
-        return package_version("elke27")
+        return await hass.async_add_executor_job(package_version, "elke27")
     except PackageNotFoundError:
         return None
 
