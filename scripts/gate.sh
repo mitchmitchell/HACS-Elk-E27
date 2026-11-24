@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+if [ -n "${GATE_CACHE:-}" ]; then
+    GATE_CACHE="$(realpath -m -- "$GATE_CACHE")"
+fi
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 PY="${PYTHON:-python3}"
@@ -12,7 +15,8 @@ STRICT_WARNINGS=(
     -W error::pytest.PytestUnraisableExceptionWarning
     -W error::pytest.PytestUnhandledThreadExceptionWarning
 )
-ORDER=(deps ruff format mypy loopcheck passthrough pytest hassfest)
+GATE_BASE="${GATE_BASE:-origin/main}"
+ORDER=(deps ruff format mypy loopcheck passthrough pytest diffcov hassfest)
 
 usage() {
     cat <<USAGE
@@ -27,11 +31,14 @@ With no arguments every step runs, in this order:
   mypy         mypy $PACKAGE
   loopcheck    scripts/loopcheck.py on $PACKAGE
   passthrough  the integration never uses the elke27 raw pass-through
-  pytest       pytest with runtime, unraisable and thread warnings as errors
+  pytest       pytest with runtime, unraisable and thread warnings as errors,
+               recording branch coverage of $PACKAGE in coverage.xml
+  diffcov      every changed $PACKAGE line and branch since the merge base
+               with \$GATE_BASE (default origin/main) is covered (100%)
   hassfest     Home Assistant hassfest at the pinned homeassistant version
 
 Groups: lint (ruff format mypy loopcheck passthrough),
-        tests (deps pytest), validate (hassfest), all.
+        tests (deps pytest diffcov), validate (hassfest), all.
 Every selected step runs; the exit status is 1 if any failed.
 USAGE
 }
@@ -82,7 +89,24 @@ step_passthrough() {
 }
 
 step_pytest() {
-    "$PY" -m pytest -q -p no:cacheprovider "${STRICT_WARNINGS[@]}" tests
+    rm -f coverage.xml
+    "$PY" -m pytest -q -p no:cacheprovider "${STRICT_WARNINGS[@]}" \
+        --cov="$PACKAGE" --cov-branch --cov-report=xml:coverage.xml --cov-report= \
+        tests
+}
+
+step_diffcov() {
+    if [ ! -f coverage.xml ]; then
+        echo "coverage.xml is missing; the pytest step must run first"
+        return 1
+    fi
+    if ! git rev-parse --verify --quiet "$GATE_BASE^{commit}" >/dev/null; then
+        echo "compare base $GATE_BASE not found; fetch it (git fetch origin main)"
+        return 1
+    fi
+    "$PY" -m diff_cover.diff_cover_tool coverage.xml \
+        --compare-branch="$GATE_BASE" --branch-coverage \
+        --include "$PACKAGE/*" --fail-under=100
 }
 
 hass_version() {
@@ -131,9 +155,9 @@ expand() {
     case "$1" in
         all) echo "${ORDER[@]}" ;;
         lint) echo "ruff format mypy loopcheck passthrough" ;;
-        tests) echo "deps pytest" ;;
+        tests) echo "deps pytest diffcov" ;;
         validate) echo "hassfest" ;;
-        deps | ruff | format | mypy | loopcheck | passthrough | pytest | hassfest) echo "$1" ;;
+        deps | ruff | format | mypy | loopcheck | passthrough | pytest | diffcov | hassfest) echo "$1" ;;
         *) return 1 ;;
     esac
 }
