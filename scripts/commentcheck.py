@@ -10,8 +10,7 @@ the explanation. A comment is allowed only when it is one of:
 - nothing but an upstream URL;
 - a suppression with codes and a reason of at least three words after ``--``:
   ``noqa: CODE``, ``ruff: noqa: CODE``, ``type: ignore[code]``,
-  ``pyright: ignore[code]``, ``pragma: no cover``, ``pragma: no branch`` or a
-  ``fmt:`` directive;
+  ``pyright: ignore[code]``, ``pragma: no cover`` or ``pragma: no branch``;
 - in a config file, the reason for a rule code: a comment on the line that names
   the code, or a full-line comment directly above that line or above a
   per-file-ignores entry;
@@ -53,8 +52,7 @@ CODE_LIST = r"[A-Za-z]+[0-9]+(?:[\s,]+[A-Za-z]+[0-9]+)*"
 SUPPRESSION = re.compile(
     rf"^(?:(?:ruff:\s*)?noqa(?P<noqa>:\s*{CODE_LIST})?"
     r"|(?:type|pyright):\s*ignore(?P<codes>\[[^\]]+\])?"
-    r"|pragma:\s*no\s+(?:cover|branch)"
-    r"|fmt:\s*(?:off|on|skip))",
+    r"|pragma:\s*no\s+(?:cover|branch))",
     re.IGNORECASE,
 )
 RULE_CODE = re.compile(r"[\"'][A-Z]{1,4}[0-9]{2,4}[\"']")

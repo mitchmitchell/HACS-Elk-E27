@@ -513,22 +513,15 @@ def test_commentcheck_allows_only_the_listed_forms(tmp_path: Path) -> None:
         "x = 1  # noqa -- blanket without any codes",
         "x = 1  # type: ignore -- no error code given",
         "x = 1  # fmt: skip",
+        "x = 1  # fmt: skip -- keeps the aligned table",
+        "# fmt: off -- keeps the aligned table",
     ],
 )
 def test_commentcheck_rejects_suppression_edges(tmp_path: Path, line: str) -> None:
-    """A reason never rescues a codeless noqa or ignore; fmt: needs one (D55)."""
+    """A reason never rescues a codeless noqa or ignore, or any fmt: directive."""
     sample = tmp_path / "sample.py"
     sample.write_text(f"{line}\n", encoding="utf-8")
     assert [f.line for f in commentcheck.check_file(sample, "sample.py")] == [1]
-
-
-def test_commentcheck_accepts_fmt_with_reason(tmp_path: Path) -> None:
-    """``fmt:`` is a suppression, so with a reason it passes (D55)."""
-    sample = tmp_path / "sample.py"
-    sample.write_text(
-        "x = 1  # fmt: skip -- keeps the aligned table\n", encoding="utf-8"
-    )
-    assert commentcheck.check_file(sample, "sample.py") == []
 
 
 def test_commentcheck_shebang_only_on_first_line(tmp_path: Path) -> None:
