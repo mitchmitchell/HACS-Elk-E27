@@ -421,7 +421,8 @@ def _run_lines(workflow: dict[object, object]) -> list[str]:
 
 def test_ci_runs_checks_only_through_the_gate_script() -> None:
     """CI and the local gate are one script, so they cannot drift (repeat CI miss)."""
-    assert sorted(p.name for p in WORKFLOWS.glob("*.yml")) == sorted(GATE_WORKFLOWS)
+    workflows = [p.name for p in WORKFLOWS.iterdir() if p.suffix in {".yml", ".yaml"}]
+    assert sorted(workflows) == sorted(GATE_WORKFLOWS)
     for name, command in GATE_WORKFLOWS.items():
         workflow = _workflow(name)
         runs = _run_lines(workflow)
