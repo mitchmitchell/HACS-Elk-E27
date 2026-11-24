@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+if [ -n "${GATE_CACHE:-}" ]; then
+    GATE_CACHE="$("${PYTHON:-python3}" -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$GATE_CACHE")"
+fi
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 PY="${PYTHON:-python3}"
@@ -31,7 +34,7 @@ With no arguments every step runs, in this order:
   pytest       pytest with runtime, unraisable and thread warnings as errors
   hassfest     Home Assistant hassfest at the pinned homeassistant version
 
-Groups: lint (ruff format mypy loopcheck comments passthrough),
+Groups: lint (deps ruff format mypy loopcheck comments passthrough),
         tests (deps pytest), validate (hassfest), all.
 Every selected step runs; the exit status is 1 if any failed.
 USAGE
@@ -135,7 +138,7 @@ step_hassfest() {
 expand() {
     case "$1" in
         all) echo "${ORDER[@]}" ;;
-        lint) echo "ruff format mypy loopcheck comments passthrough" ;;
+        lint) echo "deps ruff format mypy loopcheck comments passthrough" ;;
         tests) echo "deps pytest" ;;
         validate) echo "hassfest" ;;
         deps | ruff | format | mypy | loopcheck | comments | passthrough | pytest | hassfest) echo "$1" ;;

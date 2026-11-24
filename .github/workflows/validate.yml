@@ -31,7 +31,7 @@ jobs:
       - name: Gate (validate)
         run: scripts/gate.sh validate
 
-  hacs: # https://github.com/hacs/action
+  hacs:
     name: HACS validation
     runs-on: ubuntu-latest
     steps:
