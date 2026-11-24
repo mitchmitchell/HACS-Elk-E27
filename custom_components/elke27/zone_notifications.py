@@ -37,17 +37,6 @@ def zones_still_unbypassed_issue_id(config_entry_id: str) -> str:
     return f"{ISSUE_ZONES_STILL_UNBYPASSED}_{config_entry_id}"
 
 
-@callback
-def async_clear_zones_still_changed_issues(
-    hass: HomeAssistant, config_entry_id: str
-) -> None:
-    """Remove still-changed zone Repairs issues for one config entry."""
-    ir.async_delete_issue(hass, DOMAIN, zones_still_bypassed_issue_id(config_entry_id))
-    ir.async_delete_issue(
-        hass, DOMAIN, zones_still_unbypassed_issue_id(config_entry_id)
-    )
-
-
 def notify_still_changed_zones_by_panel(
     hass: HomeAssistant,
     *,

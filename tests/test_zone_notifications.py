@@ -135,3 +135,40 @@ def test_notify_still_changed_merges_zone_ids_on_repeat_failure(
         bypass=True,
         zone_ids="1, 2",
     )
+
+
+def test_still_bypassed_and_still_unbypassed_issues_stay_separate(
+    hass: HomeAssistant,
+    issue_registry: IssueRegistry,
+) -> None:
+    entry_id = "entry-1"
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: (
+                ZoneState(zone_id=1, name="", area_id=1, open=False, bypassed=True),
+            )
+        },
+        bypass=True,
+    )
+    notify_still_changed_zones_by_panel(
+        hass,
+        zones_by_config_entry={
+            entry_id: (
+                ZoneState(zone_id=2, name="", area_id=1, open=False, bypassed=False),
+            )
+        },
+        bypass=False,
+    )
+    bypassed = issue_registry.async_get_issue(
+        DOMAIN, f"{ISSUE_ZONES_STILL_BYPASSED}_{entry_id}"
+    )
+    unbypassed = issue_registry.async_get_issue(
+        DOMAIN, f"{ISSUE_ZONES_STILL_UNBYPASSED}_{entry_id}"
+    )
+    assert bypassed is not None
+    assert unbypassed is not None
+    assert bypassed.translation_key == ISSUE_ZONES_STILL_BYPASSED
+    assert bypassed.translation_placeholders == {"zone_ids": "1"}
+    assert unbypassed.translation_key == ISSUE_ZONES_STILL_UNBYPASSED
+    assert unbypassed.translation_placeholders == {"zone_ids": "2"}
