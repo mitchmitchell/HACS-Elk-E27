@@ -393,6 +393,7 @@ def test_getattr_literal_names_do_not_grow() -> None:
 
 
 WORKFLOWS = ROOT / ".github" / "workflows"
+WORKFLOW_SUFFIXES = {".yml", ".yaml"}
 GATE_WORKFLOWS = {
     "lint.yml": "scripts/gate.sh lint",
     "tests.yml": "scripts/gate.sh tests",
@@ -402,63 +403,151 @@ _DIRECT_CHECK = re.compile(r"\b(ruff|mypy|pytest|loopcheck|hassfest)\b")
 ALLOWED_ACTIONS = ("actions/checkout@", "actions/setup-python@", "hacs/action@")
 
 
-def _workflow(name: str) -> dict[object, object]:
-    loaded = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
-    assert isinstance(loaded, dict)
-    return loaded
+def _load_workflow(path: Path) -> object:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def _run_lines(workflow: dict[object, object]) -> list[str]:
+def _job_problems(where: str, job: object) -> tuple[list[str], list[str]]:
+    """Return ``(problems, run lines)`` for one workflow job."""
+    if not isinstance(job, dict):
+        return [f"{where}: job is not a mapping"], []
+    problems: list[str] = []
+    if "uses" in job:
+        problems.append(f"{where}: job-level uses {job['uses']} (reusable workflow)")
+    steps = job.get("steps")
+    if not isinstance(steps, list) or not steps:
+        return [*problems, f"{where}: job has no steps"], []
+    runs: list[str] = []
+    for index, step in enumerate(steps):
+        at = f"{where}: step {index}"
+        if not isinstance(step, dict):
+            problems.append(f"{at} is not a mapping")
+            continue
+        uses = step.get("uses")
+        if uses is not None and not str(uses).startswith(ALLOWED_ACTIONS):
+            problems.append(f"{at} uses {uses}, which is not allowlisted")
+        if "run" in step:
+            run = str(step["run"])
+            runs.append(run)
+            if _DIRECT_CHECK.search(run) and "gate.sh" not in run:
+                problems.append(f"{at} runs a check outside scripts/gate.sh")
+    return problems, runs
+
+
+def _workflow_problems(name: str, workflow: object, command: str | None) -> list[str]:
+    """Every per-job problem in one workflow, plus its gate-entry checks."""
+    if not isinstance(workflow, dict):
+        return [f"{name}: not a mapping"]
     jobs = workflow.get("jobs")
-    assert isinstance(jobs, dict)
-    return [
-        str(step["run"])
-        for job in jobs.values()
-        for step in job.get("steps", [])
-        if "run" in step
+    if not isinstance(jobs, dict) or not jobs:
+        return [f"{name}: no jobs"]
+    problems: list[str] = []
+    runs: list[str] = []
+    for job_id, job in jobs.items():
+        job_problems, job_runs = _job_problems(f"{name}:{job_id}", job)
+        problems += job_problems
+        runs += job_runs
+    if command is not None and command not in runs:
+        problems.append(f"{name}: must run `{command}`")
+    triggers = workflow.get("on", workflow.get(True))
+    pull_request = triggers.get("pull_request") if isinstance(triggers, dict) else None
+    if command is not None and not (
+        isinstance(triggers, dict) and "pull_request" in triggers
+    ):
+        problems.append(f"{name}: must run on pull_request")
+    if isinstance(pull_request, dict) and "branches" in pull_request:
+        problems.append(f"{name}: pull_request must not filter on branches")
+    return problems
+
+
+def _workflow_dir_problems(directory: Path) -> list[str]:
+    """Check every *.yml / *.yaml workflow in ``directory``, job by job."""
+    names = sorted(p.name for p in directory.iterdir() if p.suffix in WORKFLOW_SUFFIXES)
+    problems = [
+        f"{n}: workflow has no gate entry" for n in names if n not in GATE_WORKFLOWS
     ]
-
-
-def _uses(workflow: dict[object, object]) -> list[str]:
-    jobs = workflow.get("jobs")
-    assert isinstance(jobs, dict)
-    return [
-        str(step["uses"])
-        for job in jobs.values()
-        for step in job.get("steps", [])
-        if "uses" in step
+    problems += [
+        f"{n}: gate workflow is missing" for n in GATE_WORKFLOWS if n not in names
     ]
-
-
-def test_ci_uses_only_allowlisted_actions() -> None:
-    """A workflow action can't run a check behind the gate's back (Tester F1)."""
-    for name in GATE_WORKFLOWS:
-        others = [
-            uses
-            for uses in _uses(_workflow(name))
-            if not uses.startswith(ALLOWED_ACTIONS)
-        ]
-        assert others == [], (
-            f"{name} uses {others}; run the check as a scripts/gate.sh step"
+    for name in names:
+        problems += _workflow_problems(
+            name, _load_workflow(directory / name), GATE_WORKFLOWS.get(name)
         )
+    return problems
 
 
 def test_ci_runs_checks_only_through_the_gate_script() -> None:
-    """CI and the local gate are one script, so they cannot drift (repeat CI miss)."""
-    workflows = [p.name for p in WORKFLOWS.iterdir() if p.suffix in {".yml", ".yaml"}]
-    assert sorted(workflows) == sorted(GATE_WORKFLOWS)
-    for name, command in GATE_WORKFLOWS.items():
-        workflow = _workflow(name)
-        runs = _run_lines(workflow)
-        assert command in runs, f"{name} must run `{command}`"
-        direct = [r for r in runs if _DIRECT_CHECK.search(r) and "gate.sh" not in r]
-        assert direct == [], (
-            f"{name} runs a check outside scripts/gate.sh; add it as a gate step"
+    """
+    CI and the local gate are one script, so they cannot drift (repeat CI miss).
+
+    Checked per job in every workflow file: no job-level ``uses`` (a reusable
+    workflow would run checks the gate never sees), at least one step, every
+    step action allowlisted (Tester F1), no check run outside ``gate.sh``, each
+    gate workflow runs its gate group, and ``pull_request`` has no branch filter.
+    """
+    assert _workflow_dir_problems(WORKFLOWS) == []
+
+
+_REUSABLE_JOB = {
+    "uses": "org/repo/.github/workflows/lint.yml@v1",
+    "permissions": {},
+}
+
+
+def test_reusable_workflow_job_fails_the_guard(tmp_path: Path) -> None:
+    """A job-level reusable workflow fails in a gate workflow and in any other."""
+    for path in WORKFLOWS.iterdir():
+        if path.suffix in WORKFLOW_SUFFIXES:
+            (tmp_path / path.name).write_text(
+                path.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+    assert _workflow_dir_problems(tmp_path) == []
+
+    lint = _load_workflow(tmp_path / "lint.yml")
+    assert isinstance(lint, dict)
+    lint["jobs"]["shadow"] = _REUSABLE_JOB
+    assert _workflow_problems("lint.yml", lint, GATE_WORKFLOWS["lint.yml"]) == [
+        (
+            "lint.yml:shadow: job-level uses "
+            "org/repo/.github/workflows/lint.yml@v1 (reusable workflow)"
+        ),
+        "lint.yml:shadow: job has no steps",
+    ]
+
+    for name in ("extra.yml", "extra.yaml"):
+        (tmp_path / name).write_text(
+            yaml.safe_dump(
+                {"on": {"pull_request": None}, "jobs": {"x": _REUSABLE_JOB}}
+            ),
+            encoding="utf-8",
         )
-        triggers = workflow.get("on", workflow.get(True))
-        assert isinstance(triggers, dict)
-        assert "pull_request" in triggers
-        pull_request = triggers["pull_request"]
-        assert not (isinstance(pull_request, dict) and "branches" in pull_request), (
-            f"{name} must run on every pull request so stacked PRs are checked"
+    problems = _workflow_dir_problems(tmp_path)
+    for name in ("extra.yml", "extra.yaml"):
+        assert f"{name}: workflow has no gate entry" in problems
+        assert (
+            f"{name}:x: job-level uses org/repo/.github/workflows/lint.yml@v1 "
+            "(reusable workflow)"
+        ) in problems
+        assert f"{name}:x: job has no steps" in problems
+
+
+def test_unlisted_step_action_fails_the_guard() -> None:
+    """A step action outside the allowlist fails (Tester F1)."""
+    workflow = {
+        "on": {"pull_request": None},
+        "jobs": {
+            "lint": {
+                "steps": [
+                    {"uses": "actions/checkout@abc"},
+                    {"uses": "home-assistant/actions/hassfest@abc"},
+                    {"run": "scripts/gate.sh lint"},
+                ]
+            }
+        },
+    }
+    assert _workflow_problems("lint.yml", workflow, "scripts/gate.sh lint") == [
+        (
+            "lint.yml:lint: step 1 uses home-assistant/actions/hassfest@abc, "
+            "which is not allowlisted"
         )
+    ]

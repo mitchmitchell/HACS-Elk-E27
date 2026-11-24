@@ -33,7 +33,7 @@ With no arguments every step runs, in this order:
   pytest       pytest with runtime, unraisable and thread warnings as errors
   hassfest     Home Assistant hassfest at the pinned homeassistant version
 
-Groups: lint (ruff format mypy loopcheck passthrough),
+Groups: lint (deps ruff format mypy loopcheck passthrough),
         tests (deps pytest), validate (hassfest), all.
 Every selected step runs; the exit status is 1 if any failed.
 USAGE
@@ -133,7 +133,7 @@ step_hassfest() {
 expand() {
     case "$1" in
         all) echo "${ORDER[@]}" ;;
-        lint) echo "ruff format mypy loopcheck passthrough" ;;
+        lint) echo "deps ruff format mypy loopcheck passthrough" ;;
         tests) echo "deps pytest" ;;
         validate) echo "hassfest" ;;
         deps | ruff | format | mypy | loopcheck | passthrough | pytest | hassfest) echo "$1" ;;
