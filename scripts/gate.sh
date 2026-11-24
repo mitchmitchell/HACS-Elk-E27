@@ -122,7 +122,8 @@ step_hassfest() {
         echo "could not prepare hassfest for homeassistant $ver"
         return 1
     }
-    (cd "$core" && "$venv/bin/python" -m script.hassfest --action validate \
+    (cd "$core" && PATH="$venv/bin:$PATH" VIRTUAL_ENV="$venv" \
+        "$venv/bin/python" -m script.hassfest --action validate \
         --integration-path "$REPO_ROOT/$PACKAGE")
 }
 
