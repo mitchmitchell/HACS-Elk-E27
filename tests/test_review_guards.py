@@ -561,19 +561,18 @@ def test_unlisted_step_action_fails_the_guard() -> None:
     ]
 
 
-def _load_commentcheck() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "commentcheck", ROOT / "scripts" / "commentcheck.py"
-    )
+def _load_script(name: str) -> ModuleType:
+    """Load ``scripts/<name>.py`` by path (scripts/ is not a package)."""
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules["commentcheck"] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-commentcheck = _load_commentcheck()
+commentcheck = _load_script("commentcheck")
 
 _PY_SAMPLE = """\
 #!/usr/bin/env python3
@@ -842,111 +841,53 @@ def test_guard_exceptions_are_well_formed_and_unexpired() -> None:
     assert problems == []
 
 
+privacc = _load_script("privacc")
+privacc_probes = _load_script("privacc_probes")
+
 _PACKAGES = ("custom_components", "elke27_lib", "homeassistant")
-_DOTTED = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)+")
-_REFLECTION_ATTRS = {
-    "setattr",
-    "delattr",
-    "getattr",
-    "hasattr",
-    "object",
-    "__setattr__",
-    "__delattr__",
-    "__getattribute__",
-}
-_PATCH_CALLS = {"patch", "setattr", "delattr"}
+_SOURCE_PACKAGES = ("elke27_lib",)
 
 
-def _call_name(call: ast.Call) -> str | None:
-    if isinstance(call.func, ast.Name):
-        return call.func.id
-    if isinstance(call.func, ast.Attribute):
-        return call.func.attr
-    return None
+def test_vendored_privacc_counts_every_shared_probe() -> None:
+    """The vendored counter passes elke27's shared probe set unchanged."""
+    assert set(_PACKAGES) == set(privacc_probes.PACKAGES)
+    wrong = {
+        probe.source: got
+        for probe in privacc_probes.PROBES
+        if (got := tuple(h.form for h in privacc.reach(probe.module(), _PACKAGES)))
+        != probe.forms
+    }
+    assert wrong == {}
 
 
-def _str_arg(call: ast.Call, index: int) -> str | None:
-    if len(call.args) > index:
-        arg = call.args[index]
-        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            return arg.value
-    return None
+def _private_reach_lines(path: Path, *, in_tests: bool | None = None) -> list[int]:
+    """
+    Lines with private reach, minus valid ``private-access`` guard exceptions.
 
-
-def _private_path(value: str | None) -> bool:
-    return (
-        value is not None
-        and _DOTTED.fullmatch(value) is not None
-        and any(_is_private(part) for part in value.split("."))
-    )
-
-
-def _private_reach_call(call: ast.Call) -> bool:
-    """Reflection on a private name that the older counters do not see."""
-    name = _call_name(call)
-    if (
-        isinstance(call.func, ast.Attribute)
-        and name in _REFLECTION_ATTRS
-        and _is_private(_str_arg(call, 1) or "")
-    ):
-        return True
-    return name in _PATCH_CALLS and _private_path(_str_arg(call, 0))
-
-
-def _imported_package_names(tree: ast.Module) -> set[str]:
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
-            _PACKAGES
-        ):
-            names |= {alias.asname or alias.name for alias in node.names}
-        elif isinstance(node, ast.Import):
-            names |= {
-                (alias.asname or alias.name).split(".")[0]
-                for alias in node.names
-                if alias.name.startswith(_PACKAGES)
-            }
-    return names
-
-
-def _base_root(base: ast.expr) -> str | None:
-    while isinstance(base, ast.Attribute):
-        base = base.value
-    if isinstance(base, ast.Subscript):
-        return _base_root(base.value)
-    return base.id if isinstance(base, ast.Name) else None
-
-
-def _private_overrides(tree: ast.Module) -> list[int]:
-    """Private methods defined on a test subclass of a library or HA class."""
-    imported = _imported_package_names(tree)
-    return [
-        item.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ClassDef)
-        and any(_base_root(base) in imported for base in node.bases)
-        for item in node.body
-        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
-        and _is_private(item.name)
-    ]
-
-
-def _private_reach_lines(path: Path) -> list[int]:
-    tree = _tree(path)
-    lines = [
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and _private_reach_call(node)
-    ]
-    if path.is_relative_to(TESTS):
-        lines += _private_overrides(tree)
+    Tests watch elke27, the integration and Home Assistant. Integration modules
+    watch only elke27: their ``_attr_*`` class attributes and own helpers on HA
+    entity and flow subclasses are the HA pattern, not private reach.
+    ``in_tests`` defaults to whether ``path`` is under ``tests/``.
+    """
+    if in_tests is None:
+        in_tests = path.is_relative_to(TESTS)
+    packages = _PACKAGES if in_tests else _SOURCE_PACKAGES
     allowed = _guard_exception_lines(path, "private-access")
-    return [line for line in lines if line not in allowed]
+    return [
+        hit.line
+        for hit in privacc.reach_in_file(path, packages)
+        if hit.line not in allowed
+    ]
 
 
 PRIVATE_REACH_CEILING: dict[str, int] = {
+    "tests/test_area_devices.py": 1,
+    "tests/test_arming.py": 1,
     "tests/test_config_flow.py": 1,
+    "tests/test_coordinator_client.py": 1,
     "tests/test_coordinator_d3.py": 4,
+    "tests/test_entities.py": 1,
+    "tests/test_init.py": 1,
     "tests/test_panel_mac.py": 1,
 }
 
@@ -955,14 +896,18 @@ def test_no_new_private_reach_through_strings_or_subclasses() -> None:
     """
     Private reach the import/getattr counter misses (repeat review finding).
 
-    Counts, per file: string patch targets with a private part
-    (``patch("pkg._x")``, ``monkeypatch.setattr("pkg._x", v)``), attribute
-    reflection on a private name (``monkeypatch.setattr(x, "_y", v)``,
-    ``patch.object(x, "_y")``, ``object.__setattr__(x, "_y", v)``) and private
-    methods defined on a test subclass of an elke27, integration or Home
-    Assistant class. ``PRIVATE_REACH_CEILING`` was frozen on 2026-11-24 and may
-    only shrink. A one-off goes on the line as a ``private-access`` guard
-    exception.
+    Counted per file by ``scripts/privacc.py`` (vendored from elke27) with the
+    elke27, integration and Home Assistant packages watched: string patch targets
+    with a private part (``patch``, ``patch.dict``, keyword ``target=``), private
+    attribute names given as strings (``patch.object``, ``patch.multiple``,
+    ``monkeypatch.setattr``, reflection, positional or keyword), ``__dict__`` and
+    ``vars()`` keys, imports of private names or modules, and private methods or
+    class attributes on a subclass of a watched class (integration modules watch
+    only elke27, see ``_private_reach_lines``). Private imports from
+    elke27 or the integration in tests are also counted by
+    ``LEGACY_PRIVATE_IMPORTS``. ``PRIVATE_REACH_CEILING`` was frozen on
+    2026-11-25 and may only shrink. A one-off goes on the line as a
+    ``private-access`` guard exception.
     """
     counts = {
         _rel(path): len(lines)
@@ -976,16 +921,19 @@ def test_no_new_private_reach_through_strings_or_subclasses() -> None:
 
 
 def _src_private_imports(path: Path) -> list[str]:
+    """Private names and modules imported relatively or from a watched package."""
     allowed = _guard_exception_lines(path, "private-access")
-    return [
-        alias.name
-        for node in ast.walk(_tree(path))
-        if isinstance(node, ast.ImportFrom)
-        and (node.level or (node.module or "").startswith(_PACKAGES))
-        and node.lineno not in allowed
-        for alias in node.names
-        if _is_private(alias.name)
-    ]
+    found: list[str] = []
+    for node in ast.walk(_tree(path)):
+        if not isinstance(node, ast.ImportFrom) or node.lineno in allowed:
+            continue
+        module = node.module or ""
+        if not (node.level or module.startswith(_PACKAGES)):
+            continue
+        if any(_is_private(part) for part in module.split(".")):
+            found.append("." * node.level + module)
+        found += [alias.name for alias in node.names if _is_private(alias.name)]
+    return found
 
 
 SRC_PRIVATE_IMPORT_CEILING: dict[str, list[str]] = {
@@ -1017,6 +965,32 @@ def test_src_modules_import_no_private_names() -> None:
         "Do not import a private name from another module; make it public. If you "
         "removed one, drop it from SRC_PRIVATE_IMPORT_CEILING."
     )
+
+
+def test_src_private_imports_count_private_modules(tmp_path: Path) -> None:
+    """A private module counts as well as a private name (B2, #194)."""
+    module = tmp_path / "mod.py"
+    module.write_text(
+        "from elke27_lib._session import Session\n"
+        "from ._util import helper\n"
+        "from .const import _secret, PUBLIC\n"
+        "from homeassistant.core import HomeAssistant\n",
+        encoding="utf-8",
+    )
+    assert _src_private_imports(module) == ["elke27_lib._session", "._util", "_secret"]
+
+
+def test_private_reach_watches_ha_only_in_tests(tmp_path: Path) -> None:
+    """An HA subclass's private members count in tests, not in integration code."""
+    snippet = (
+        "from homeassistant.components.light import LightEntity\n"
+        "class Light(LightEntity):\n"
+        "    _attr_has_entity_name = True\n"
+    )
+    module = tmp_path / "light.py"
+    module.write_text(snippet, encoding="utf-8")
+    assert _private_reach_lines(module) == []
+    assert _private_reach_lines(module, in_tests=True) == [2]
 
 
 def test_guard_exception_exempts_only_its_own_line(tmp_path: Path) -> None:
