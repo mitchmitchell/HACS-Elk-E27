@@ -172,3 +172,33 @@ def test_still_bypassed_and_still_unbypassed_issues_stay_separate(
     assert bypassed.translation_placeholders == {"zone_ids": "1"}
     assert unbypassed.translation_key == ISSUE_ZONES_STILL_UNBYPASSED
     assert unbypassed.translation_placeholders == {"zone_ids": "2"}
+
+
+def test_zone_is_listed_only_in_latest_still_changed_issue(
+    hass: HomeAssistant,
+    issue_registry: IssueRegistry,
+) -> None:
+    entry_id = "entry-1"
+
+    def notify(zone_ids: tuple[int, ...], bypass: bool) -> None:
+        notify_still_changed_zones_by_panel(
+            hass,
+            zones_by_config_entry={
+                entry_id: tuple(
+                    ZoneState(
+                        zone_id=zone_id, name="", area_id=1, open=False, bypassed=bypass
+                    )
+                    for zone_id in zone_ids
+                )
+            },
+            bypass=bypass,
+        )
+
+    notify((5, 7), True)
+    notify((5,), False)
+    _expect_issue(issue_registry, entry_id=entry_id, bypass=True, zone_ids="7")
+    _expect_issue(issue_registry, entry_id=entry_id, bypass=False, zone_ids="5")
+    notify((5,), True)
+    _expect_issue(issue_registry, entry_id=entry_id, bypass=True, zone_ids="5, 7")
+    unbypassed_issue_id = zones_still_unbypassed_issue_id(entry_id)
+    assert issue_registry.async_get_issue(DOMAIN, unbypassed_issue_id) is None
