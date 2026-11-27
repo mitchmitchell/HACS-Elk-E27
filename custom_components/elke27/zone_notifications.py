@@ -54,6 +54,9 @@ def notify_still_changed_zones_by_panel(
             issue_id = zones_still_unbypassed_issue_id(config_entry_id)
             translation_key = ISSUE_ZONES_STILL_UNBYPASSED
         new_ids = {zone.zone_id for zone in zones}
+        async_clear_restored_zones_from_still_changed_issue(
+            hass, config_entry_id, sorted(new_ids), service_bypass=bypass
+        )
         existing = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
         if existing is not None:
             placeholders = existing.translation_placeholders or {}
