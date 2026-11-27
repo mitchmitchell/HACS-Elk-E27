@@ -818,6 +818,21 @@ def _guard_exception_lines(path: Path, guard: str) -> set[int]:
     return lines
 
 
+def _guard_exception_problems(path: Path, today: dt.date) -> list[tuple[int, str]]:
+    """Return ``(line, problem)`` for each malformed or expired guard exception."""
+    problems: list[tuple[int, str]] = []
+    for tok in _comment_tokens(path):
+        if not _GUARD_EXCEPTION_START.search(tok.string):
+            continue
+        match = GUARD_EXCEPTION.search(tok.string)
+        if match is None or len(match["reason"].split()) < _MIN_REASON_WORDS:
+            problems.append((tok.start[0], "malformed guard exception"))
+        elif dt.date.fromisoformat(match["expires"]) < today:
+            expired = f"guard exception expired {match['expires']}"
+            problems.append((tok.start[0], expired))
+    return problems
+
+
 def test_guard_exceptions_are_well_formed_and_unexpired() -> None:
     """
     A guard exception sits on the offending line in one exact form.
@@ -827,18 +842,31 @@ def test_guard_exceptions_are_well_formed_and_unexpired() -> None:
     exception cannot outlive its approval.
     """
     today = dt.datetime.now(tz=dt.UTC).date()
-    problems: list[str] = []
-    for path in [*_files(SOURCE), *_files(TESTS)]:
-        for tok in _comment_tokens(path):
-            if not _GUARD_EXCEPTION_START.search(tok.string):
-                continue
-            where = f"{_rel(path)}:{tok.start[0]}"
-            match = GUARD_EXCEPTION.search(tok.string)
-            if match is None or len(match["reason"].split()) < _MIN_REASON_WORDS:
-                problems.append(f"{where}: malformed guard exception")
-            elif dt.date.fromisoformat(match["expires"]) < today:
-                problems.append(f"{where}: guard exception expired {match['expires']}")
+    problems = [
+        f"{_rel(path)}:{line}: {problem}"
+        for path in [*_files(SOURCE), *_files(TESTS)]
+        for line, problem in _guard_exception_problems(path, today)
+    ]
     assert problems == []
+
+
+def test_guard_exception_check_flags_malformed_and_expired(tmp_path: Path) -> None:
+    """The form check reports an expired, a short-reason and a bare exception."""
+    head = "  # guard-exception: private-access - "
+    tail = " - approved by Mitch Mitchell\n"
+    module = tmp_path / "test_sample.py"
+    module.write_text(
+        f"a = 1{head}seam lands in #999 - expires 2999-01-01{tail}"
+        f"b = 2{head}seam lands in #999 - expires 2000-01-01{tail}"
+        f"c = 3{head}too short - expires 2999-01-01{tail}"
+        "d = 4  # guard-exception: private-access\n",
+        encoding="utf-8",
+    )
+    assert _guard_exception_problems(module, dt.date(2026, 11, 26)) == [
+        (2, "guard exception expired 2000-01-01"),
+        (3, "malformed guard exception"),
+        (4, "malformed guard exception"),
+    ]
 
 
 privacc = _load_script("privacc")
@@ -867,7 +895,9 @@ def _private_reach_lines(path: Path, *, in_tests: bool | None = None) -> list[in
     Tests watch elke27, the integration and Home Assistant. Integration modules
     watch only elke27: their ``_attr_*`` class attributes and own helpers on HA
     entity and flow subclasses are the HA pattern, not private reach.
-    ``in_tests`` defaults to whether ``path`` is under ``tests/``.
+    ``in_tests`` defaults to whether ``path`` is under ``tests/``. A subclass
+    override is reported on its ``class`` line, so an exception there covers
+    every private member of that class.
     """
     if in_tests is None:
         in_tests = path.is_relative_to(TESTS)
