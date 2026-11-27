@@ -12,7 +12,13 @@ paths = [
     "requirements.txt",
     "requirements_test.txt",
 ]
-exclude = ["scripts/loopcheck.py", "tests/loopcheck", "tests/snapshots"]
+exclude = [
+    "scripts/loopcheck.py",
+    "scripts/privacc.py",
+    "scripts/privacc_probes.py",
+    "tests/loopcheck",
+    "tests/snapshots",
+]
 
 [tool.elke27.commentcheck.ceiling]
 ".github/dependabot.yml" = 1
