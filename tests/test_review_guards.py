@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import configparser
+import datetime as dt
 import importlib.util
 from pathlib import Path
 import re
@@ -560,19 +561,18 @@ def test_unlisted_step_action_fails_the_guard() -> None:
     ]
 
 
-def _load_commentcheck() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "commentcheck", ROOT / "scripts" / "commentcheck.py"
-    )
+def _load_script(name: str) -> ModuleType:
+    """Load ``scripts/<name>.py`` by path (scripts/ is not a package)."""
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules["commentcheck"] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-commentcheck = _load_commentcheck()
+commentcheck = _load_script("commentcheck")
 
 _PY_SAMPLE = """\
 #!/usr/bin/env python3
@@ -782,3 +782,258 @@ def test_missing_gate_workflow_fails_the_guard(tmp_path: Path) -> None:
     problems = _workflow_dir_problems(tmp_path)
     assert "tests.yml: gate workflow is missing" in problems
     assert "validate.yml: gate workflow is missing" in problems
+
+
+GUARD_EXCEPTION = re.compile(
+    r"#\s*guard-exception:\s*(?P<guard>[a-z][a-z-]*)\s+-\s+(?P<reason>\S.*?\S)"
+    r"\s+-\s+expires\s+(?P<expires>\d{4}-\d{2}-\d{2})"
+    r"\s+-\s+approved by\s+(?P<approver>\S.*?)\s*$"
+)
+_GUARD_EXCEPTION_START = re.compile(r"#\s*guard-exception\b")
+_MIN_REASON_WORDS = 3
+
+
+def _comment_tokens(path: Path) -> list[tokenize.TokenInfo]:
+    with path.open("rb") as handle:
+        return [
+            tok
+            for tok in tokenize.tokenize(handle.readline)
+            if tok.type == tokenize.COMMENT
+        ]
+
+
+def _guard_exception_lines(path: Path, guard: str) -> set[int]:
+    """Return the lines that carry a valid, unexpired exception for ``guard``."""
+    today = dt.datetime.now(tz=dt.UTC).date()
+    lines: set[int] = set()
+    for tok in _comment_tokens(path):
+        match = GUARD_EXCEPTION.search(tok.string)
+        if (
+            match
+            and match["guard"] == guard
+            and len(match["reason"].split()) >= _MIN_REASON_WORDS
+            and dt.date.fromisoformat(match["expires"]) >= today
+        ):
+            lines.add(tok.start[0])
+    return lines
+
+
+def _guard_exception_problems(path: Path, today: dt.date) -> list[tuple[int, str]]:
+    """Return ``(line, problem)`` for each malformed or expired guard exception."""
+    problems: list[tuple[int, str]] = []
+    for tok in _comment_tokens(path):
+        if not _GUARD_EXCEPTION_START.search(tok.string):
+            continue
+        match = GUARD_EXCEPTION.search(tok.string)
+        if match is None or len(match["reason"].split()) < _MIN_REASON_WORDS:
+            problems.append((tok.start[0], "malformed guard exception"))
+        elif dt.date.fromisoformat(match["expires"]) < today:
+            expired = f"guard exception expired {match['expires']}"
+            problems.append((tok.start[0], expired))
+    return problems
+
+
+def test_guard_exceptions_are_well_formed_and_unexpired() -> None:
+    """
+    A guard exception sits on the offending line in one exact form.
+
+    ``# guard-exception: <guard> - <reason, 3+ words> - expires YYYY-MM-DD -
+    approved by <named human>``. An expired or malformed one fails here, so an
+    exception cannot outlive its approval.
+    """
+    today = dt.datetime.now(tz=dt.UTC).date()
+    problems = [
+        f"{_rel(path)}:{line}: {problem}"
+        for path in [*_files(SOURCE), *_files(TESTS)]
+        for line, problem in _guard_exception_problems(path, today)
+    ]
+    assert problems == []
+
+
+def test_guard_exception_check_flags_malformed_and_expired(tmp_path: Path) -> None:
+    """The form check reports an expired, a short-reason and a bare exception."""
+    head = "  # guard-exception: private-access - "
+    tail = " - approved by Mitch Mitchell\n"
+    module = tmp_path / "test_sample.py"
+    module.write_text(
+        f"a = 1{head}seam lands in #999 - expires 2999-01-01{tail}"
+        f"b = 2{head}seam lands in #999 - expires 2000-01-01{tail}"
+        f"c = 3{head}too short - expires 2999-01-01{tail}"
+        "d = 4  # guard-exception: private-access\n",
+        encoding="utf-8",
+    )
+    assert _guard_exception_problems(module, dt.date(2026, 11, 26)) == [
+        (2, "guard exception expired 2000-01-01"),
+        (3, "malformed guard exception"),
+        (4, "malformed guard exception"),
+    ]
+
+
+privacc = _load_script("privacc")
+privacc_probes = _load_script("privacc_probes")
+
+_PACKAGES = ("custom_components", "elke27_lib", "homeassistant")
+_SOURCE_PACKAGES = ("elke27_lib",)
+
+
+def test_vendored_privacc_counts_every_shared_probe() -> None:
+    """The vendored counter passes elke27's shared probe set unchanged."""
+    assert set(_PACKAGES) == set(privacc_probes.PACKAGES)
+    wrong = {
+        probe.source: got
+        for probe in privacc_probes.PROBES
+        if (got := tuple(h.form for h in privacc.reach(probe.module(), _PACKAGES)))
+        != probe.forms
+    }
+    assert wrong == {}
+
+
+def _private_reach_lines(path: Path, *, in_tests: bool | None = None) -> list[int]:
+    """
+    Lines with private reach, minus valid ``private-access`` guard exceptions.
+
+    Tests watch elke27, the integration and Home Assistant. Integration modules
+    watch only elke27: their ``_attr_*`` class attributes and own helpers on HA
+    entity and flow subclasses are the HA pattern, not private reach.
+    ``in_tests`` defaults to whether ``path`` is under ``tests/``. A subclass
+    override is reported on its ``class`` line, so an exception there covers
+    every private member of that class.
+    """
+    if in_tests is None:
+        in_tests = path.is_relative_to(TESTS)
+    packages = _PACKAGES if in_tests else _SOURCE_PACKAGES
+    allowed = _guard_exception_lines(path, "private-access")
+    return [
+        hit.line
+        for hit in privacc.reach_in_file(path, packages)
+        if hit.line not in allowed
+    ]
+
+
+PRIVATE_REACH_CEILING: dict[str, int] = {
+    "tests/test_area_devices.py": 1,
+    "tests/test_arming.py": 1,
+    "tests/test_config_flow.py": 1,
+    "tests/test_coordinator_client.py": 1,
+    "tests/test_coordinator_d3.py": 4,
+    "tests/test_entities.py": 1,
+    "tests/test_init.py": 1,
+    "tests/test_panel_mac.py": 1,
+}
+
+
+def test_no_new_private_reach_through_strings_or_subclasses() -> None:
+    """
+    Private reach the import/getattr counter misses (repeat review finding).
+
+    Counted per file by ``scripts/privacc.py`` (vendored from elke27) with the
+    elke27, integration and Home Assistant packages watched: string patch targets
+    with a private part (``patch``, ``patch.dict``, keyword ``target=``), private
+    attribute names given as strings (``patch.object``, ``patch.multiple``,
+    ``monkeypatch.setattr``, reflection, positional or keyword), ``__dict__`` and
+    ``vars()`` keys, imports of private names or modules, and private methods or
+    class attributes on a subclass of a watched class (integration modules watch
+    only elke27, see ``_private_reach_lines``). Private imports from
+    elke27 or the integration in tests are also counted by
+    ``LEGACY_PRIVATE_IMPORTS``. ``PRIVATE_REACH_CEILING`` was frozen on
+    2026-11-25 and may only shrink. A one-off goes on the line as a
+    ``private-access`` guard exception.
+    """
+    counts = {
+        _rel(path): len(lines)
+        for path in [*_files(SOURCE), *_test_modules()]
+        if (lines := _private_reach_lines(path))
+    }
+    assert counts == PRIVATE_REACH_CEILING, (
+        "Use a public seam instead of patching or overriding a private name. If you "
+        "removed one, lower PRIVATE_REACH_CEILING."
+    )
+
+
+def _src_private_imports(path: Path) -> list[str]:
+    """Private names and modules imported relatively or from a watched package."""
+    allowed = _guard_exception_lines(path, "private-access")
+    found: list[str] = []
+    for node in ast.walk(_tree(path)):
+        if not isinstance(node, ast.ImportFrom) or node.lineno in allowed:
+            continue
+        module = node.module or ""
+        if not (node.level or module.startswith(_PACKAGES)):
+            continue
+        if any(_is_private(part) for part in module.split(".")):
+            found.append("." * node.level + module)
+        found += [alias.name for alias in node.names if _is_private(alias.name)]
+    return found
+
+
+SRC_PRIVATE_IMPORT_CEILING: dict[str, list[str]] = {
+    "custom_components/elke27/__init__.py": [
+        "_area_id_from_unique_id",
+        "_async_handle_alarm_arm_automatic",
+        "_async_handle_zone_bypass",
+        "_numeric_id_from_unique_id",
+        "_service_mode_to_arm_mode",
+    ],
+    "custom_components/elke27/coordinator.py": ["_library_arm_mode"],
+}
+
+
+def test_src_modules_import_no_private_names() -> None:
+    """
+    One integration module never imports another module's ``_name``.
+
+    ruff's PLC2701 is preview-only, so this is the check. The existing imports
+    were frozen in ``SRC_PRIVATE_IMPORT_CEILING`` on 2026-11-24 and may only be
+    removed.
+    """
+    found = {
+        _rel(path): names
+        for path in _files(SOURCE)
+        if (names := sorted(_src_private_imports(path)))
+    }
+    assert found == SRC_PRIVATE_IMPORT_CEILING, (
+        "Do not import a private name from another module; make it public. If you "
+        "removed one, drop it from SRC_PRIVATE_IMPORT_CEILING."
+    )
+
+
+def test_src_private_imports_count_private_modules(tmp_path: Path) -> None:
+    """A private module counts as well as a private name (B2, #194)."""
+    module = tmp_path / "mod.py"
+    module.write_text(
+        "from elke27_lib._session import Session\n"
+        "from ._util import helper\n"
+        "from .const import _secret, PUBLIC\n"
+        "from homeassistant.core import HomeAssistant\n",
+        encoding="utf-8",
+    )
+    assert _src_private_imports(module) == ["elke27_lib._session", "._util", "_secret"]
+
+
+def test_private_reach_watches_ha_only_in_tests(tmp_path: Path) -> None:
+    """An HA subclass's private members count in tests, not in integration code."""
+    snippet = (
+        "from homeassistant.components.light import LightEntity\n"
+        "class Light(LightEntity):\n"
+        "    _attr_has_entity_name = True\n"
+    )
+    module = tmp_path / "light.py"
+    module.write_text(snippet, encoding="utf-8")
+    assert _private_reach_lines(module) == []
+    assert _private_reach_lines(module, in_tests=True) == [2]
+
+
+def test_guard_exception_exempts_only_its_own_line(tmp_path: Path) -> None:
+    """A valid exception on the line exempts it; an expired one does not."""
+    module = tmp_path / "test_sample.py"
+    module.write_text(
+        "patch.object(m, '_a')  # guard-exception: private-access - seam lands "
+        "in #999 - expires 2999-01-01 - approved by Mitch Mitchell\n"
+        "patch.object(m, '_b')  # guard-exception: private-access - seam lands "
+        "in #999 - expires 2000-01-01 - approved by Mitch Mitchell\n"
+        "patch.object(m, '_c')\n",
+        encoding="utf-8",
+    )
+    assert _guard_exception_lines(module, "private-access") == {1}
+    assert _guard_exception_lines(module, "sleep") == set()
+    assert _private_reach_lines(module) == [2, 3]
