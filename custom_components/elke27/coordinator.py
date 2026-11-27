@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict, is_dataclass
 from datetime import timedelta
 import logging
 import time
@@ -1310,7 +1311,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
         if connected is False:
             self._connection_epoch += 1
             _LOGGER.debug("Panel disconnect event received; scheduling reconnect")
-            self._log_unavailable()
+            self._log_unavailable(event.data.get("err_msg"))
             # Entities already report unavailable (client not ready), but only
             # a listener update makes HA write that state (#97). Queued before
             # the reconnect so it runs before the reconnect's own epoch bump.
@@ -1386,11 +1387,15 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
             "elke27 panel mac check",
         )
 
-    def _log_unavailable(self) -> None:
-        """Log the panel as unavailable once."""
+    def _log_unavailable(self, err_msg: object = None) -> None:
+        """Log the panel as unavailable once, with the library's reason if any."""
         if self._unavailable_logged:
             return
-        _LOGGER.warning("Panel connection lost")
+        reason = err_msg.strip() if isinstance(err_msg, str) else ""
+        if reason:
+            _LOGGER.warning("Panel connection lost: %s", reason)
+        else:
+            _LOGGER.warning("Panel connection lost")
         self._unavailable_logged = True
 
     def start_reauth_once(self) -> None:
@@ -1468,6 +1473,7 @@ class Elke27DataUpdateCoordinator(DataUpdateCoordinator[PanelSnapshot]):
                 self._schedule_refresh_after_connect()
             else:
                 self._connection_epoch += 1
+                self._log_unavailable(_event_err_msg(event))
                 # Push the snapshot (one listener update per drop, shared with
                 # the link listener): every entity re-reads is_ready and goes
                 # unavailable together, instead of showing stale state.
@@ -1556,6 +1562,12 @@ def _log_command_failure(
         )
     else:
         _LOGGER.warning("%s %s %s failed: %s", kind, target_id, action, err)
+
+
+def _event_err_msg(event: ConnectionStateChanged) -> str | None:
+    """Return the library's disconnect reason, or None if it exposes none."""
+    value = asdict(event).get("err_msg") if is_dataclass(event) else None
+    return value if isinstance(value, str) else None
 
 
 def _connection_state(event: Elke27Event) -> bool | None:
