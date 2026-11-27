@@ -4,6 +4,8 @@ target-version = "py314"
 
 extend-exclude = [
     "scripts/loopcheck.py", # vendored from elke27 d45070b plus ELK111; do not local-edit
+    "scripts/privacc.py", # vendored from elke27 5f247f9 (#176); do not local-edit
+    "scripts/privacc_probes.py", # vendored from elke27 5f247f9 (#176); do not local-edit
     "tests/loopcheck", # intentional loopcheck rule fixtures, not product code
 ]
 
